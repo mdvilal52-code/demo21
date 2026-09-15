@@ -1,0 +1,24 @@
+{
+  "name": "@ai-concierge/testing",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc",
+    "test:unit": "echo \"no tests in @ai-concierge/testing (shared test utilities only)\"",
+    "test:security": "echo \"no security tests in @ai-concierge/testing\""
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.0",
+    "ioredis": "^5.4.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
+  }
+}

@@ -9,9 +9,16 @@
     "masterPlan": "docs/MASTER-PLAN.md",
     "designSystem": "docs/DESIGN-SYSTEM.md",
     "gateOrder": [
-      "typecheck", "lint", "unit", "integration",
-      "security", "e2e", "build", "code-review",
-      "architecture-review", "regression"
+      "typecheck",
+      "lint",
+      "unit",
+      "integration",
+      "security",
+      "e2e",
+      "build",
+      "code-review",
+      "architecture-review",
+      "regression"
     ],
     "freezeRequires": [
       "all deliverables done",
@@ -27,24 +34,25 @@
   "phases": [
     {
       "id": 1,
-      "name": "Foundation & Platform Skeleton",
-      "status": "PENDING",
-      "goal": "Runnable, tested, CI-gated monorepo: api, worker, web shell, db, cache, storage, observability, design tokens.",
+      "name": "Foundation & Platform Skeleton + Enquiry / Intent Recognition",
+      "status": "FROZEN",
+      "goal": "Runnable, tested, CI-gated monorepo (api, worker, web, db, cache, observability, security, design tokens) delivering business Step 1 end to end: customer message -> deterministic AI intent recognition -> persisted + audited -> queued for background processing.",
       "deliverables": [
-        "pnpm workspaces + Turborepo + strict TS project refs + ESLint/Prettier + Vitest + Playwright + .env.example + .nvmrc",
-        "apps/api: Fastify + Zod type provider, OpenAPI /docs, /health + /ready, request-id/correlation, pino logs, OTel bootstrap, env->Zod config, AppError envelope, graceful shutdown",
-        "apps/worker: BullMQ worker bootstrap + heartbeat job",
-        "apps/web: Next.js App Router + Tailwind + shadcn/ui + Emerald&Copper tokens, themed shell (TopBar + CopperCard + GlassCard)",
-        "packages/core, packages/config, packages/observability, packages/ui (tokens + Monogram/CopperCard/GlassCard/PillButton), packages/db (Prisma: Tenant/User/AuditEvent + migration + seed)",
-        "infra/compose: postgres, redis, minio, otel-collector, grafana/tempo",
-        ".github/workflows/ci.yml (all gates in order) + security.yml (audit, gitleaks, semgrep)",
+        "pnpm workspaces (no Turborepo — plain tsc per package, pnpm -r respects the dependency graph) + ESLint flat config + Prettier + Vitest + Playwright + .env.example + .nvmrc",
+        "apps/api: Fastify 5 + Zod type provider, OpenAPI /docs, /health + /live + /ready, request-id/correlation (AsyncLocalStorage), pino logs, OTel bootstrap (NOT_CONFIGURED by default), env->Zod config, AppError envelope, graceful shutdown, helmet/CORS/rate-limit, POST /v1/enquiries + GET /v1/enquiries/:id",
+        "apps/worker: BullMQ worker consuming post-enquiry-processing, idempotent processor + audit event",
+        "apps/web: Next.js App Router + Tailwind + original Emerald&Copper components (Monogram/GlassCard/CopperCard/PillButton/StatusChip) + enquiry form + server-side SSRF-safe proxy route",
+        "packages/config, packages/domain, packages/ai (RuleBasedIntentEngine + prompt-injection sanitizer), packages/security, packages/observability, packages/contracts, packages/db (Prisma: Tenant/Conversation/Message/IntentRecord/AuditEvent/IdempotencyKey + migration), packages/testing (real-Postgres/Redis test helpers)",
+        "docker-compose.yml: postgres, redis (minio/otel-collector/grafana deferred — not needed until a real object-storage or exporter consumer exists)",
+        ".github/workflows/ci.yml (full gate pipeline) + security.yml (pnpm audit, gitleaks, semgrep)",
         "docs/ARCHITECTURE.md, docs/phases/PHASE-01.md"
       ],
       "acceptance": [
-        "pnpm install && docker compose up -d && pnpm db:migrate && pnpm dev starts api+worker+web",
-        "GET /health -> 200 with build info; GET /docs serves OpenAPI",
-        "web shell renders with design tokens (visual snapshot committed)",
-        "all gates pass on a clean clone"
+        "pnpm install && docker compose up -d && pnpm db:migrate && pnpm dev:api / dev:worker / dev:web starts each service",
+        "GET /health -> 200 with observability status; GET /docs serves OpenAPI",
+        "web enquiry form renders with the design tokens and round-trips a real request through the API",
+        "POST /v1/enquiries recognizes intent, persists conversation+message+intent+audit atomically, enqueues background processing; GET /v1/enquiries/:id returns it",
+        "all gates pass: typecheck, lint, format, 91 unit + 21 integration + 21 security + 4 e2e (incl. accessibility) tests, production build — see docs/phases/PHASE-01.md §8"
       ],
       "dependsOn": [],
       "phaseDoc": "docs/phases/PHASE-01.md"

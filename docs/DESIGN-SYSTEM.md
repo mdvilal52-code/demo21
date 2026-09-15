@@ -9,38 +9,50 @@ Visual regression tests (Phase 7/8) compare rendered screens against these refer
 
 ## 1. Color tokens
 
-| Token | Value | Use |
-|---|---|---|
-| `--emerald-950` | `#04201A` | page background bottom of gradient |
-| `--emerald-900` | `#072B22` | page background |
-| `--emerald-800` | `#0B3D30` | primary surface |
-| `--emerald-700` | `#0F5240` | raised surface / glass card base |
-| `--emerald-600` | `#14684F` | hover / gradient highlight |
-| `--emerald-glass` | `rgba(20,104,79,0.55)` | translucent card on emerald (with 1px `rgba(255,255,255,0.08)` border) |
-| `--copper-900` | `#6E4128` | copper shadow edge |
-| `--copper-700` | `#9C6240` | copper dark band |
-| `--copper-500` | `#C8865A` | copper base / primary action |
-| `--copper-300` | `#E2AE86` | copper light band |
-| `--copper-100` | `#F1D2B6` | copper specular highlight |
-| `--cream-50` | `#FAF7F2` | white card |
-| `--cream-100` | `#F1EAE0` | white card border / dividers |
-| `--ink-900` | `#14201B` | text on copper and cream |
-| `--ink-600` | `#3E4A45` | secondary text on copper and cream |
-| `--on-emerald` | `#EFE6D8` | primary text on emerald |
-| `--on-emerald-muted` | `rgba(239,230,216,0.68)` | secondary text on emerald |
-| `--accent-copper-text` | `#D9A878` | copper-tinted headings on emerald |
-| `--success` | `#5CC48F` | verified / ok |
-| `--warning` | `#E3B25C` | pending |
-| `--danger` | `#E06B6B` | failed / escalated |
+| Token                  | Value                    | Use                                                                    |
+| ---------------------- | ------------------------ | ---------------------------------------------------------------------- |
+| `--emerald-950`        | `#04201A`                | page background bottom of gradient                                     |
+| `--emerald-900`        | `#072B22`                | page background                                                        |
+| `--emerald-800`        | `#0B3D30`                | primary surface                                                        |
+| `--emerald-700`        | `#0F5240`                | raised surface / glass card base                                       |
+| `--emerald-600`        | `#14684F`                | hover / gradient highlight                                             |
+| `--emerald-glass`      | `rgba(20,104,79,0.55)`   | translucent card on emerald (with 1px `rgba(255,255,255,0.08)` border) |
+| `--copper-900`         | `#6E4128`                | copper shadow edge                                                     |
+| `--copper-700`         | `#9C6240`                | copper dark band                                                       |
+| `--copper-500`         | `#C8865A`                | copper base / primary action                                           |
+| `--copper-300`         | `#E2AE86`                | copper light band                                                      |
+| `--copper-100`         | `#F1D2B6`                | copper specular highlight                                              |
+| `--cream-50`           | `#FAF7F2`                | white card                                                             |
+| `--cream-100`          | `#F1EAE0`                | white card border / dividers                                           |
+| `--ink-900`            | `#14201B`                | text on copper and cream                                               |
+| `--ink-600`            | `#3E4A45`                | secondary text on copper and cream                                     |
+| `--on-emerald`         | `#EFE6D8`                | primary text on emerald                                                |
+| `--on-emerald-muted`   | `rgba(239,230,216,0.68)` | secondary text on emerald                                              |
+| `--accent-copper-text` | `#D9A878`                | copper-tinted headings on emerald                                      |
+| `--success`            | `#5CC48F`                | verified / ok                                                          |
+| `--warning`            | `#E3B25C`                | pending                                                                |
+| `--danger`             | `#E06B6B`                | failed / escalated                                                     |
 
 Gradients
 
 ```css
---bg-emerald: linear-gradient(180deg, #0F5240 0%, #0B3D30 45%, #04201A 100%);
---brushed-copper: linear-gradient(135deg,
-  #6E4128 0%, #9C6240 18%, #C8865A 38%, #F1D2B6 50%, #C8865A 62%, #9C6240 82%, #6E4128 100%);
+--bg-emerald: linear-gradient(180deg, #0f5240 0%, #0b3d30 45%, #04201a 100%);
+--brushed-copper: linear-gradient(
+  135deg,
+  #6e4128 0%,
+  #9c6240 18%,
+  #c8865a 38%,
+  #f1d2b6 50%,
+  #c8865a 62%,
+  #9c6240 82%,
+  #6e4128 100%
+);
 /* brushed texture: overlay a repeating-linear-gradient of 1px alpha lines at 0.06 opacity */
---brushed-lines: repeating-linear-gradient(90deg, rgba(255,255,255,0.06) 0 1px, transparent 1px 3px);
+--brushed-lines: repeating-linear-gradient(
+  90deg,
+  rgba(255, 255, 255, 0.06) 0 1px,
+  transparent 1px 3px
+);
 ```
 
 Dark mode is the only mode for the customer app. The admin dashboard is emerald-dark by default
@@ -48,12 +60,12 @@ with an optional cream-light variant (same copper accents).
 
 ## 2. Typography
 
-| Role | Font | Style |
-|---|---|---|
-| Display / logo wordmark | `Jost` 300–400 | uppercase, `letter-spacing: 0.22em` |
-| Headings | `Jost` 500 | uppercase, `letter-spacing: 0.14em` |
-| Body | `Inter` 400/500 | normal case, tabular numerals for money and dates |
-| Micro labels | `Inter` 500 | uppercase, 11px, `letter-spacing: 0.12em` |
+| Role                    | Font            | Style                                             |
+| ----------------------- | --------------- | ------------------------------------------------- |
+| Display / logo wordmark | `Jost` 300–400  | uppercase, `letter-spacing: 0.22em`               |
+| Headings                | `Jost` 500      | uppercase, `letter-spacing: 0.14em`               |
+| Body                    | `Inter` 400/500 | normal case, tabular numerals for money and dates |
+| Micro labels            | `Inter` 500     | uppercase, 11px, `letter-spacing: 0.12em`         |
 
 Sizes (mobile): display 26px, h1 20px, h2 16px, body 14px, micro 11px. Line-height 1.35.
 
@@ -67,20 +79,20 @@ Sizes (mobile): display 26px, h1 20px, h2 16px, body 14px, micro 11px. Line-heig
 
 ## 4. Components (packages/ui)
 
-| Component | Description |
-|---|---|
-| `Monogram` | copper outline geometric "N" mark, 44px, centered on brand screens |
-| `Wordmark` | "GLOBAL CONNECT" / product name in display style with a copper hairline underline |
-| `CopperCard` | brushed-copper metallic card, ink text, optional icon slot + trailing action circle |
-| `GlassCard` | emerald translucent card with hairline border, on-emerald text |
-| `CreamCard` | white/cream card for identity and forms (Name / ID rows with copper chevrons) |
-| `PillButton` | variants: `copper` (solid), `outline` (copper hairline on emerald), `ghost` |
-| `StatTile` | KPI tile: micro label + large tabular number + trend; used in dashboard grid |
-| `JourneyStepper` | horizontal 19-step (collapsed to 5 milestones) stepper with copper dots |
-| `StatusChip` | verified / pending / failed chips using success / warning / danger |
-| `BottomTabBar` | 3–5 icons, copper active state, glass background |
-| `TopBar` | logo left, title center, profile right (dashboard) |
-| `ToggleSwitch` | copper knob on emerald track |
+| Component        | Description                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| `Monogram`       | copper outline geometric "N" mark, 44px, centered on brand screens                  |
+| `Wordmark`       | "GLOBAL CONNECT" / product name in display style with a copper hairline underline   |
+| `CopperCard`     | brushed-copper metallic card, ink text, optional icon slot + trailing action circle |
+| `GlassCard`      | emerald translucent card with hairline border, on-emerald text                      |
+| `CreamCard`      | white/cream card for identity and forms (Name / ID rows with copper chevrons)       |
+| `PillButton`     | variants: `copper` (solid), `outline` (copper hairline on emerald), `ghost`         |
+| `StatTile`       | KPI tile: micro label + large tabular number + trend; used in dashboard grid        |
+| `JourneyStepper` | horizontal 19-step (collapsed to 5 milestones) stepper with copper dots             |
+| `StatusChip`     | verified / pending / failed chips using success / warning / danger                  |
+| `BottomTabBar`   | 3–5 icons, copper active state, glass background                                    |
+| `TopBar`         | logo left, title center, profile right (dashboard)                                  |
+| `ToggleSwitch`   | copper knob on emerald track                                                        |
 
 All components are built on shadcn/ui primitives + Tailwind with the tokens above exposed as a
 Tailwind preset in `packages/config/tailwind`.

@@ -72,18 +72,18 @@ Companion documents
                           FAIL → diagnose → fix → test → loop
 ```
 
-| Layer | Responsibility | Lives in |
-|---|---|---|
-| Customer channels | WhatsApp, Web chat, Email adapters, unified inbound message model | `packages/channels`, `apps/api` (webhooks) |
-| AI Concierge Gateway | authn, rate limiting, WAF rules, DLP redaction, request envelope | `apps/api`, `packages/security` |
-| Event / Workflow Engine | journey state machine, idempotency keys, retry, timeouts, saga compensation, transactional outbox | `packages/workflow`, `apps/worker` |
-| AI Orchestrator | intent, entity extraction, reasoning, tool calls behind permission gates, prompt registry, evaluation | `packages/ai` |
-| Human Escalation | tiers 2/3/4, queues, SLA timers, handoff context, approvals | `packages/domain`, `apps/web` |
-| Security Engine | zero trust: RBAC+ABAC policy engine, tenant isolation, AI sandbox, egress allowlist, anomaly response | `packages/security` |
-| Domain Services | booking, pricing, documents, CRM, payment, delivery, return, invoice, follow-up | `packages/domain`, `packages/db` |
-| Data Layer | PostgreSQL (Prisma + RLS), Redis (BullMQ, cache), S3-compatible storage, Postgres FTS (pluggable), audit log | `packages/db`, `infra/compose` |
-| Observability + QA | OpenTelemetry logs/metrics/traces, AI evaluation, security regression, anomaly engine, Automatic QA gate | `packages/observability`, `packages/qa` |
-| Interfaces | Admin dashboard, customer mobile app (PWA) | `apps/web`, `apps/customer` |
+| Layer                   | Responsibility                                                                                               | Lives in                                   |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
+| Customer channels       | WhatsApp, Web chat, Email adapters, unified inbound message model                                            | `packages/channels`, `apps/api` (webhooks) |
+| AI Concierge Gateway    | authn, rate limiting, WAF rules, DLP redaction, request envelope                                             | `apps/api`, `packages/security`            |
+| Event / Workflow Engine | journey state machine, idempotency keys, retry, timeouts, saga compensation, transactional outbox            | `packages/workflow`, `apps/worker`         |
+| AI Orchestrator         | intent, entity extraction, reasoning, tool calls behind permission gates, prompt registry, evaluation        | `packages/ai`                              |
+| Human Escalation        | tiers 2/3/4, queues, SLA timers, handoff context, approvals                                                  | `packages/domain`, `apps/web`              |
+| Security Engine         | zero trust: RBAC+ABAC policy engine, tenant isolation, AI sandbox, egress allowlist, anomaly response        | `packages/security`                        |
+| Domain Services         | booking, pricing, documents, CRM, payment, delivery, return, invoice, follow-up                              | `packages/domain`, `packages/db`           |
+| Data Layer              | PostgreSQL (Prisma + RLS), Redis (BullMQ, cache), S3-compatible storage, Postgres FTS (pluggable), audit log | `packages/db`, `infra/compose`             |
+| Observability + QA      | OpenTelemetry logs/metrics/traces, AI evaluation, security regression, anomaly engine, Automatic QA gate     | `packages/observability`, `packages/qa`    |
+| Interfaces              | Admin dashboard, customer mobile app (PWA)                                                                   | `apps/web`, `apps/customer`                |
 
 ## 2. Repository layout (pnpm workspaces + Turborepo)
 
@@ -118,44 +118,44 @@ Companion documents
 
 ## 3. Tech stack (locked)
 
-| Area | Choice |
-|---|---|
-| Frontend | Next.js (App Router) + TypeScript, Tailwind CSS, shadcn/ui, React Hook Form, Zod |
-| Backend | Node.js + TypeScript, Fastify, REST + Webhooks, OpenAPI (generated from Zod route schemas) |
-| Database | PostgreSQL + Prisma (migrations, RLS policies as SQL migrations) |
-| Cache / Jobs | Redis + BullMQ |
-| Object storage | S3-compatible (MinIO locally) |
-| AI | `AIProvider` abstraction — OpenAI / Anthropic / other adapters, `NotConfiguredProvider`; no lock-in |
-| Auth | OIDC / OAuth2, short-lived access tokens (≤15 min) + rotating refresh, RBAC + ABAC policy engine |
-| Observability | OpenTelemetry (traces, metrics), structured JSON logs (pino), correlation ids |
-| Testing | Vitest (unit), Supertest (HTTP), Testcontainers (integration), Playwright (e2e), fast-check (property tests), Semgrep (SAST), dependency scanning, gitleaks (secrets) |
-| Infra | Docker, Docker Compose (local), Terraform, GitHub Actions CI/CD with mandatory gates |
+| Area           | Choice                                                                                                                                                                |
+| -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Frontend       | Next.js (App Router) + TypeScript, Tailwind CSS, shadcn/ui, React Hook Form, Zod                                                                                      |
+| Backend        | Node.js + TypeScript, Fastify, REST + Webhooks, OpenAPI (generated from Zod route schemas)                                                                            |
+| Database       | PostgreSQL + Prisma (migrations, RLS policies as SQL migrations)                                                                                                      |
+| Cache / Jobs   | Redis + BullMQ                                                                                                                                                        |
+| Object storage | S3-compatible (MinIO locally)                                                                                                                                         |
+| AI             | `AIProvider` abstraction — OpenAI / Anthropic / other adapters, `NotConfiguredProvider`; no lock-in                                                                   |
+| Auth           | OIDC / OAuth2, short-lived access tokens (≤15 min) + rotating refresh, RBAC + ABAC policy engine                                                                      |
+| Observability  | OpenTelemetry (traces, metrics), structured JSON logs (pino), correlation ids                                                                                         |
+| Testing        | Vitest (unit), Supertest (HTTP), Testcontainers (integration), Playwright (e2e), fast-check (property tests), Semgrep (SAST), dependency scanning, gitleaks (secrets) |
+| Infra          | Docker, Docker Compose (local), Terraform, GitHub Actions CI/CD with mandatory gates                                                                                  |
 
 ## 4. Customer journey → workflow states
 
 Owner: **AI** = AI orchestrator proposes, deterministic code validates · **SYS** = deterministic service · **HUMAN** = escalation tier.
 
-| # | Step | State | Owner | Key logic | Side effects / compensation |
-|---|---|---|---|---|---|
-| 01 | Enquiry / Intent | `ENQUIRY_RECEIVED` | AI | classify intent (rental, support, complaint, other); open/resume journey | create `journey`, `conversation`; audit |
-| 02 | Extract dates + location | `EXTRACTING_REQUIREMENTS` | AI→SYS | extract pickup/return datetime, pickup/return location; normalise to Asia/Dubai; validate ranges | update journey context |
-| 03 | Determine vehicle | `VEHICLE_SELECTION` | AI→SYS | map preference to fleet class / model; budget hint | none |
-| 04 | Ask missing information | `COLLECTING_MISSING_INFO` | AI | generate targeted questions for missing required fields; loop until complete or timeout | timeout 24h → `EXPIRED` |
-| 05 | Eligibility | `ELIGIBILITY_CHECK` | SYS | tenant rules: min age per class, licence type (UAE / IDP), residency, blocklist, deposit ability | fail → `DECLINED` + reason; may escalate T3 for exception |
-| 06 | Availability | `AVAILABILITY_CHECK` | SYS | calendar check with buffer; place soft hold (TTL) | hold created; compensation releases hold |
-| 07 | Alternatives | `OFFERING_ALTERNATIVES` | AI→SYS | if unavailable: nearest dates / similar class / upgrade options from real availability | none |
-| 08 | Quote | `QUOTE_ISSUED` | SYS | pricing engine: base rate, duration tiers, extras, deposit, VAT 5 %; quote expiry | quote record; expiry timer → `QUOTE_EXPIRED`, release hold |
-| 09 | Documents | `DOCUMENTS_REQUESTED` | AI→SYS | request passport, licence, Emirates ID / visa; presigned uploads | timers, reminders |
-| 10 | Document verification | `DOCUMENTS_VERIFYING` | SYS→HUMAN | MIME/size/AV checks, extraction interface, checklist; manual review queue (T2) | reject → back to 09 |
-| 11 | Payment instructions | `PAYMENT_INSTRUCTED` | SYS | payment link or bank instructions via `PaymentProvider`; deposit hold | webhook reconciliation; timeout → reminder → `EXPIRED` |
-| 12 | CRM update | `CRM_UPDATED` | SYS | upsert customer, booking, timeline into CRM adapter (internal by default) | retry with backoff |
-| 13 | Human approval | `AWAITING_HUMAN_APPROVAL` | HUMAN T3 | manager approves booking (fraud/high value/exception); SLA timer | reject → `DECLINED` with compensation (refund intent, release hold) |
-| 14 | Confirmation | `CONFIRMED` | SYS→AI | convert hold to booking, send confirmation with details | booking confirmed; calendar block |
-| 15 | Delivery coordination | `DELIVERY_SCHEDULED` | AI→SYS→HUMAN T2 | slot, address, driver assignment, handover checklist, photos | reschedule flow |
-| 16 | On-rental support | `ON_RENTAL` | AI (T2 fallback) | Q&A, extension requests (re-quote), incident intake | extension = sub-journey |
-| 17 | Return coordination | `RETURN_SCHEDULED` → `RETURNED` | AI→SYS→HUMAN T2 | slot, inspection checklist, damage/fuel/km capture | disputes → T3 |
-| 18 | Final invoice | `FINAL_INVOICE_ISSUED` | SYS | extras, fines, damage, deposit release; PDF invoice; payment/refund | refund via provider |
-| 19 | Post-rental follow-up | `FOLLOW_UP_SENT` → `CLOSED` | AI→SYS | thank-you, review request, next-offer; scheduled job | none |
+| #   | Step                     | State                           | Owner            | Key logic                                                                                        | Side effects / compensation                                         |
+| --- | ------------------------ | ------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------- |
+| 01  | Enquiry / Intent         | `ENQUIRY_RECEIVED`              | AI               | classify intent (rental, support, complaint, other); open/resume journey                         | create `journey`, `conversation`; audit                             |
+| 02  | Extract dates + location | `EXTRACTING_REQUIREMENTS`       | AI→SYS           | extract pickup/return datetime, pickup/return location; normalise to Asia/Dubai; validate ranges | update journey context                                              |
+| 03  | Determine vehicle        | `VEHICLE_SELECTION`             | AI→SYS           | map preference to fleet class / model; budget hint                                               | none                                                                |
+| 04  | Ask missing information  | `COLLECTING_MISSING_INFO`       | AI               | generate targeted questions for missing required fields; loop until complete or timeout          | timeout 24h → `EXPIRED`                                             |
+| 05  | Eligibility              | `ELIGIBILITY_CHECK`             | SYS              | tenant rules: min age per class, licence type (UAE / IDP), residency, blocklist, deposit ability | fail → `DECLINED` + reason; may escalate T3 for exception           |
+| 06  | Availability             | `AVAILABILITY_CHECK`            | SYS              | calendar check with buffer; place soft hold (TTL)                                                | hold created; compensation releases hold                            |
+| 07  | Alternatives             | `OFFERING_ALTERNATIVES`         | AI→SYS           | if unavailable: nearest dates / similar class / upgrade options from real availability           | none                                                                |
+| 08  | Quote                    | `QUOTE_ISSUED`                  | SYS              | pricing engine: base rate, duration tiers, extras, deposit, VAT 5 %; quote expiry                | quote record; expiry timer → `QUOTE_EXPIRED`, release hold          |
+| 09  | Documents                | `DOCUMENTS_REQUESTED`           | AI→SYS           | request passport, licence, Emirates ID / visa; presigned uploads                                 | timers, reminders                                                   |
+| 10  | Document verification    | `DOCUMENTS_VERIFYING`           | SYS→HUMAN        | MIME/size/AV checks, extraction interface, checklist; manual review queue (T2)                   | reject → back to 09                                                 |
+| 11  | Payment instructions     | `PAYMENT_INSTRUCTED`            | SYS              | payment link or bank instructions via `PaymentProvider`; deposit hold                            | webhook reconciliation; timeout → reminder → `EXPIRED`              |
+| 12  | CRM update               | `CRM_UPDATED`                   | SYS              | upsert customer, booking, timeline into CRM adapter (internal by default)                        | retry with backoff                                                  |
+| 13  | Human approval           | `AWAITING_HUMAN_APPROVAL`       | HUMAN T3         | manager approves booking (fraud/high value/exception); SLA timer                                 | reject → `DECLINED` with compensation (refund intent, release hold) |
+| 14  | Confirmation             | `CONFIRMED`                     | SYS→AI           | convert hold to booking, send confirmation with details                                          | booking confirmed; calendar block                                   |
+| 15  | Delivery coordination    | `DELIVERY_SCHEDULED`            | AI→SYS→HUMAN T2  | slot, address, driver assignment, handover checklist, photos                                     | reschedule flow                                                     |
+| 16  | On-rental support        | `ON_RENTAL`                     | AI (T2 fallback) | Q&A, extension requests (re-quote), incident intake                                              | extension = sub-journey                                             |
+| 17  | Return coordination      | `RETURN_SCHEDULED` → `RETURNED` | AI→SYS→HUMAN T2  | slot, inspection checklist, damage/fuel/km capture                                               | disputes → T3                                                       |
+| 18  | Final invoice            | `FINAL_INVOICE_ISSUED`          | SYS              | extras, fines, damage, deposit release; PDF invoice; payment/refund                              | refund via provider                                                 |
+| 19  | Post-rental follow-up    | `FOLLOW_UP_SENT` → `CLOSED`     | AI→SYS           | thank-you, review request, next-offer; scheduled job                                             | none                                                                |
 
 Overlay states: `ESCALATED(tier, reason)` (resumable), `CANCELLED`, `DECLINED`, `EXPIRED`.
 Every transition: guarded, validated, transactional, idempotent, audited, emits an outbox event.
@@ -171,6 +171,7 @@ Status values: `PENDING` → `IN_PROGRESS` → `FROZEN`. A phase is FROZEN only 
 Goal: a runnable, tested, CI-gated monorepo with API, worker, web shell, database, cache, storage, observability bootstrap and the design tokens — the base every later phase builds on.
 
 Deliverables
+
 - Monorepo: pnpm workspaces, Turborepo, strict TypeScript project references, ESLint + Prettier, Vitest, Playwright, `.env.example`, `.nvmrc`.
 - `apps/api`: Fastify with Zod type provider, OpenAPI at `/docs`, `/health` + `/ready`, request-id + correlation, pino structured logs, OTel bootstrap, config loader (env → Zod, fail fast), `AppError` envelope, graceful shutdown.
 - `apps/worker`: BullMQ worker bootstrap, heartbeat job, shared config/logging.
@@ -181,6 +182,7 @@ Deliverables
 - Docs: `docs/ARCHITECTURE.md`, `docs/phases/PHASE-01.md`, contracts updated.
 
 Acceptance
+
 - `pnpm install && docker compose up -d && pnpm db:migrate && pnpm dev` starts api, worker, web.
 - `GET /health` → 200 with build info; `GET /docs` serves OpenAPI.
 - Web shell renders with the design tokens (visual snapshot committed).
@@ -191,6 +193,7 @@ Acceptance
 Goal: the complete persistent model and domain services for a luxury rental business, with tenant isolation, audit, transactions and structured errors.
 
 Deliverables
+
 - Prisma models: Tenant, User, Role, Customer, Vehicle, VehicleClass, AvailabilityBlock, Hold, PricingRule, Quote, Booking, Document, Payment, Invoice, Conversation, Message, EscalationCase, AuditEvent, OutboxEvent, IdempotencyKey; every business table carries `tenant_id`; RLS baseline policies as SQL migrations.
 - Repositories + domain services (`packages/domain`) with a DI container; transaction helper; optimistic versioning.
 - Pricing engine (integer fils, VAT, duration tiers, extras, deposit) with property-based tests.
@@ -205,6 +208,7 @@ Acceptance: migrations up/down/up clean; integration tests via Testcontainers; R
 Goal: the 19-step journey as a typed, persisted, idempotent state machine with retries, timeouts and compensation.
 
 Deliverables
+
 - `packages/workflow`: state/transition table from §4, guards, effects, context schema (Zod), version-checked persistence, `ESCALATED` overlay, resume.
 - Idempotency middleware (HTTP + jobs + webhooks) backed by `IdempotencyKey`.
 - Transactional outbox → BullMQ relay; retry policies; delayed jobs for timeouts (quote expiry, document reminders, approval SLA).
@@ -218,6 +222,7 @@ Acceptance: exhaustive transition tests; property test "no invalid transition re
 Goal: AI drives the journey safely — proposes, never decides.
 
 Deliverables
+
 - `AIProvider` interface (chat, structured output, optional embeddings); adapters `anthropic`, `openai`, `NotConfiguredProvider`; selection by env; timeouts, retries, cost/latency telemetry.
 - Prompt registry (versioned per step), structured outputs validated by Zod, refusal/low-confidence handling, PII redaction (DLP hook) before provider calls.
 - Step agents: intent classification, requirement extraction, missing-info questions, alternatives narration, quote explanation, on-rental support, follow-up copy.
@@ -232,6 +237,7 @@ Acceptance: journey steps 01–08 run end-to-end with a provider or degrade expl
 Goal: every external touchpoint behind a clean interface; the full 19-step journey runnable.
 
 Deliverables
+
 - Gateway inbound model; WhatsApp adapter (Meta Cloud API webhooks with signature verification), Web chat (REST + SSE), Email adapter (inbound webhook + outbound interface); outbound templates, rate limits, delivery receipts; each adapter has `NOT_CONFIGURED`.
 - Document pipeline: presigned S3 uploads, MIME/size validation, AV-scan interface, extraction interface, verification checklist, T2 manual review queue.
 - `PaymentProvider` interface + payment instructions + webhook reconciliation + refunds; `NOT_CONFIGURED` → explicit manual-instruction path flagged in admin.
@@ -249,6 +255,7 @@ Internet → WAF/Rate Limit → API Gateway → Authentication → Authorization
 ```
 
 Deliverables
+
 - Edge: Redis-backed rate limiting, WAF rules (body size, schema, IP lists, bot signals).
 - AuthN: OIDC/OAuth2, ≤15-min access tokens, rotating refresh, step-up/MFA for admin roles.
 - AuthZ: RBAC roles + ABAC policy engine (tenant, ownership, journey state, tier) enforced in one middleware and in services.
@@ -300,18 +307,18 @@ Deliverables: Terraform (network, Postgres, Redis, object storage, container run
 
 ## 7. Quality gates — commands
 
-| Gate | Command | Tooling |
-|---|---|---|
-| Typecheck | `pnpm typecheck` | `tsc -b` |
-| Lint | `pnpm lint` | ESLint + Prettier check |
-| Unit | `pnpm test:unit` | Vitest, fast-check |
-| Integration | `pnpm test:integration` | Vitest + Testcontainers + Supertest |
-| Security | `pnpm test:security` | Semgrep, `pnpm audit`, gitleaks, authz/injection tests |
-| E2E | `pnpm test:e2e` | Playwright |
-| Build | `pnpm build` | Turborepo |
-| Code review | `/code-review` + phase checklist | — |
-| Architecture review | checklist vs §1 and §6 | — |
-| Regression | `pnpm test` on the final commit | full suite |
+| Gate                | Command                          | Tooling                                                |
+| ------------------- | -------------------------------- | ------------------------------------------------------ |
+| Typecheck           | `pnpm typecheck`                 | `tsc -b`                                               |
+| Lint                | `pnpm lint`                      | ESLint + Prettier check                                |
+| Unit                | `pnpm test:unit`                 | Vitest, fast-check                                     |
+| Integration         | `pnpm test:integration`          | Vitest + Testcontainers + Supertest                    |
+| Security            | `pnpm test:security`             | Semgrep, `pnpm audit`, gitleaks, authz/injection tests |
+| E2E                 | `pnpm test:e2e`                  | Playwright                                             |
+| Build               | `pnpm build`                     | Turborepo                                              |
+| Code review         | `/code-review` + phase checklist | —                                                      |
+| Architecture review | checklist vs §1 and §6           | —                                                      |
+| Regression          | `pnpm test` on the final commit  | full suite                                             |
 
 ## 8. Definition of Done (per phase)
 
@@ -326,15 +333,15 @@ Deliverables: Terraform (network, Postgres, Redis, object storage, container run
 
 ## 9. Decisions & assumptions (confirm or override before Phase 1)
 
-| # | Topic | Assumption |
-|---|---|---|
-| 1 | Product / brand name | Product: **AI Concierge**; brand mark from the reference: **GLOBAL CONNECT** with the "N" monogram. Both configurable per tenant. |
-| 2 | Customer app | Next.js mobile-first **PWA** (stack has no native runtime). Native wrapper (Expo/Capacitor) can be added later without rewriting screens. |
-| 3 | Multi-tenancy | Multi-tenant from day one (tenant id + RLS); first tenant is the Dubai business. |
-| 4 | Languages | English first, Arabic (RTL) supported by the i18n layer from Phase 1, translations in Phase 8. |
-| 5 | Currency / tax | AED, VAT 5 %, integer fils. |
-| 6 | WhatsApp | Meta Cloud API adapter first; Twilio adapter possible behind the same interface. |
-| 7 | Payments | `PaymentProvider` interface; first adapter chosen at Phase 5 (Stripe / Network International / Tap). |
-| 8 | AI providers | Anthropic and OpenAI adapters; no provider is required to boot — `NOT_CONFIGURED` is a valid state. |
-| 9 | Workflow engine | Custom typed state machine in `packages/workflow` (XState v5 acceptable alternative; decided at Phase 3 start). |
-| 10 | Package manager | pnpm + Turborepo; Node LTS. |
+| #   | Topic                | Assumption                                                                                                                                |
+| --- | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | Product / brand name | Product: **AI Concierge**; brand mark from the reference: **GLOBAL CONNECT** with the "N" monogram. Both configurable per tenant.         |
+| 2   | Customer app         | Next.js mobile-first **PWA** (stack has no native runtime). Native wrapper (Expo/Capacitor) can be added later without rewriting screens. |
+| 3   | Multi-tenancy        | Multi-tenant from day one (tenant id + RLS); first tenant is the Dubai business.                                                          |
+| 4   | Languages            | English first, Arabic (RTL) supported by the i18n layer from Phase 1, translations in Phase 8.                                            |
+| 5   | Currency / tax       | AED, VAT 5 %, integer fils.                                                                                                               |
+| 6   | WhatsApp             | Meta Cloud API adapter first; Twilio adapter possible behind the same interface.                                                          |
+| 7   | Payments             | `PaymentProvider` interface; first adapter chosen at Phase 5 (Stripe / Network International / Tap).                                      |
+| 8   | AI providers         | Anthropic and OpenAI adapters; no provider is required to boot — `NOT_CONFIGURED` is a valid state.                                       |
+| 9   | Workflow engine      | Custom typed state machine in `packages/workflow` (XState v5 acceptable alternative; decided at Phase 3 start).                           |
+| 10  | Package manager      | pnpm + Turborepo; Node LTS.                                                                                                               |

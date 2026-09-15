@@ -1,0 +1,49 @@
+{
+  "name": "ai-concierge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "packageManager": "pnpm@10.33.0",
+  "scripts": {
+    "build": "pnpm -r run build",
+    "dev:api": "pnpm --filter @ai-concierge/api dev",
+    "dev:worker": "pnpm --filter @ai-concierge/worker dev",
+    "dev:web": "pnpm --filter @ai-concierge/web dev",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "eslint . --max-warnings=0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test:unit": "pnpm -r run test:unit",
+    "test:integration": "pnpm -r --workspace-concurrency=1 run test:integration",
+    "test:e2e": "pnpm --filter @ai-concierge/web test:e2e",
+    "test:security": "pnpm -r --workspace-concurrency=1 run test:security",
+    "test": "pnpm run test:unit && pnpm run test:integration && pnpm run test:security",
+    "db:generate": "pnpm --filter @ai-concierge/db generate",
+    "db:migrate": "pnpm --filter @ai-concierge/db migrate:deploy",
+    "db:migrate:dev": "pnpm --filter @ai-concierge/db migrate:dev"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3.2.0",
+    "@eslint/js": "^9.15.0",
+    "eslint": "^9.15.0",
+    "eslint-config-prettier": "^9.1.0",
+    "prettier": "^3.3.3",
+    "typescript": "^5.6.3",
+    "typescript-eslint": "^8.15.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/client",
+      "@prisma/engines",
+      "esbuild",
+      "msgpackr-extract",
+      "prisma",
+      "protobufjs",
+      "unrs-resolver"
+    ]
+  }
+}

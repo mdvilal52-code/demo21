@@ -11,13 +11,13 @@ dashboard and a customer mobile app.
 
 ## Read first
 
-| Document | Purpose |
-|---|---|
-| [`CLAUDE.md`](./CLAUDE.md) | What to read at the start of every session |
-| [`docs/MASTER-PLAN.md`](./docs/MASTER-PLAN.md) | Architecture, repo layout, tech stack, 19-step journey, all 10 phases |
-| [`docs/PHASE-CONTRACTS.json`](./docs/PHASE-CONTRACTS.json) | Machine-readable phase status, deliverables, acceptance criteria |
-| [`docs/PHASE-EXECUTION-PROTOCOL.md`](./docs/PHASE-EXECUTION-PROTOCOL.md) | Mandatory rules and quality-gate pipeline for every change |
-| [`docs/DESIGN-SYSTEM.md`](./docs/DESIGN-SYSTEM.md) | Emerald & copper design tokens, components and screen contracts |
+| Document                                                                 | Purpose                                                               |
+| ------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| [`CLAUDE.md`](./CLAUDE.md)                                               | What to read at the start of every session                            |
+| [`docs/MASTER-PLAN.md`](./docs/MASTER-PLAN.md)                           | Architecture, repo layout, tech stack, 19-step journey, all 10 phases |
+| [`docs/PHASE-CONTRACTS.json`](./docs/PHASE-CONTRACTS.json)               | Machine-readable phase status, deliverables, acceptance criteria      |
+| [`docs/PHASE-EXECUTION-PROTOCOL.md`](./docs/PHASE-EXECUTION-PROTOCOL.md) | Mandatory rules and quality-gate pipeline for every change            |
+| [`docs/DESIGN-SYSTEM.md`](./docs/DESIGN-SYSTEM.md)                       | Emerald & copper design tokens, components and screen contracts       |
 
 ## Phases
 

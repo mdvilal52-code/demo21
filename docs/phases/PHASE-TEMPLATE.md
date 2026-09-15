@@ -16,9 +16,11 @@
 Goal: <from PHASE-CONTRACTS.json>
 
 Deliverables (from contract):
+
 - [ ] ...
 
 Out of scope for this phase:
+
 - ...
 
 ## 3. Design / decisions
@@ -37,18 +39,18 @@ Out of scope for this phase:
 
 ## 5. Gate results (Protocol §Quality gate pipeline — all must be green)
 
-| Gate | Command | Result | Notes |
-|---|---|---|---|
-| Typecheck | `pnpm typecheck` | ☐ | |
-| Lint | `pnpm lint` | ☐ | |
-| Unit | `pnpm test:unit` | ☐ | |
-| Integration | `pnpm test:integration` | ☐ | |
-| Security | `pnpm test:security` | ☐ | SAST / deps / secrets / authz |
-| E2E | `pnpm test:e2e` | ☐ | |
-| Build | `pnpm build` | ☐ | |
-| Code review | `/code-review` | ☐ | findings addressed |
-| Architecture review | checklist §1/§6 | ☐ | |
-| Regression | `pnpm test` (final commit) | ☐ | |
+| Gate                | Command                    | Result | Notes                         |
+| ------------------- | -------------------------- | ------ | ----------------------------- |
+| Typecheck           | `pnpm typecheck`           | ☐      |                               |
+| Lint                | `pnpm lint`                | ☐      |                               |
+| Unit                | `pnpm test:unit`           | ☐      |                               |
+| Integration         | `pnpm test:integration`    | ☐      |                               |
+| Security            | `pnpm test:security`       | ☐      | SAST / deps / secrets / authz |
+| E2E                 | `pnpm test:e2e`            | ☐      |                               |
+| Build               | `pnpm build`               | ☐      |                               |
+| Code review         | `/code-review`             | ☐      | findings addressed            |
+| Architecture review | checklist §1/§6            | ☐      |                               |
+| Regression          | `pnpm test` (final commit) | ☐      |                               |
 
 Migrations verified: up ☐ / down ☐ / re-up on fresh DB ☐
 

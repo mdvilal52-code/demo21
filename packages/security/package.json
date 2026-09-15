@@ -1,0 +1,21 @@
+{
+  "name": "@ai-concierge/security",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc",
+    "test:unit": "vitest run --exclude \"**/*.security.test.ts\"",
+    "test:security": "vitest run .security.test."
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}

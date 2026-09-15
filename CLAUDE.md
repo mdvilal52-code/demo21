@@ -23,14 +23,14 @@ This is a **production system** built phase by phase. Do not improvise outside t
 
 ## Where things live
 
-| Doc | Purpose |
-|---|---|
-| `docs/PHASE-EXECUTION-PROTOCOL.md` | mandatory rules before/during/after every change |
-| `docs/PHASE-CONTRACTS.json` | machine-readable phase status, deliverables, acceptance |
-| `docs/MASTER-PLAN.md` | architecture, repo layout, tech stack, 19-step journey, phases |
-| `docs/DESIGN-SYSTEM.md` | emerald & copper tokens, components, screen contracts |
-| `docs/phases/PHASE-TEMPLATE.md` | copy to `PHASE-NN.md` when running a phase |
-| `docs/design/reference/` | reference images the UI must match |
+| Doc                                | Purpose                                                        |
+| ---------------------------------- | -------------------------------------------------------------- |
+| `docs/PHASE-EXECUTION-PROTOCOL.md` | mandatory rules before/during/after every change               |
+| `docs/PHASE-CONTRACTS.json`        | machine-readable phase status, deliverables, acceptance        |
+| `docs/MASTER-PLAN.md`              | architecture, repo layout, tech stack, 19-step journey, phases |
+| `docs/DESIGN-SYSTEM.md`            | emerald & copper tokens, components, screen contracts          |
+| `docs/phases/PHASE-TEMPLATE.md`    | copy to `PHASE-NN.md` when running a phase                     |
+| `docs/design/reference/`           | reference images the UI must match                             |
 
 ## Workflow
 

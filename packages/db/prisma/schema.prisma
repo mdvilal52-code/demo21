@@ -1,0 +1,134 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Root of tenant isolation. RLS-enforced isolation is a Phase 2/6 addition;
+/// Phase 1 enforces it at the application layer — every repository function
+/// takes a tenantId and filters by it explicitly (see @ai-concierge/db repositories).
+model Tenant {
+  id        String   @id @default(uuid())
+  name      String
+  createdAt DateTime @default(now())
+
+  conversations Conversation[]
+  auditEvents   AuditEvent[]
+  intentRecords IntentRecord[]
+
+  @@map("tenants")
+}
+
+enum Channel {
+  WHATSAPP
+  WEB
+  EMAIL
+}
+
+model Conversation {
+  id          String    @id @default(uuid())
+  tenantId    String
+  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  channel     Channel
+  customerRef String
+  createdAt   DateTime  @default(now())
+  processedAt DateTime?
+
+  messages Message[]
+
+  @@index([tenantId])
+  @@map("conversations")
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  content        String
+  createdAt      DateTime     @default(now())
+
+  intentRecords IntentRecord[]
+
+  @@index([conversationId])
+  @@map("messages")
+}
+
+enum IntentType {
+  ENQUIRY
+  BOOKING_REQUEST
+  AVAILABILITY_REQUEST
+  PRICE_REQUEST
+  DOCUMENT_REQUEST
+  PAYMENT_REQUEST
+  SUPPORT_REQUEST
+  RETURN_REQUEST
+  COMPLAINT
+  UNKNOWN
+}
+
+enum IntentStatus {
+  RECOGNIZED
+  NEEDS_CLARIFICATION
+}
+
+/// One row per intent-recognition run against a message. Entities/flags/
+/// modelMetadata are stored as-is from the (Zod-validated) engine output —
+/// never raw customer PII beyond what the engine already extracted.
+model IntentRecord {
+  id                  String       @id @default(uuid())
+  tenantId            String
+  tenant              Tenant       @relation(fields: [tenantId], references: [id])
+  messageId           String
+  message             Message      @relation(fields: [messageId], references: [id])
+  intentType          IntentType
+  status              IntentStatus
+  confidence          Float
+  entities            Json
+  missingFields       String[]
+  clarificationPrompt String?
+  flags               Json
+  modelMetadata       Json
+  createdAt           DateTime     @default(now())
+
+  @@index([tenantId])
+  @@index([messageId])
+  @@map("intent_records")
+}
+
+/// Append-only. Written in the same transaction as the mutation it records.
+model AuditEvent {
+  id         String   @id @default(uuid())
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  actor      String
+  action     String
+  entityType String
+  entityId   String
+  before     Json?
+  after      Json?
+  requestId  String?
+  ip         String?
+  createdAt  DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([entityType, entityId])
+  @@map("audit_events")
+}
+
+/// Backs idempotent handling of POST /v1/enquiries (and future mutating
+/// endpoints): the same Idempotency-Key replays the stored response instead
+/// of re-running the side effects.
+model IdempotencyKey {
+  key            String   @id
+  tenantId       String
+  requestHash    String
+  responseStatus Int
+  responseBody   Json
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId])
+  @@map("idempotency_keys")
+}
