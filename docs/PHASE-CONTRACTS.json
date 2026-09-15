@@ -1,0 +1,237 @@
+{
+  "$schema": "./phase-contracts.schema.json",
+  "project": "AI Concierge — Luxury Car Rental (Dubai)",
+  "version": "0.1.0",
+  "updatedAt": "2026-09-15",
+  "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
+  "rules": {
+    "protocol": "docs/PHASE-EXECUTION-PROTOCOL.md",
+    "masterPlan": "docs/MASTER-PLAN.md",
+    "designSystem": "docs/DESIGN-SYSTEM.md",
+    "gateOrder": [
+      "typecheck", "lint", "unit", "integration",
+      "security", "e2e", "build", "code-review",
+      "architecture-review", "regression"
+    ],
+    "freezeRequires": [
+      "all deliverables done",
+      "all acceptance criteria demonstrated",
+      "all gates green locally and in CI",
+      "migrations up/down/up clean",
+      "no fake success paths (NOT_CONFIGURED used for missing providers)",
+      "phase security checklist complete",
+      "docs/phases/PHASE-NN.md written",
+      "PHASE-CONTRACTS.json updated"
+    ]
+  },
+  "phases": [
+    {
+      "id": 1,
+      "name": "Foundation & Platform Skeleton",
+      "status": "PENDING",
+      "goal": "Runnable, tested, CI-gated monorepo: api, worker, web shell, db, cache, storage, observability, design tokens.",
+      "deliverables": [
+        "pnpm workspaces + Turborepo + strict TS project refs + ESLint/Prettier + Vitest + Playwright + .env.example + .nvmrc",
+        "apps/api: Fastify + Zod type provider, OpenAPI /docs, /health + /ready, request-id/correlation, pino logs, OTel bootstrap, env->Zod config, AppError envelope, graceful shutdown",
+        "apps/worker: BullMQ worker bootstrap + heartbeat job",
+        "apps/web: Next.js App Router + Tailwind + shadcn/ui + Emerald&Copper tokens, themed shell (TopBar + CopperCard + GlassCard)",
+        "packages/core, packages/config, packages/observability, packages/ui (tokens + Monogram/CopperCard/GlassCard/PillButton), packages/db (Prisma: Tenant/User/AuditEvent + migration + seed)",
+        "infra/compose: postgres, redis, minio, otel-collector, grafana/tempo",
+        ".github/workflows/ci.yml (all gates in order) + security.yml (audit, gitleaks, semgrep)",
+        "docs/ARCHITECTURE.md, docs/phases/PHASE-01.md"
+      ],
+      "acceptance": [
+        "pnpm install && docker compose up -d && pnpm db:migrate && pnpm dev starts api+worker+web",
+        "GET /health -> 200 with build info; GET /docs serves OpenAPI",
+        "web shell renders with design tokens (visual snapshot committed)",
+        "all gates pass on a clean clone"
+      ],
+      "dependsOn": [],
+      "phaseDoc": "docs/phases/PHASE-01.md"
+    },
+    {
+      "id": 2,
+      "name": "Core Domain & Data Model",
+      "status": "PENDING",
+      "goal": "Complete persistent model + domain services with tenant isolation, audit, transactions, structured errors.",
+      "deliverables": [
+        "Prisma models: Tenant, User, Role, Customer, Vehicle, VehicleClass, AvailabilityBlock, Hold, PricingRule, Quote, Booking, Document, Payment, Invoice, Conversation, Message, EscalationCase, AuditEvent, OutboxEvent, IdempotencyKey (+ tenant_id + RLS)",
+        "Repositories + domain services (packages/domain) with DI + transaction helper + optimistic versioning",
+        "Pricing engine (integer fils, VAT, duration tiers, extras, deposit) with property-based tests",
+        "Availability service with holds + TTL release job",
+        "Admin REST CRUD (fleet, pricing, customers, bookings) behind authz stub + OpenAPI",
+        "Seed: Dubai demo fleet + pricing + demo tenant"
+      ],
+      "acceptance": [
+        "migrations up/down/up clean",
+        "integration tests via Testcontainers",
+        "RLS cross-tenant tests fail closed",
+        "pricing property tests green"
+      ],
+      "dependsOn": [1],
+      "phaseDoc": "docs/phases/PHASE-02.md"
+    },
+    {
+      "id": 3,
+      "name": "Event / Workflow Engine",
+      "status": "PENDING",
+      "goal": "19-step journey as a typed, persisted, idempotent state machine with retries, timeouts, compensation.",
+      "deliverables": [
+        "packages/workflow: state/transition table, guards, effects, Zod context, version-checked persistence, ESCALATED overlay, resume",
+        "Idempotency middleware (HTTP + jobs + webhooks) backed by IdempotencyKey",
+        "Transactional outbox -> BullMQ relay + retry policies + delayed timeout jobs",
+        "Saga compensation (release hold, void quote, refund intent, notify)",
+        "Journey API: start, advance, escalate, resume, cancel + timeline"
+      ],
+      "acceptance": [
+        "exhaustive transition tests",
+        "property test: no invalid transition reachable",
+        "crash-recovery test leaves consistent state",
+        "journey timeline fully audited"
+      ],
+      "dependsOn": [2],
+      "phaseDoc": "docs/phases/PHASE-03.md"
+    },
+    {
+      "id": 4,
+      "name": "AI Orchestrator & Provider Abstraction",
+      "status": "PENDING",
+      "goal": "AI drives the journey safely — proposes, never decides.",
+      "deliverables": [
+        "AIProvider interface + anthropic/openai/NotConfigured adapters, env selection, timeouts, retries, cost/latency telemetry",
+        "Prompt registry (versioned per step), Zod-validated structured outputs, refusal/low-confidence handling, DLP redaction before provider calls",
+        "Step agents: intent, extraction, missing-info, alternatives, quote explanation, on-rental support, follow-up",
+        "Tool-calling with permission gates (allowed states + roles); side-effects only via workflow engine",
+        "Human escalation service: tiers 2/3/4, reasons, SLA timers, handoff context, resume",
+        "AI evaluation harness: golden conversations, recorded fixtures, deterministic offline runs, CI thresholds"
+      ],
+      "acceptance": [
+        "journey steps 01-08 run e2e with a provider or degrade to NOT_CONFIGURED",
+        "injection suite: prompt injection cannot trigger a tool outside its allowed state",
+        "eval suite >= thresholds"
+      ],
+      "dependsOn": [3],
+      "phaseDoc": "docs/phases/PHASE-04.md"
+    },
+    {
+      "id": 5,
+      "name": "Channels, Documents, Payments, CRM & Fulfilment",
+      "status": "PENDING",
+      "goal": "Every external touchpoint behind a clean interface; full 19-step journey runnable.",
+      "deliverables": [
+        "Gateway inbound model; WhatsApp (Meta Cloud API + signature verify), Web chat (REST + SSE), Email (inbound webhook + outbound); templates, rate limits, receipts; NOT_CONFIGURED per adapter",
+        "Document pipeline: presigned S3 uploads, MIME/size validation, AV-scan interface, extraction interface, checklist, T2 review queue",
+        "PaymentProvider interface + instructions + webhook reconciliation + refunds; NOT_CONFIGURED -> explicit manual path flagged in admin",
+        "CRM adapter (internal default), delivery/return coordination (slots, assignment, checklists, photos), invoice PDF, follow-up scheduler"
+      ],
+      "acceptance": [
+        "full journey 01-19 passes e2e with test doubles inside tests only",
+        "production wiring shows real provider status per adapter in admin Settings",
+        "webhook signature + replay tests"
+      ],
+      "dependsOn": [4],
+      "phaseDoc": "docs/phases/PHASE-05.md"
+    },
+    {
+      "id": 6,
+      "name": "Security Engine & Zero Trust",
+      "status": "PENDING",
+      "goal": "Zero-trust layering verified by tests (WAF -> AuthN -> AuthZ -> Tenant -> Sandbox -> Egress -> DB policy -> Encrypted data).",
+      "deliverables": [
+        "Edge: Redis rate limiting + WAF rules (body size, schema, IP lists, bot signals)",
+        "AuthN: OIDC/OAuth2, <=15-min access tokens, rotating refresh, step-up/MFA for admin",
+        "AuthZ: RBAC + ABAC policy engine (tenant, ownership, journey state, tier) in one middleware and in services",
+        "Tenant isolation: RLS on every table, per-connection tenant context, cross-tenant negative tests",
+        "AI sandbox: tool permission matrix, egress allowlist, injection defences, output DLP",
+        "Data: TLS, field-level PII encryption, secrets management, key rotation runbook",
+        "Detection & response: anomaly rules, automatic restricted response, security event stream, T4 escalation",
+        "CI: Semgrep, dependency scan, gitleaks, Trivy image scan, ZAP baseline",
+        "docs/SECURITY-MODEL.md (STRIDE) + compromised-account kill-chain test"
+      ],
+      "acceptance": [
+        "kill-chain test proves each layer contains a compromised account",
+        "authz matrix tests",
+        "all scanners green with zero critical"
+      ],
+      "dependsOn": [5],
+      "phaseDoc": "docs/phases/PHASE-06.md"
+    },
+    {
+      "id": 7,
+      "name": "Admin Dashboard (Web)",
+      "status": "PENDING",
+      "goal": "Dashboard wireframe, pixel-faithful to the design system.",
+      "deliverables": [
+        "Home: TopBar, JourneyStepper (live counts), StatTiles (Active Bookings, AI Automation %, Human Escalations, Revenue AED)",
+        "Bookings, Journeys (live state + timeline), Escalation queue (tiers, SLA), Document review, Customers, Fleet & availability, Pricing, Payments/Invoices, Audit log, Settings (provider status)",
+        "Real-time via SSE, role-aware navigation",
+        "Playwright e2e + visual regression against reference"
+      ],
+      "acceptance": [
+        "screens match DESIGN-SYSTEM.md contracts",
+        "visual regression green against docs/design/reference",
+        "role-aware nav enforced"
+      ],
+      "dependsOn": [6],
+      "phaseDoc": "docs/phases/PHASE-07.md"
+    },
+    {
+      "id": 8,
+      "name": "Customer Mobile App (PWA)",
+      "status": "PENDING",
+      "goal": "Mobile wireframe + reference image, pixel-faithful.",
+      "deliverables": [
+        "Home: Monogram, AI CONCIERGE, Upcoming Rental CopperCard, Documents GlassCard, Payment CopperCard, CONTACT AI",
+        "Chat with AI (web channel), Bookings, Document upload with camera, Payments, Profile, BottomTabBar",
+        "Installable PWA, offline shell, push-notification interface (NOT_CONFIGURED until keys)",
+        "Visual regression against docs/design/reference"
+      ],
+      "acceptance": [
+        "home matches the reference mockup",
+        "installable PWA + offline shell",
+        "visual regression green"
+      ],
+      "dependsOn": [7],
+      "phaseDoc": "docs/phases/PHASE-08.md"
+    },
+    {
+      "id": 9,
+      "name": "Observability, AI Evaluation & Automatic QA",
+      "status": "PENDING",
+      "goal": "Measurable, self-checking system; Automatic QA PASS/FAIL gate.",
+      "deliverables": [
+        "OTel end-to-end (api, worker, web) with journey-id propagation",
+        "Metrics: automation rate, escalation rate, step conversion, latency, AI cost; Grafana dashboards in compose",
+        "AI evaluation suite (accuracy, safety, hallucination, tone)",
+        "Security regression suite + anomaly engine",
+        "Automatic QA engine: PASS/FAIL per journey and per release + CI report artifact"
+      ],
+      "acceptance": [
+        "traces span api->worker->web with journey id",
+        "Automatic QA gate blocks release on FAIL",
+        "eval + security regression thresholds enforced in CI"
+      ],
+      "dependsOn": [8],
+      "phaseDoc": "docs/phases/PHASE-09.md"
+    },
+    {
+      "id": 10,
+      "name": "Infrastructure, CI/CD & Release",
+      "status": "PENDING",
+      "goal": "Production-ready delivery.",
+      "deliverables": [
+        "Terraform (network, Postgres, Redis, object storage, container runtime, secrets, WAF)",
+        "dev/staging/prod environments",
+        "CI/CD with mandatory gates + manual prod approval",
+        "migration strategy, backups/DR drill, runbooks, SLOs/alerts, release-freeze checklist"
+      ],
+      "acceptance": [
+        "terraform plan/apply on staging",
+        "prod deploy gated by all checks + manual approval",
+        "DR drill documented and rehearsed"
+      ],
+      "dependsOn": [9],
+      "phaseDoc": "docs/phases/PHASE-10.md"
+    }
+  ]
+}
