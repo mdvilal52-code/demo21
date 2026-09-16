@@ -1,0 +1,3 @@
+{
+  "buildCommand": "cd ../.. && pnpm --filter @ai-concierge/web... run build"
+}
