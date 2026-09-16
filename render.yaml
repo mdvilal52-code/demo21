@@ -1,8 +1,18 @@
-# Render Blueprint — deploys apps/api (web service) and apps/worker (background
-# worker) from this pnpm workspace monorepo, matching how they already run: a
-# persistent Fastify server (app.listen()) and a persistent BullMQ consumer,
-# neither of which fits a serverless request/response model (see PHASE-4.md /
-# ARCHITECTURE.md — this is why these two apps are not deployed to Vercel).
+# Render Blueprint — deploys apps/api (web service) from this pnpm workspace
+# monorepo. apps/worker (the BullMQ background worker) is deliberately NOT
+# deployed here: Render has no free plan for background workers at all
+# (smallest paid tier is ~$7/month), and the worker's job — marking
+# Conversation.processedAt and writing one extra AuditEvent — is best-effort
+# background processing behind an already-durable queue enqueue, never on
+# the path of any Phase 1-4 API response (see apps/api/src/services/
+# enquiryService.ts and ARCHITECTURE.md's Phase 1 flow diagram: the queue
+# job is enqueued *after* the request's own transaction commits and the
+# response is already being returned). So every Phase 1-4 endpoint keeps
+# working exactly as before with the worker simply never running; queued
+# jobs sit in Redis unconsumed instead of erroring. Add an ai-concierge-worker
+# service back (see git history for the exact config) whenever that
+# background step, or a real Event/Workflow Engine that depends on it, is
+# actually needed.
 #
 # Free-tier notes (see Render's own pricing/limits page for current numbers):
 #   - ai-concierge-db (Postgres, free): 1 GB, auto-expires 30 days after
@@ -12,10 +22,6 @@
 #     not fine for anything that needs Redis as durable storage.
 #   - ai-concierge-api (web, free): spins down after 15 min with no inbound
 #     traffic; next request wakes it up (~1 min cold start).
-#   - ai-concierge-worker (background worker): Render does not offer a free
-#     plan for background workers at all, so this is on the smallest paid
-#     compute tier. Bump the `plan:` values below once this needs to behave
-#     like the "production system" CLAUDE.md describes.
 
 databases:
   - name: ai-concierge-db
@@ -56,9 +62,6 @@ services:
           type: keyvalue
           name: ai-concierge-redis
           property: connectionString
-      # Must be the IDENTICAL value on both ai-concierge-api and
-      # ai-concierge-worker (both verify/sign with it) — enter the same
-      # string manually in both places during Blueprint setup.
       - key: WEBHOOK_SIGNING_SECRET
         sync: false
       # Must match a real seeded Tenant row.
@@ -71,32 +74,4 @@ services:
       # Comma-separated list of origins allowed to call this API (e.g. the
       # deployed apps/web URL).
       - key: CORS_ALLOWED_ORIGINS
-        sync: false
-
-  - type: worker
-    name: ai-concierge-worker
-    runtime: node
-    plan: 0.5c-512mb
-    region: oregon
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @ai-concierge/worker... run build
-    startCommand: node apps/worker/dist/worker.js
-    envVars:
-      - key: NODE_VERSION
-        value: '22'
-      - key: NODE_ENV
-        value: production
-      - key: DATABASE_URL
-        fromDatabase:
-          name: ai-concierge-db
-          property: connectionString
-      - key: REDIS_URL
-        fromService:
-          type: keyvalue
-          name: ai-concierge-redis
-          property: connectionString
-      # Must be the IDENTICAL value entered for ai-concierge-api.
-      - key: WEBHOOK_SIGNING_SECRET
-        sync: false
-      # Must match a real seeded Tenant row.
-      - key: DEFAULT_TENANT_ID
         sync: false
