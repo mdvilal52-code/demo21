@@ -1,3 +1,0 @@
-{
-  "buildCommand": "cd ../.. && pnpm --filter @ai-concierge/api... run build"
-}
