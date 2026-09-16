@@ -25,7 +25,7 @@ databases:
 
 envVarGroups:
   - name: ai-concierge-shared
-    envVars:
+    vars:
       # Shared across api + worker so both verify/sign with the identical
       # secret — must live in one group, not be generated per-service.
       - key: WEBHOOK_SIGNING_SECRET
@@ -54,9 +54,8 @@ services:
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @ai-concierge/api... run build && pnpm --filter @ai-concierge/db run migrate:deploy
     startCommand: node apps/api/dist/server.js
     healthCheckPath: /health
-    envVarGroups:
-      - ai-concierge-shared
     envVars:
+      - fromGroup: ai-concierge-shared
       - key: NODE_VERSION
         value: '22'
       - key: NODE_ENV
@@ -86,9 +85,8 @@ services:
     region: oregon
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @ai-concierge/worker... run build
     startCommand: node apps/worker/dist/worker.js
-    envVarGroups:
-      - ai-concierge-shared
     envVars:
+      - fromGroup: ai-concierge-shared
       - key: NODE_VERSION
         value: '22'
       - key: NODE_ENV
