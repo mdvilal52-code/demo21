@@ -47,7 +47,11 @@ services:
     runtime: node
     plan: free
     region: oregon
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @ai-concierge/api... run build
+    # Runs the Postgres migration on every deploy (prisma migrate deploy only
+    # ever applies pending migrations, so this is safe to re-run every time,
+    # including when there's nothing new to apply) — otherwise a fresh
+    # ai-concierge-db has no tables and every request fails.
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @ai-concierge/api... run build && pnpm --filter @ai-concierge/db run migrate:deploy
     startCommand: node apps/api/dist/server.js
     healthCheckPath: /health
     envVarGroups:
