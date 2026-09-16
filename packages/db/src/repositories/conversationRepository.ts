@@ -49,6 +49,22 @@ export async function findConversationById(
  * of re-stamping a new timestamp, so callers can use the returned count to
  * decide whether this was the transition that actually happened.
  */
+/**
+ * Step 2 needs "the conversation's latest message" specifically (not just
+ * any message via `findConversationById`'s unordered include), scoped to
+ * the same tenant-isolation convention via the conversation relation.
+ */
+export async function findLatestMessageForConversation(
+  db: Executor,
+  tenantId: TenantId,
+  conversationId: string,
+) {
+  return db.message.findFirst({
+    where: { conversationId, conversation: { tenantId } },
+    orderBy: { createdAt: 'desc' },
+  });
+}
+
 export async function markConversationProcessed(
   db: Executor,
   tenantId: TenantId,

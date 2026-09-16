@@ -1,4 +1,4 @@
-import { RuleBasedIntentEngine } from '@ai-concierge/ai';
+import { DateLocationExtractionOrchestrator, RuleBasedIntentEngine } from '@ai-concierge/ai';
 import {
   createTestPrismaClient,
   createTestRedisClient,
@@ -55,6 +55,7 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
     redis,
     postEnquiryQueue,
     intentEngine: new RuleBasedIntentEngine(),
+    dateLocationOrchestrator: new DateLocationExtractionOrchestrator(),
     observabilityStatus: 'NOT_CONFIGURED',
   };
 

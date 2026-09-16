@@ -15,9 +15,10 @@ model Tenant {
   name      String
   createdAt DateTime @default(now())
 
-  conversations Conversation[]
-  auditEvents   AuditEvent[]
-  intentRecords IntentRecord[]
+  conversations            Conversation[]
+  auditEvents              AuditEvent[]
+  intentRecords            IntentRecord[]
+  dateLocationExtractions  DateLocationExtraction[]
 
   @@map("tenants")
 }
@@ -50,7 +51,8 @@ model Message {
   content        String
   createdAt      DateTime     @default(now())
 
-  intentRecords IntentRecord[]
+  intentRecords            IntentRecord[]
+  dateLocationExtractions  DateLocationExtraction[]
 
   @@index([conversationId])
   @@map("messages")
@@ -131,4 +133,42 @@ model IdempotencyKey {
 
   @@index([tenantId])
   @@map("idempotency_keys")
+}
+
+enum LocationType {
+  AIRPORT
+  HOTEL
+  LANDMARK
+  ADDRESS
+  CITY_AREA
+  UNKNOWN
+}
+
+/// Step 2 — Extract Dates & Location. One row per extraction run against a
+/// message. `pickupLocation`/`dropoffLocation`/`ambiguities`/`validationErrors`/
+/// `flags`/`modelMetadata` are stored as-is from the (Zod-validated)
+/// TemporalValidationService output — the same "store the validated engine
+/// output verbatim" convention as IntentRecord.
+model DateLocationExtraction {
+  id               String        @id @default(uuid())
+  tenantId         String
+  tenant           Tenant        @relation(fields: [tenantId], references: [id])
+  messageId        String
+  message          Message       @relation(fields: [messageId], references: [id])
+  pickupDate       DateTime?
+  returnDate       DateTime?
+  timezone         String?
+  pickupLocation   Json?
+  dropoffLocation  Json?
+  locationType     LocationType?
+  confidence       Float
+  ambiguities      Json
+  validationErrors Json
+  flags            Json
+  modelMetadata    Json
+  createdAt        DateTime      @default(now())
+
+  @@index([tenantId])
+  @@index([messageId])
+  @@map("date_location_extractions")
 }

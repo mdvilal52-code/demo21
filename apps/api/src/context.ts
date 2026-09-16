@@ -1,4 +1,4 @@
-import type { IntentEngine } from '@ai-concierge/ai';
+import type { DateLocationExtractionOrchestrator, IntentEngine } from '@ai-concierge/ai';
 import type { PrismaClient } from '@ai-concierge/db';
 import type { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
@@ -12,6 +12,7 @@ export interface AppContext {
   redis: Redis;
   postEnquiryQueue: Queue;
   intentEngine: IntentEngine;
+  dateLocationOrchestrator: DateLocationExtractionOrchestrator;
   observabilityStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
 }
 

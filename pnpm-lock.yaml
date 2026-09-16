@@ -221,6 +221,9 @@ importers:
       '@ai-concierge/domain':
         specifier: workspace:*
         version: link:../domain
+      '@ai-concierge/security':
+        specifier: workspace:*
+        version: link:../security
     devDependencies:
       typescript:
         specifier: ^5.6.3

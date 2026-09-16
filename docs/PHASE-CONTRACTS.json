@@ -1,9 +1,10 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.1.0",
-  "updatedAt": "2026-09-15",
+  "version": "0.2.0",
+  "updatedAt": "2026-09-16",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
+  "phaseNumbering": "Phases 1-2 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location), not the original 10-phase infra grouping below. Phase 3 is scoped the same way (Determine Vehicle = journey Step 3). Phase ids 4-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 4-19) as work reaches them, same as phases 1-2 already turned out to differ from this document's original phase 1-2 grouping.",
   "rules": {
     "protocol": "docs/PHASE-EXECUTION-PROTOCOL.md",
     "masterPlan": "docs/MASTER-PLAN.md",
@@ -59,44 +60,33 @@
     },
     {
       "id": 2,
-      "name": "Core Domain & Data Model",
-      "status": "PENDING",
-      "goal": "Complete persistent model + domain services with tenant isolation, audit, transactions, structured errors.",
+      "name": "Extract Dates & Location (journey Step 2)",
+      "status": "FROZEN",
+      "goal": "Take a Phase 1 conversation's validated, intent-recognized message and propose+verify pickup/return dates and pickup/dropoff locations. AI proposes (DateExtractionService, LocationExtractionService); deterministic domain logic verifies (TemporalValidationService) before anything is persisted or returned.",
       "deliverables": [
-        "Prisma models: Tenant, User, Role, Customer, Vehicle, VehicleClass, AvailabilityBlock, Hold, PricingRule, Quote, Booking, Document, Payment, Invoice, Conversation, Message, EscalationCase, AuditEvent, OutboxEvent, IdempotencyKey (+ tenant_id + RLS)",
-        "Repositories + domain services (packages/domain) with DI + transaction helper + optimistic versioning",
-        "Pricing engine (integer fils, VAT, duration tiers, extras, deposit) with property-based tests",
-        "Availability service with holds + TTL release job",
-        "Admin REST CRUD (fleet, pricing, customers, bookings) behind authz stub + OpenAPI",
-        "Seed: Dubai demo fleet + pricing + demo tenant"
+        "packages/domain: LocationType, AmbiguityCode, ValidationErrorCode, normalizedLocationSchema, dateLocationExtractionResultSchema",
+        "packages/ai/step2: DateExtractionService (named-month/range/ISO/numeric/relative/next-weekday dates, ambiguity-safe, DST-aware via Intl), LocationExtractionService (Dubai/UAE gazetteer via a LocationProvider abstraction), TemporalValidationService (PAST_DATE/RETURN_BEFORE_OR_EQUAL_PICKUP/IMPOSSIBLE_DATE/TIMEZONE_MISMATCH/UNSUPPORTED_LOCATION + confidence), DateLocationExtractionOrchestrator",
+        "packages/security/resilience.ts: withTimeout, CircuitBreaker, RateLimiter, applied to the location provider seam",
+        "packages/db: DateLocationExtraction model + migration, dateLocationExtractionRepository, findLatestMessageForConversation",
+        "packages/contracts: extractDatesLocationParamsSchema / extractDatesLocationResponseSchema",
+        "apps/api: POST /v1/enquiries/:conversationId/dates-location (dateLocationService.ts + routes/v1/temporal.ts)",
+        "docs/PHASE-2.md"
       ],
       "acceptance": [
-        "migrations up/down/up clean",
-        "integration tests via Testcontainers",
-        "RLS cross-tenant tests fail closed",
-        "pricing property tests green"
+        "every required test case passes: 15 Oct; 15-19 Oct; tomorrow; next Friday; ambiguous 10/11/26 (never guessed); invalid date; past date; return before pickup; timezone mismatch; Dubai; unknown location; malicious prompt injection",
+        "full Phase 1 regression re-run and green (no working Phase 1 functionality broken)",
+        "all gates pass: typecheck, lint, format, 180 unit + 32 integration + 29 security tests, 4 e2e, production build — see docs/PHASE-2.md §8"
       ],
       "dependsOn": [1],
-      "phaseDoc": "docs/phases/PHASE-02.md"
+      "phaseDoc": "docs/PHASE-2.md"
     },
     {
       "id": 3,
-      "name": "Event / Workflow Engine",
+      "name": "Determine Vehicle (journey Step 3)",
       "status": "PENDING",
-      "goal": "19-step journey as a typed, persisted, idempotent state machine with retries, timeouts, compensation.",
-      "deliverables": [
-        "packages/workflow: state/transition table, guards, effects, Zod context, version-checked persistence, ESCALATED overlay, resume",
-        "Idempotency middleware (HTTP + jobs + webhooks) backed by IdempotencyKey",
-        "Transactional outbox -> BullMQ relay + retry policies + delayed timeout jobs",
-        "Saga compensation (release hold, void quote, refund intent, notify)",
-        "Journey API: start, advance, escalate, resume, cancel + timeline"
-      ],
-      "acceptance": [
-        "exhaustive transition tests",
-        "property test: no invalid transition reachable",
-        "crash-recovery test leaves consistent state",
-        "journey timeline fully audited"
-      ],
+      "goal": "Map the customer's vehicle preference (plus Step 2's dates/location) to a fleet class/model proposal, deterministically verified against real fleet data — same AI-proposes/domain-verifies split as Steps 1-2. Full scope to be given when this phase is started (see docs/PHASE-2.md §13 for the forward contract as currently understood).",
+      "deliverables": [],
+      "acceptance": [],
       "dependsOn": [2],
       "phaseDoc": "docs/phases/PHASE-03.md"
     },

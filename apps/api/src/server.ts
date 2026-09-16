@@ -1,4 +1,4 @@
-import { RuleBasedIntentEngine } from '@ai-concierge/ai';
+import { DateLocationExtractionOrchestrator, RuleBasedIntentEngine } from '@ai-concierge/ai';
 import { createPrismaClient } from '@ai-concierge/db';
 import { createLogger, bootstrapObservability } from '@ai-concierge/observability';
 import { buildApp } from './app.js';
@@ -25,6 +25,7 @@ async function main(): Promise<void> {
   const redis = createRedisClient(config.REDIS_URL);
   const postEnquiryQueue = createPostEnquiryQueue(redis.duplicate());
   const intentEngine = new RuleBasedIntentEngine();
+  const dateLocationOrchestrator = new DateLocationExtractionOrchestrator();
 
   const ctx: AppContext = {
     config,
@@ -33,6 +34,7 @@ async function main(): Promise<void> {
     redis,
     postEnquiryQueue,
     intentEngine,
+    dateLocationOrchestrator,
     observabilityStatus: observability.status,
   };
 

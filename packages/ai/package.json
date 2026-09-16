@@ -15,7 +15,8 @@
     "test:security": "vitest run .security.test."
   },
   "dependencies": {
-    "@ai-concierge/domain": "workspace:*"
+    "@ai-concierge/domain": "workspace:*",
+    "@ai-concierge/security": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.3",

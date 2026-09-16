@@ -11,6 +11,7 @@ import { registerSwagger } from './plugins/swagger.js';
 import { registerErrorHandler } from './plugins/errorHandler.js';
 import { healthRoutes } from './routes/health.js';
 import { enquiryRoutes } from './routes/v1/enquiries.js';
+import { temporalRoutes } from './routes/v1/temporal.js';
 
 export async function buildApp(
   ctx: AppContext,
@@ -35,6 +36,7 @@ export async function buildApp(
 
   await app.register(healthRoutes);
   await app.register(enquiryRoutes);
+  await app.register(temporalRoutes);
 
   return app;
 }

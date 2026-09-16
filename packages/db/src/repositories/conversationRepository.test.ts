@@ -10,6 +10,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   createConversationWithMessage,
   findConversationById,
+  findLatestMessageForConversation,
   markConversationProcessed,
 } from './conversationRepository.js';
 
@@ -93,5 +94,33 @@ describe('conversationRepository', () => {
 
     const found = await findConversationById(prisma, TEST_TENANT_ID, conversation.id);
     expect(found?.processedAt).not.toBeNull();
+  });
+
+  it('finds the latest message for a conversation, scoped to the correct tenant', async () => {
+    const { conversation, message } = await createConversationWithMessage(prisma, {
+      tenantId: TEST_TENANT_ID,
+      channel: 'WEB',
+      customerRef: 'web-session-5',
+      content: 'pickup 15 Oct from Dubai Marina',
+    });
+
+    const found = await findLatestMessageForConversation(prisma, TEST_TENANT_ID, conversation.id);
+    expect(found?.id).toBe(message.id);
+
+    const foundFromOtherTenant = await findLatestMessageForConversation(
+      prisma,
+      OTHER_TENANT_ID,
+      conversation.id,
+    );
+    expect(foundFromOtherTenant).toBeNull();
+  });
+
+  it('returns null for an unknown conversation id', async () => {
+    const found = await findLatestMessageForConversation(
+      prisma,
+      TEST_TENANT_ID,
+      '00000000-0000-0000-0000-000000009999',
+    );
+    expect(found).toBeNull();
   });
 });
