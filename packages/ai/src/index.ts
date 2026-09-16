@@ -17,3 +17,12 @@ export * from './step2/locationExtractionService.js';
 export * from './step2/dateExtractionService.js';
 export * from './step2/temporalValidationService.js';
 export * from './step2/orchestrator.js';
+
+// Step 3 — Determine Vehicle
+export * from './step3/levenshtein.js';
+export * from './step3/categoryKeywords.js';
+export * from './step3/vehicleCatalogProvider.js';
+export * from './step3/vehicleIntentService.js';
+export * from './step3/vehicleCatalogService.js';
+export * from './step3/vehicleValidationService.js';
+export * from './step3/orchestrator.js';

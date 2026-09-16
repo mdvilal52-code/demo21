@@ -1,4 +1,8 @@
-import { DateLocationExtractionOrchestrator, RuleBasedIntentEngine } from '@ai-concierge/ai';
+import {
+  DateLocationExtractionOrchestrator,
+  RuleBasedIntentEngine,
+  VehicleDeterminationOrchestrator,
+} from '@ai-concierge/ai';
 import { createPrismaClient } from '@ai-concierge/db';
 import { createLogger, bootstrapObservability } from '@ai-concierge/observability';
 import { buildApp } from './app.js';
@@ -6,6 +10,7 @@ import type { AppContext } from './context.js';
 import { loadApiEnv } from './env.js';
 import { createPostEnquiryQueue } from './lib/queue.js';
 import { createRedisClient } from './lib/redis.js';
+import { PrismaVehicleCatalogProvider } from './services/vehicleCatalogProvider.js';
 
 async function main(): Promise<void> {
   const config = loadApiEnv();
@@ -26,6 +31,9 @@ async function main(): Promise<void> {
   const postEnquiryQueue = createPostEnquiryQueue(redis.duplicate());
   const intentEngine = new RuleBasedIntentEngine();
   const dateLocationOrchestrator = new DateLocationExtractionOrchestrator();
+  const vehicleOrchestrator = new VehicleDeterminationOrchestrator({
+    catalogProvider: new PrismaVehicleCatalogProvider(prisma),
+  });
 
   const ctx: AppContext = {
     config,
@@ -35,6 +43,7 @@ async function main(): Promise<void> {
     postEnquiryQueue,
     intentEngine,
     dateLocationOrchestrator,
+    vehicleOrchestrator,
     observabilityStatus: observability.status,
   };
 

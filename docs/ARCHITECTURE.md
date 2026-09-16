@@ -72,6 +72,49 @@ intent recognition, made explicit here as three separate classes: `DateExtractio
 design as Phase 1's engine); `TemporalValidationService` is the sole authority on whether the
 proposal is usable, and its output is what gets persisted and returned — never the raw proposal.
 
+## Phase 3 scope: Determine Vehicle (journey Step 3)
+
+Same input convention as Step 2 — a conversation's latest message, never raw request-body text.
+
+```
+POST /v1/enquiries/:conversationId/vehicle-selection
+                │
+                ▼
+  findLatestMessageForConversation (tenant-scoped)
+                │
+                ▼
+  VehicleDeterminationOrchestrator.determine(message.content, { tenantId })
+                │
+                ├─ sanitizeForProcessing()          — prompt-injection screen (reused from Phase 1)
+                │
+                ├─ VehicleCatalogService.getLexicon(tenantId) ── PrismaVehicleCatalogProvider
+                │      (real fleet, tenant-scoped — never a hardcoded make/model list)
+                │
+                ├─ VehicleIntentService.propose(text, lexicon)
+                │      (AI proposes: exact model > brand only > category only > fuzzy typo,
+                │       pure/zero-I/O — only ever proposes ids present in the real lexicon)
+                │
+                ├─ VehicleCatalogService.resolve(tenantId, proposal)
+                │      (fetches full records for the proposal's candidates + real, bookable
+                │       alternatives — widening to the general fleet if a category-scoped
+                │       alternative search comes up empty)
+                │
+                └─ VehicleValidationService.validate()
+                       (deterministic verifier: resolves / needs clarification / unsupported —
+                        UNKNOWN_VEHICLE, VEHICLE_INACTIVE, VEHICLE_UNAVAILABLE — confidence
+                        scoring, always Zod-validated before it leaves here)
+                │
+                ▼
+  one Prisma transaction: create VehicleDetermination + write AuditEvent
+                │
+                ▼
+  201 { conversationId, messageId, determination }
+```
+
+**Database is authoritative; AI proposes, deterministic domain logic verifies** — the same split,
+now with an explicit third component: `VehicleCatalogService` is the only class that touches the
+real fleet, so "never invent inventory" is enforced structurally rather than by convention.
+
 ## Monorepo layout
 
 ```
@@ -80,9 +123,11 @@ apps/
   worker/   BullMQ Worker — post-enquiry background processing
   web/      Next.js (App Router) — enquiry form UI + a thin server-side proxy route
 packages/
-  domain/         pure business types & Zod schemas (Intent, Conversation, Temporal/Location, AppError, PII, audit, tenant)
+  domain/         pure business types & Zod schemas (Intent, Conversation, Temporal/Location, Vehicle, AppError, PII, audit, tenant)
   ai/             RuleBasedIntentEngine; Step 2: DateExtractionService, LocationExtractionService,
-                  TemporalValidationService, DateLocationExtractionOrchestrator, Dubai/UAE gazetteer
+                  TemporalValidationService, DateLocationExtractionOrchestrator, Dubai/UAE gazetteer;
+                  Step 3: VehicleIntentService, VehicleCatalogService, VehicleValidationService,
+                  VehicleDeterminationOrchestrator
   security/       secure headers, CORS allowlist, SSRF-safe fetch, webhook HMAC, CSRF primitive,
                   resilience primitives (timeout, circuit breaker, rate limiter)
   observability/  pino logger (with redaction), request correlation (AsyncLocalStorage), OTel bootstrap
@@ -101,35 +146,40 @@ imports, use `tsc --noEmit` for typecheck since they don't need to emit for anyo
 
 ## Data model
 
-`Tenant`, `Conversation`, `Message`, `IntentRecord`, `AuditEvent`, `IdempotencyKey` (Phase 1) plus
-`DateLocationExtraction` (Phase 2) — see `packages/db/prisma/schema.prisma`. Every business table
-carries `tenantId`; every repository function takes `tenantId` explicitly and filters by it
-(`findFirst`/`updateMany` with `tenantId` in the WHERE clause). This is the **application-level**
-half of tenant isolation. Database-level Row Level Security is still not implemented — see Known
-Limitations in `docs/phases/PHASE-01.md` and `docs/phases/PHASE-2.md`.
+`Tenant`, `Conversation`, `Message`, `IntentRecord`, `AuditEvent`, `IdempotencyKey` (Phase 1),
+`DateLocationExtraction` (Phase 2), `Vehicle` and `VehicleDetermination` (Phase 3) — see
+`packages/db/prisma/schema.prisma`. Every business table carries `tenantId`; every repository
+function takes `tenantId` explicitly and filters by it (`findFirst`/`updateMany` with `tenantId` in
+the WHERE clause). This is the **application-level** half of tenant isolation. Database-level Row
+Level Security is still not implemented — see Known Limitations in `docs/phases/PHASE-01.md`,
+`docs/PHASE-2.md` and `docs/PHASE-3.md`. `Vehicle` additionally supports soft deletion
+(`deletedAt`) — every repository query excludes soft-deleted rows, and nothing in the codebase
+issues a hard `DELETE` on that table.
 
 ## Security posture (Phase 1)
 
-| Control                                 | Implementation                                                                                                                                                                                                                         |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Input validation                        | Zod at the HTTP boundary (`@fastify/type-provider-zod`) and again at the Next.js route handler                                                                                                                                         |
-| Request size limits                     | Fastify `bodyLimit` (`API_BODY_LIMIT_BYTES`, default 100 KB)                                                                                                                                                                           |
-| Rate limiting                           | `@fastify/rate-limit`, per-IP, configurable window/max                                                                                                                                                                                 |
-| CORS                                    | explicit allowlist (`CORS_ALLOWED_ORIGINS`), no wildcard                                                                                                                                                                               |
-| Secure headers / CSP                    | `@fastify/helmet`, deny-by-default CSP (`packages/security/headers.ts`)                                                                                                                                                                |
-| SSRF protection                         | `ssrfSafeFetch`: allowlist + DNS-rebinding check + no auto-redirects; used by the Next.js route handler calling the API                                                                                                                |
-| SQL injection                           | Prisma parameterized queries only; no raw SQL with interpolated input                                                                                                                                                                  |
-| XSS                                     | React auto-escaping; no `dangerouslySetInnerHTML`; JSON API responses                                                                                                                                                                  |
-| Webhook signatures                      | HMAC-SHA256 sign/verify primitive (`packages/security/webhookSignature.ts`) — not yet wired to a real channel (Phase 5)                                                                                                                |
-| CSRF                                    | double-submit primitive shipped, not mounted (API is stateless/token-based; no cookie session exists yet — see Known Limitations)                                                                                                      |
-| Secrets                                 | `.env` only, never committed; pino redaction paths strip secrets/PII from logs                                                                                                                                                         |
-| PII                                     | `classifyPII`/`redactPII` in `packages/domain`; log redaction also strips raw message content                                                                                                                                          |
-| Audit                                   | every mutation (`enquiry.received`, `conversation.processed`) writes an `AuditEvent` in the same transaction                                                                                                                           |
-| Tenant isolation                        | application-level (see Data model); DB-level RLS is Phase 2/6                                                                                                                                                                          |
-| Prompt-injection defense                | `sanitizeForProcessing` flags known injection patterns; Phase 1's engine is deterministic so nothing can actually be hijacked, but the signal is captured now for Phase 4                                                              |
-| Outbound allowlist                      | `OUTBOUND_ALLOWED_HOSTS` enforced by `ssrfSafeFetch`                                                                                                                                                                                   |
-| Geocoding provider abstraction          | `LocationProvider` interface (`packages/ai/step2`) — Phase 2's `GazetteerLocationProvider` makes zero network calls; any future network-based provider must go through `ssrfSafeFetch`, never a raw `fetch` on caller-influenced input |
-| Timeouts / circuit breaker / rate limit | `packages/security/resilience.ts` — generic primitives, applied to the location provider seam (`ResilientLocationProvider`) even though the current provider doesn't need them, so the safety net is exercised now                     |
+| Control                                 | Implementation                                                                                                                                                                                                                                           |
+| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Input validation                        | Zod at the HTTP boundary (`@fastify/type-provider-zod`) and again at the Next.js route handler                                                                                                                                                           |
+| Request size limits                     | Fastify `bodyLimit` (`API_BODY_LIMIT_BYTES`, default 100 KB)                                                                                                                                                                                             |
+| Rate limiting                           | `@fastify/rate-limit`, per-IP, configurable window/max                                                                                                                                                                                                   |
+| CORS                                    | explicit allowlist (`CORS_ALLOWED_ORIGINS`), no wildcard                                                                                                                                                                                                 |
+| Secure headers / CSP                    | `@fastify/helmet`, deny-by-default CSP (`packages/security/headers.ts`)                                                                                                                                                                                  |
+| SSRF protection                         | `ssrfSafeFetch`: allowlist + DNS-rebinding check + no auto-redirects; used by the Next.js route handler calling the API                                                                                                                                  |
+| SQL injection                           | Prisma parameterized queries only; no raw SQL with interpolated input                                                                                                                                                                                    |
+| XSS                                     | React auto-escaping; no `dangerouslySetInnerHTML`; JSON API responses                                                                                                                                                                                    |
+| Webhook signatures                      | HMAC-SHA256 sign/verify primitive (`packages/security/webhookSignature.ts`) — not yet wired to a real channel (Phase 5)                                                                                                                                  |
+| CSRF                                    | double-submit primitive shipped, not mounted (API is stateless/token-based; no cookie session exists yet — see Known Limitations)                                                                                                                        |
+| Secrets                                 | `.env` only, never committed; pino redaction paths strip secrets/PII from logs                                                                                                                                                                           |
+| PII                                     | `classifyPII`/`redactPII` in `packages/domain`; log redaction also strips raw message content                                                                                                                                                            |
+| Audit                                   | every mutation (`enquiry.received`, `conversation.processed`) writes an `AuditEvent` in the same transaction                                                                                                                                             |
+| Tenant isolation                        | application-level (see Data model); DB-level RLS is Phase 2/6                                                                                                                                                                                            |
+| Prompt-injection defense                | `sanitizeForProcessing` flags known injection patterns; Phase 1's engine is deterministic so nothing can actually be hijacked, but the signal is captured now for Phase 4                                                                                |
+| Outbound allowlist                      | `OUTBOUND_ALLOWED_HOSTS` enforced by `ssrfSafeFetch`                                                                                                                                                                                                     |
+| Geocoding provider abstraction          | `LocationProvider` interface (`packages/ai/step2`) — Phase 2's `GazetteerLocationProvider` makes zero network calls; any future network-based provider must go through `ssrfSafeFetch`, never a raw `fetch` on caller-influenced input                   |
+| Timeouts / circuit breaker / rate limit | `packages/security/resilience.ts` — generic primitives, applied to the location provider seam (`ResilientLocationProvider`) even though the current provider doesn't need them, so the safety net is exercised now                                       |
+| Never invent inventory                  | `VehicleCatalogProvider` interface (`packages/ai/step3`) — the matching lexicon and every resolved/alternative vehicle always come from the tenant's real `Vehicle` rows; proven with a prompt-injection payload asking for a vehicle that doesn't exist |
+| Vehicle catalog constraints             | `@@unique([tenantId, make, model])`, soft delete (`deletedAt`, never a hard `DELETE`), tenant-scoped repository functions, `AppError('CONFLICT', ...)` on a duplicate identity instead of a raw driver error                                             |
 
 ## AI Intent Engine
 
@@ -165,6 +215,36 @@ implements an adapter rather than inventing the boundary under deadline pressure
 - **`DateLocationExtractionOrchestrator`** — wires the three together: sanitize → locate → date →
   validate, defaulting to `Asia/Dubai` when no location resolved (Phase 2's single-market default,
   see `docs/phases/PHASE-2.md`).
+
+## Step 3 — Determine Vehicle
+
+- **`VehicleIntentService`** — pure, zero-I/O proposal step. Tiered, mutually-exclusive matching
+  against a DB-sourced lexicon: exact model → brand only (unambiguous if the brand has one model) →
+  category only (unambiguous if the category has one model) → typo-tolerant fuzzy match (a small,
+  self-written Levenshtein implementation, `packages/ai/step3/levenshtein.ts`, no new dependency).
+  Never proposes an id absent from the lexicon it was given; when nothing matches, reports either a
+  vehicle-shaped phrase it couldn't resolve (for `UNKNOWN_VEHICLE`) or nothing at all (for
+  `NO_VEHICLE_MENTIONED`) — a lone capitalized sentence-initial word ("What", "I") is deliberately
+  never mistaken for either.
+- **`VehicleCatalogService`** — the only class that talks to the real fleet, via an injected
+  `VehicleCatalogProvider` (`PrismaVehicleCatalogProvider` in `apps/api`, tenant-scoped on every
+  call — unlike Step 2's tenant-agnostic static gazetteer). Supplies the lexicon, the full records
+  for whatever `VehicleIntentService` proposed, and a small set of genuinely bookable alternatives —
+  widening from a category-scoped search to the general active fleet if the narrower one comes up
+  empty, so a customer is never left with nothing to choose from.
+- **`VehicleValidationService`** — the deterministic verifier. Decides `RESOLVED` (single, active,
+  `AVAILABLE` match) vs. `NEEDS_CLARIFICATION` (multiple candidates, or nothing mentioned) vs.
+  `UNSUPPORTED` (`UNKNOWN_VEHICLE`, `VEHICLE_INACTIVE`, or `VEHICLE_UNAVAILABLE`). Computes a 0–1
+  confidence score and is the only place a `VehicleDeterminationResult` is constructed and
+  Zod-validated.
+- **`VehicleDeterminationOrchestrator`** — wires the three together: sanitize → lexicon → propose →
+  resolve → validate. Requires a real `VehicleCatalogProvider` (no zero-config default exists, unlike
+  Step 2's Dubai/UAE gazetteer, since there's no sensible generic fleet to fall back to).
+- **Three distinct "not available" states**, deliberately kept separate: `deletedAt` (soft-deleted —
+  behaves as if the vehicle never existed), `active` (a real entry, disabled by the business —
+  `VEHICLE_INACTIVE`), `availabilityStatus` (a real, active entry temporarily down —
+  `VEHICLE_UNAVAILABLE`, a catalog-level flag only, not a date-range booking calendar; that's journey
+  Step 6, a distinct later phase).
 
 ## Observability
 

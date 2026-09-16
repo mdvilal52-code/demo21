@@ -4,3 +4,5 @@ export * from './repositories/intentRepository.js';
 export * from './repositories/auditRepository.js';
 export * from './repositories/idempotencyRepository.js';
 export * from './repositories/dateLocationExtractionRepository.js';
+export * from './repositories/vehicleRepository.js';
+export * from './repositories/vehicleDeterminationRepository.js';

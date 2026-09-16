@@ -1,10 +1,10 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "updatedAt": "2026-09-16",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
-  "phaseNumbering": "Phases 1-2 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location), not the original 10-phase infra grouping below. Phase 3 is scoped the same way (Determine Vehicle = journey Step 3). Phase ids 4-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 4-19) as work reaches them, same as phases 1-2 already turned out to differ from this document's original phase 1-2 grouping.",
+  "phaseNumbering": "Phases 1-3 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle), not the original 10-phase infra grouping below. Phase ids 4-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 4-19) as work reaches them, same as phases 1-3 already turned out to differ from this document's original phase 1-3 grouping.",
   "rules": {
     "protocol": "docs/PHASE-EXECUTION-PROTOCOL.md",
     "masterPlan": "docs/MASTER-PLAN.md",
@@ -83,12 +83,23 @@
     {
       "id": 3,
       "name": "Determine Vehicle (journey Step 3)",
-      "status": "PENDING",
-      "goal": "Map the customer's vehicle preference (plus Step 2's dates/location) to a fleet class/model proposal, deterministically verified against real fleet data — same AI-proposes/domain-verifies split as Steps 1-2. Full scope to be given when this phase is started (see docs/PHASE-2.md §13 for the forward contract as currently understood).",
-      "deliverables": [],
-      "acceptance": [],
+      "status": "FROZEN",
+      "goal": "Map the customer's vehicle preference (exact model, brand only, category only, or a typo) to a real fleet catalog entry, deterministically verified against the tenant's actual inventory — same AI-proposes/domain-verifies split as Steps 1-2, with an explicit third component (VehicleCatalogService) standing for 'database is authoritative, never invent inventory'.",
+      "deliverables": [
+        "packages/domain: VehicleCategory, LuxuryTier, Transmission, VehicleAvailabilityStatus, VehicleMatchType, VehicleDeterminationStatus, pricingProfileSchema, vehicleSchema, VehicleAmbiguityCode/VehicleValidationErrorCode + schemas, vehicleDeterminationResultSchema",
+        "packages/ai/step3: VehicleIntentService (pure, tiered exact-model/brand-only/category-only/fuzzy-typo matching against a DB-sourced lexicon), VehicleCatalogProvider seam, VehicleCatalogService (the only class touching the real fleet; alternatives widen to the general active fleet when a category-scoped search is empty), VehicleValidationService (RESOLVED/NEEDS_CLARIFICATION/UNSUPPORTED + UNKNOWN_VEHICLE/VEHICLE_INACTIVE/VEHICLE_UNAVAILABLE + confidence), VehicleDeterminationOrchestrator",
+        "packages/db: Vehicle model (unique(tenantId,make,model), soft delete via deletedAt) + VehicleDetermination model + migration, vehicleRepository (create/soft-delete/lexicon/lookup/alternatives, Prisma-to-domain mapping re-validated via Zod), vehicleDeterminationRepository",
+        "packages/contracts: determineVehicleParamsSchema / determineVehicleResponseSchema",
+        "apps/api: PrismaVehicleCatalogProvider, POST /v1/enquiries/:conversationId/vehicle-selection (vehicleService.ts + routes/v1/vehicle.ts)",
+        "docs/PHASE-3.md"
+      ],
+      "acceptance": [
+        "every required test case passes: exact vehicle; brand only; category only; typos; unknown vehicle; malicious prompt injection (never fabricates the requested vehicle); inactive vehicle; duplicate vehicle (unique constraint, case-insensitive); tenant isolation",
+        "full Phase 1 + Phase 2 regression re-run and green (no working functionality broken)",
+        "all gates pass: typecheck, lint, format, 260 unit + 53 integration + 33 security tests, 4 e2e, production build — see docs/PHASE-3.md §8"
+      ],
       "dependsOn": [2],
-      "phaseDoc": "docs/phases/PHASE-03.md"
+      "phaseDoc": "docs/PHASE-3.md"
     },
     {
       "id": 4,

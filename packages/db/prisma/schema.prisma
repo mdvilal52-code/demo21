@@ -19,6 +19,8 @@ model Tenant {
   auditEvents              AuditEvent[]
   intentRecords            IntentRecord[]
   dateLocationExtractions  DateLocationExtraction[]
+  vehicles                 Vehicle[]
+  vehicleDeterminations    VehicleDetermination[]
 
   @@map("tenants")
 }
@@ -53,6 +55,7 @@ model Message {
 
   intentRecords            IntentRecord[]
   dateLocationExtractions  DateLocationExtraction[]
+  vehicleDeterminations    VehicleDetermination[]
 
   @@index([conversationId])
   @@map("messages")
@@ -171,4 +174,103 @@ model DateLocationExtraction {
   @@index([tenantId])
   @@index([messageId])
   @@map("date_location_extractions")
+}
+
+enum VehicleCategory {
+  SEDAN
+  SUV
+  COUPE
+  CONVERTIBLE
+  SPORTS
+  VAN
+}
+
+enum LuxuryTier {
+  PREMIUM
+  LUXURY
+  ULTRA_LUXURY
+}
+
+enum Transmission {
+  AUTOMATIC
+  MANUAL
+}
+
+/// Catalog-level status only (is this fleet class offered at all right now) —
+/// NOT a date-range booking calendar. Real per-date availability/holds are
+/// journey Step 6, a distinct later phase.
+enum VehicleAvailabilityStatus {
+  AVAILABLE
+  UNAVAILABLE
+  MAINTENANCE
+}
+
+enum VehicleDeterminationStatus {
+  RESOLVED
+  NEEDS_CLARIFICATION
+  UNSUPPORTED
+}
+
+/// Step 3 — Determine Vehicle. A fleet class/model catalog entry (e.g.
+/// "Lamborghini Urus"), not an individual physical unit. `make`/`model` are
+/// normalized to a canonical case at the repository layer before writing, so
+/// the unique constraint is effectively case-insensitive without needing the
+/// `citext` extension. Soft-deleted rows (`deletedAt` set) are excluded from
+/// every repository query — they behave as if they never existed for
+/// matching purposes, distinct from `active=false` (a real, known catalog
+/// entry temporarily not offered) and `availabilityStatus` (a real, active
+/// entry that is temporarily unavailable/in maintenance).
+model Vehicle {
+  id                 String                    @id @default(uuid())
+  tenantId           String
+  tenant             Tenant                    @relation(fields: [tenantId], references: [id])
+  make               String
+  model              String
+  category           VehicleCategory
+  luxuryTier         LuxuryTier
+  seats              Int
+  luggage            Int
+  transmission       Transmission
+  availabilityStatus VehicleAvailabilityStatus @default(AVAILABLE)
+  /// Zod-validated PricingProfile (currency, dailyRate, weeklyRate?, depositAmount?) — a
+  /// "budget hint" per MASTER-PLAN.md Step 3, not the real pricing engine (Step 8).
+  pricingProfile     Json
+  active             Boolean                   @default(true)
+  deletedAt          DateTime?
+  createdAt          DateTime                  @default(now())
+  updatedAt          DateTime                  @updatedAt
+
+  vehicleDeterminations VehicleDetermination[]
+
+  @@unique([tenantId, make, model])
+  @@index([tenantId])
+  @@index([tenantId, category])
+  @@map("vehicles")
+}
+
+/// One row per vehicle-determination run against a message — same
+/// append-only-history convention as IntentRecord/DateLocationExtraction.
+/// `resolvedVehicleId` is null whenever status is NEEDS_CLARIFICATION or
+/// UNSUPPORTED; `alternatives` snapshots the real catalog entries offered at
+/// decision time (never a fabricated vehicle).
+model VehicleDetermination {
+  id                String                     @id @default(uuid())
+  tenantId          String
+  tenant            Tenant                     @relation(fields: [tenantId], references: [id])
+  messageId         String
+  message           Message                    @relation(fields: [messageId], references: [id])
+  resolvedVehicleId String?
+  resolvedVehicle   Vehicle?                   @relation(fields: [resolvedVehicleId], references: [id])
+  status            VehicleDeterminationStatus
+  confidence        Float
+  ambiguities       Json
+  validationErrors  Json
+  alternatives      Json
+  flags             Json
+  modelMetadata     Json
+  createdAt         DateTime                   @default(now())
+
+  @@index([tenantId])
+  @@index([messageId])
+  @@map("vehicle_determinations")
 }

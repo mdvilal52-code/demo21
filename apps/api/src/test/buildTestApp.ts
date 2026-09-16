@@ -1,4 +1,8 @@
-import { DateLocationExtractionOrchestrator, RuleBasedIntentEngine } from '@ai-concierge/ai';
+import {
+  DateLocationExtractionOrchestrator,
+  RuleBasedIntentEngine,
+  VehicleDeterminationOrchestrator,
+} from '@ai-concierge/ai';
 import {
   createTestPrismaClient,
   createTestRedisClient,
@@ -10,6 +14,7 @@ import { Queue } from 'bullmq';
 import { buildApp } from '../app.js';
 import type { AppContext } from '../context.js';
 import type { ApiEnv } from '../env.js';
+import { PrismaVehicleCatalogProvider } from '../services/vehicleCatalogProvider.js';
 
 export interface TestApp {
   app: FastifyInstance;
@@ -56,6 +61,9 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
     postEnquiryQueue,
     intentEngine: new RuleBasedIntentEngine(),
     dateLocationOrchestrator: new DateLocationExtractionOrchestrator(),
+    vehicleOrchestrator: new VehicleDeterminationOrchestrator({
+      catalogProvider: new PrismaVehicleCatalogProvider(prisma),
+    }),
     observabilityStatus: 'NOT_CONFIGURED',
   };
 
