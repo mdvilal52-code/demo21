@@ -23,18 +23,6 @@ databases:
     region: oregon
     postgresMajorVersion: '16'
 
-envVarGroups:
-  - name: ai-concierge-shared
-    vars:
-      # Shared across api + worker so both verify/sign with the identical
-      # secret — must live in one group, not be generated per-service.
-      - key: WEBHOOK_SIGNING_SECRET
-        generateValue: true
-      # Must match a real seeded Tenant row; fill in during Blueprint setup
-      # (see the seed step in the deploy notes).
-      - key: DEFAULT_TENANT_ID
-        sync: false
-
 services:
   - type: keyvalue
     name: ai-concierge-redis
@@ -55,7 +43,6 @@ services:
     startCommand: node apps/api/dist/server.js
     healthCheckPath: /health
     envVars:
-      - fromGroup: ai-concierge-shared
       - key: NODE_VERSION
         value: '22'
       - key: NODE_ENV
@@ -69,6 +56,14 @@ services:
           type: keyvalue
           name: ai-concierge-redis
           property: connectionString
+      # Must be the IDENTICAL value on both ai-concierge-api and
+      # ai-concierge-worker (both verify/sign with it) — enter the same
+      # string manually in both places during Blueprint setup.
+      - key: WEBHOOK_SIGNING_SECRET
+        sync: false
+      # Must match a real seeded Tenant row.
+      - key: DEFAULT_TENANT_ID
+        sync: false
       # Render assigns the public URL only after the first deploy; set this
       # to that URL (dashboard -> ai-concierge-api -> the onrender.com URL).
       - key: API_PUBLIC_URL
@@ -86,7 +81,6 @@ services:
     buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @ai-concierge/worker... run build
     startCommand: node apps/worker/dist/worker.js
     envVars:
-      - fromGroup: ai-concierge-shared
       - key: NODE_VERSION
         value: '22'
       - key: NODE_ENV
@@ -100,3 +94,9 @@ services:
           type: keyvalue
           name: ai-concierge-redis
           property: connectionString
+      # Must be the IDENTICAL value entered for ai-concierge-api.
+      - key: WEBHOOK_SIGNING_SECRET
+        sync: false
+      # Must match a real seeded Tenant row.
+      - key: DEFAULT_TENANT_ID
+        sync: false
