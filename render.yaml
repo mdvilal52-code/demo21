@@ -38,8 +38,11 @@ services:
     # Runs the Postgres migration on every deploy (prisma migrate deploy only
     # ever applies pending migrations, so this is safe to re-run every time,
     # including when there's nothing new to apply) — otherwise a fresh
-    # ai-concierge-db has no tables and every request fails.
-    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @ai-concierge/api... run build && pnpm --filter @ai-concierge/db run migrate:deploy
+    # ai-concierge-db has no tables and every request fails. Then seeds the
+    # default tenant (idempotent, ON CONFLICT DO NOTHING) — there is no
+    # production seed script in the repo, so without this a fresh database
+    # has zero Tenant rows and DEFAULT_TENANT_ID matches nothing.
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @ai-concierge/api... run build && pnpm --filter @ai-concierge/db run migrate:deploy && echo "INSERT INTO tenants (id, name) VALUES ('$DEFAULT_TENANT_ID', 'Default Tenant') ON CONFLICT (id) DO NOTHING;" | pnpm --filter @ai-concierge/db exec prisma db execute --stdin --schema=./prisma/schema.prisma
     startCommand: node apps/api/dist/server.js
     healthCheckPath: /health
     envVars:
