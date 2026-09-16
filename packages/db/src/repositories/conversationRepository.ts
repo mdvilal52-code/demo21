@@ -65,6 +65,53 @@ export async function findLatestMessageForConversation(
   });
 }
 
+/**
+ * Appends a follow-up customer message to an existing conversation — the
+ * minimal capability Step 4's multi-turn loop needs to receive a reply at
+ * all (no generic channel-adapter message ingestion exists yet; that's
+ * Phase 5's WhatsApp/Web-chat/Email scope). Returns null when the
+ * conversation doesn't exist for this tenant, the same tenant-scoped
+ * "null means not found" convention `findLatestMessageForConversation` uses.
+ */
+export async function appendMessageToConversation(
+  db: Executor,
+  tenantId: TenantId,
+  conversationId: string,
+  content: string,
+) {
+  const conversation = await db.conversation.findFirst({
+    where: { id: conversationId, tenantId },
+    select: { id: true },
+  });
+  if (!conversation) return null;
+
+  return db.message.create({ data: { conversationId, content } });
+}
+
+/**
+ * Step 4 needs both the conversation's channel (drives whether contact
+ * details are necessary) and its latest message (the turn to process) in
+ * one read — a conversation always has at least one message from creation,
+ * so a null `message` here would indicate corrupted data, never a normal
+ * "not found" case (that's `conversation` being null).
+ */
+export async function findConversationWithLatestMessage(
+  db: Executor,
+  tenantId: TenantId,
+  conversationId: string,
+) {
+  const conversation = await db.conversation.findFirst({
+    where: { id: conversationId, tenantId },
+    include: { messages: { orderBy: { createdAt: 'desc' }, take: 1 } },
+  });
+  if (!conversation) return null;
+
+  const [message] = conversation.messages;
+  if (!message) return null;
+
+  return { channel: conversation.channel, message };
+}
+
 export async function markConversationProcessed(
   db: Executor,
   tenantId: TenantId,

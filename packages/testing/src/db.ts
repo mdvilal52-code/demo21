@@ -16,6 +16,7 @@ export function createTestPrismaClient(): PrismaClient {
 
 const TABLES = [
   'audit_events',
+  'missing_information_states',
   'vehicle_determinations',
   'date_location_extractions',
   'intent_records',

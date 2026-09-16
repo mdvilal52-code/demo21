@@ -41,3 +41,19 @@ export async function findLatestVehicleDeterminationForMessage(
     orderBy: { createdAt: 'desc' },
   });
 }
+
+/**
+ * Step 4 only needs to know Step 3 ran at all for this conversation (the
+ * dependency-chain precondition) — it never reads the resolved vehicle
+ * itself, so this stays a cheap existence check rather than a full row read.
+ */
+export async function hasVehicleDeterminationForConversation(
+  db: Executor,
+  tenantId: TenantId,
+  conversationId: string,
+): Promise<boolean> {
+  const count = await db.vehicleDetermination.count({
+    where: { tenantId, message: { conversationId } },
+  });
+  return count > 0;
+}

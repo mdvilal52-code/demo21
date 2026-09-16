@@ -115,6 +115,67 @@ POST /v1/enquiries/:conversationId/vehicle-selection
 now with an explicit third component: `VehicleCatalogService` is the only class that touches the
 real fleet, so "never invent inventory" is enforced structurally rather than by convention.
 
+## Phase 4 scope: Ask Missing Information (journey Step 4)
+
+The first genuinely stateful, multi-turn journey step — Steps 1-3 were each single-pass. Input is
+the conversation's latest message (via a new, dedicated reply endpoint), plus Steps 1-3's
+already-persisted results read fresh on every call, plus this conversation's own prior Step 4 state.
+
+```
+POST /v1/enquiries/:conversationId/messages          (append a customer reply; idempotent)
+POST /v1/enquiries/:conversationId/missing-information (process the latest reply; no request body)
+                │
+                ▼
+  five tenant-scoped reads in parallel: latest message, Step 1 intent, Step 2 dates/location,
+  Step 3 vehicle-determined?, prior MissingInformationState (null on turn 1)
+                │
+                ├─ replay? (same messageId as last processed call)
+                │      buildResultFromState() — reconstructs the current view from persisted
+                │      state alone, no extraction — never reprocesses the same message twice
+                │
+                └─ genuine new turn ──▶ MissingInformationEngine.processTurn()
+                       │
+                       ├─ sanitizeForProcessing()        — prompt-injection screen (reused from Phase 1)
+                       │
+                       ├─ AnswerExtractionService.extract*()
+                       │      (AI proposes: flight number / pickup time / driver requirement /
+                       │       contact details by pattern; dropoff address / special requests only
+                       │       as a reply to a field this conversation itself asked about earlier)
+                       │
+                       ├─ ConversationState.applyCandidates()
+                       │      (deterministic merge: new answer / correction / contradiction —
+                       │       repeated answers are a no-op, idempotent by construction)
+                       │
+                       ├─ MissingFieldDetector.detect()
+                       │      (deterministic verifier: which required fields are still genuinely
+                       │       missing, given real Step 1-3 data — e.g. no flight number question
+                       │       unless Step 2 actually resolved an AIRPORT pickup)
+                       │
+                       └─ QuestionPolicy.selectNewQuestions()
+                              (typed templates only, en/ar; never re-asks a field once asked;
+                               at most one free-text question pending at a time, required
+                               fields bump an optional one out of that slot rather than being
+                               blocked by it)
+                │
+                ▼
+  one Prisma transaction: save MissingInformationState (version-checked) + write AuditEvent
+                │
+                ▼
+  201 { conversationId, messageId, result: { status, missingFields, pendingQuestions, answers,
+        corrections, contradictions, flags, modelMetadata } }
+```
+
+**AI proposes, deterministic domain logic verifies** — the same split as Steps 1-3, a fourth time,
+plus the piece those steps never needed: `ConversationState` (functional-core, immutable — every
+method returns a new instance) is the only place multi-turn state is merged, and the only place an
+answer, correction or contradiction record is constructed (always through its Zod schema). An
+abuse-protection turn cap (`MAX_MISSING_INFO_TURNS`) is enforced by the caller (`missingInformationService`)
+before the engine ever runs, and never counts a replay against it.
+
+**Never a fake conversation** — the endpoint takes no body; the message it processes is always one
+already durably stored via `POST .../messages`, the same "read the stored message, never re-parse
+request-body text" convention Steps 2-3 established.
+
 ## Monorepo layout
 
 ```
@@ -127,7 +188,8 @@ packages/
   ai/             RuleBasedIntentEngine; Step 2: DateExtractionService, LocationExtractionService,
                   TemporalValidationService, DateLocationExtractionOrchestrator, Dubai/UAE gazetteer;
                   Step 3: VehicleIntentService, VehicleCatalogService, VehicleValidationService,
-                  VehicleDeterminationOrchestrator
+                  VehicleDeterminationOrchestrator; Step 4: AnswerExtractionService,
+                  MissingFieldDetector, QuestionPolicy, ConversationState, MissingInformationEngine
   security/       secure headers, CORS allowlist, SSRF-safe fetch, webhook HMAC, CSRF primitive,
                   resilience primitives (timeout, circuit breaker, rate limiter)
   observability/  pino logger (with redaction), request correlation (AsyncLocalStorage), OTel bootstrap
@@ -147,39 +209,46 @@ imports, use `tsc --noEmit` for typecheck since they don't need to emit for anyo
 ## Data model
 
 `Tenant`, `Conversation`, `Message`, `IntentRecord`, `AuditEvent`, `IdempotencyKey` (Phase 1),
-`DateLocationExtraction` (Phase 2), `Vehicle` and `VehicleDetermination` (Phase 3) — see
-`packages/db/prisma/schema.prisma`. Every business table carries `tenantId`; every repository
-function takes `tenantId` explicitly and filters by it (`findFirst`/`updateMany` with `tenantId` in
-the WHERE clause). This is the **application-level** half of tenant isolation. Database-level Row
-Level Security is still not implemented — see Known Limitations in `docs/phases/PHASE-01.md`,
-`docs/PHASE-2.md` and `docs/PHASE-3.md`. `Vehicle` additionally supports soft deletion
-(`deletedAt`) — every repository query excludes soft-deleted rows, and nothing in the codebase
-issues a hard `DELETE` on that table.
+`DateLocationExtraction` (Phase 2), `Vehicle` and `VehicleDetermination` (Phase 3),
+`MissingInformationState` (Phase 4) — see `packages/db/prisma/schema.prisma`. Every business table
+carries `tenantId`; every repository function takes `tenantId` explicitly and filters by it
+(`findFirst`/`updateMany` with `tenantId` in the WHERE clause). This is the **application-level**
+half of tenant isolation. Database-level Row Level Security is still not implemented — see Known
+Limitations in `docs/phases/PHASE-01.md`, `docs/PHASE-2.md`, `docs/PHASE-3.md` and `docs/PHASE-4.md`.
+`Vehicle` additionally supports soft deletion (`deletedAt`) — every repository query excludes
+soft-deleted rows, and nothing in the codebase issues a hard `DELETE` on that table.
+`MissingInformationState` is one row per conversation (`conversationId` unique), updated in place
+turn by turn under an optimistic `version` check — the one table in the schema that is mutated
+rather than appended-to, since it is genuinely the current state of an in-progress conversation, not
+a history of individual runs like `IntentRecord`/`DateLocationExtraction`/`VehicleDetermination`.
 
 ## Security posture (Phase 1)
 
-| Control                                 | Implementation                                                                                                                                                                                                                                           |
-| --------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Input validation                        | Zod at the HTTP boundary (`@fastify/type-provider-zod`) and again at the Next.js route handler                                                                                                                                                           |
-| Request size limits                     | Fastify `bodyLimit` (`API_BODY_LIMIT_BYTES`, default 100 KB)                                                                                                                                                                                             |
-| Rate limiting                           | `@fastify/rate-limit`, per-IP, configurable window/max                                                                                                                                                                                                   |
-| CORS                                    | explicit allowlist (`CORS_ALLOWED_ORIGINS`), no wildcard                                                                                                                                                                                                 |
-| Secure headers / CSP                    | `@fastify/helmet`, deny-by-default CSP (`packages/security/headers.ts`)                                                                                                                                                                                  |
-| SSRF protection                         | `ssrfSafeFetch`: allowlist + DNS-rebinding check + no auto-redirects; used by the Next.js route handler calling the API                                                                                                                                  |
-| SQL injection                           | Prisma parameterized queries only; no raw SQL with interpolated input                                                                                                                                                                                    |
-| XSS                                     | React auto-escaping; no `dangerouslySetInnerHTML`; JSON API responses                                                                                                                                                                                    |
-| Webhook signatures                      | HMAC-SHA256 sign/verify primitive (`packages/security/webhookSignature.ts`) — not yet wired to a real channel (Phase 5)                                                                                                                                  |
-| CSRF                                    | double-submit primitive shipped, not mounted (API is stateless/token-based; no cookie session exists yet — see Known Limitations)                                                                                                                        |
-| Secrets                                 | `.env` only, never committed; pino redaction paths strip secrets/PII from logs                                                                                                                                                                           |
-| PII                                     | `classifyPII`/`redactPII` in `packages/domain`; log redaction also strips raw message content                                                                                                                                                            |
-| Audit                                   | every mutation (`enquiry.received`, `conversation.processed`) writes an `AuditEvent` in the same transaction                                                                                                                                             |
-| Tenant isolation                        | application-level (see Data model); DB-level RLS is Phase 2/6                                                                                                                                                                                            |
-| Prompt-injection defense                | `sanitizeForProcessing` flags known injection patterns; Phase 1's engine is deterministic so nothing can actually be hijacked, but the signal is captured now for Phase 4                                                                                |
-| Outbound allowlist                      | `OUTBOUND_ALLOWED_HOSTS` enforced by `ssrfSafeFetch`                                                                                                                                                                                                     |
-| Geocoding provider abstraction          | `LocationProvider` interface (`packages/ai/step2`) — Phase 2's `GazetteerLocationProvider` makes zero network calls; any future network-based provider must go through `ssrfSafeFetch`, never a raw `fetch` on caller-influenced input                   |
-| Timeouts / circuit breaker / rate limit | `packages/security/resilience.ts` — generic primitives, applied to the location provider seam (`ResilientLocationProvider`) even though the current provider doesn't need them, so the safety net is exercised now                                       |
-| Never invent inventory                  | `VehicleCatalogProvider` interface (`packages/ai/step3`) — the matching lexicon and every resolved/alternative vehicle always come from the tenant's real `Vehicle` rows; proven with a prompt-injection payload asking for a vehicle that doesn't exist |
-| Vehicle catalog constraints             | `@@unique([tenantId, make, model])`, soft delete (`deletedAt`, never a hard `DELETE`), tenant-scoped repository functions, `AppError('CONFLICT', ...)` on a duplicate identity instead of a raw driver error                                             |
+| Control                                    | Implementation                                                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Input validation                           | Zod at the HTTP boundary (`@fastify/type-provider-zod`) and again at the Next.js route handler                                                                                                                                                                                                                                                                            |
+| Request size limits                        | Fastify `bodyLimit` (`API_BODY_LIMIT_BYTES`, default 100 KB)                                                                                                                                                                                                                                                                                                              |
+| Rate limiting                              | `@fastify/rate-limit`, per-IP, configurable window/max                                                                                                                                                                                                                                                                                                                    |
+| CORS                                       | explicit allowlist (`CORS_ALLOWED_ORIGINS`), no wildcard                                                                                                                                                                                                                                                                                                                  |
+| Secure headers / CSP                       | `@fastify/helmet`, deny-by-default CSP (`packages/security/headers.ts`)                                                                                                                                                                                                                                                                                                   |
+| SSRF protection                            | `ssrfSafeFetch`: allowlist + DNS-rebinding check + no auto-redirects; used by the Next.js route handler calling the API                                                                                                                                                                                                                                                   |
+| SQL injection                              | Prisma parameterized queries only; no raw SQL with interpolated input                                                                                                                                                                                                                                                                                                     |
+| XSS                                        | React auto-escaping; no `dangerouslySetInnerHTML`; JSON API responses                                                                                                                                                                                                                                                                                                     |
+| Webhook signatures                         | HMAC-SHA256 sign/verify primitive (`packages/security/webhookSignature.ts`) — not yet wired to a real channel (Phase 5)                                                                                                                                                                                                                                                   |
+| CSRF                                       | double-submit primitive shipped, not mounted (API is stateless/token-based; no cookie session exists yet — see Known Limitations)                                                                                                                                                                                                                                         |
+| Secrets                                    | `.env` only, never committed; pino redaction paths strip secrets/PII from logs                                                                                                                                                                                                                                                                                            |
+| PII                                        | `classifyPII`/`redactPII` in `packages/domain`; log redaction also strips raw message content                                                                                                                                                                                                                                                                             |
+| Audit                                      | every mutation (`enquiry.received`, `conversation.processed`) writes an `AuditEvent` in the same transaction                                                                                                                                                                                                                                                              |
+| Tenant isolation                           | application-level (see Data model); DB-level RLS is Phase 2/6                                                                                                                                                                                                                                                                                                             |
+| Prompt-injection defense                   | `sanitizeForProcessing` flags known injection patterns; every phase's engine so far (1-4) is deterministic so nothing can actually be hijacked, but the signal is captured and surfaced (Step 4 returns it as `flags.promptInjectionDetected`) for whichever future phase puts a real LLM behind one of these seams                                                       |
+| Outbound allowlist                         | `OUTBOUND_ALLOWED_HOSTS` enforced by `ssrfSafeFetch`                                                                                                                                                                                                                                                                                                                      |
+| Geocoding provider abstraction             | `LocationProvider` interface (`packages/ai/step2`) — Phase 2's `GazetteerLocationProvider` makes zero network calls; any future network-based provider must go through `ssrfSafeFetch`, never a raw `fetch` on caller-influenced input                                                                                                                                    |
+| Timeouts / circuit breaker / rate limit    | `packages/security/resilience.ts` — generic primitives, applied to the location provider seam (`ResilientLocationProvider`) even though the current provider doesn't need them, so the safety net is exercised now                                                                                                                                                        |
+| Never invent inventory                     | `VehicleCatalogProvider` interface (`packages/ai/step3`) — the matching lexicon and every resolved/alternative vehicle always come from the tenant's real `Vehicle` rows; proven with a prompt-injection payload asking for a vehicle that doesn't exist                                                                                                                  |
+| Vehicle catalog constraints                | `@@unique([tenantId, make, model])`, soft delete (`deletedAt`, never a hard `DELETE`), tenant-scoped repository functions, `AppError('CONFLICT', ...)` on a duplicate identity instead of a raw driver error                                                                                                                                                              |
+| Never expose internal prompts/instructions | `QuestionPolicy` only ever renders one of a fixed, versioned set of typed templates (`fieldTemplates.ts`) — no template is ever generated from customer text or a system prompt, so there is nothing that could leak through a rendered question                                                                                                                          |
+| PII minimization                           | `classifyPII` flags PII in the raw message (`flags.piiDetected`); free-text answers (address/special requests) are only ever captured as the reply to a field the conversation itself asked about — an unrelated PII-bearing sentence (e.g. a passport number) is never opportunistically stored; audit events record field/answer _counts_ only, never raw answer values |
+| Abuse protection / rate limiting           | `MAX_MISSING_INFO_TURNS` turn cap enforced by `missingInformationService` before the engine runs (not by the engine itself, which never throws); a replayed/idempotent retry of the same message is reconstructed from persisted state and never counts against the cap                                                                                                   |
 
 ## AI Intent Engine
 
@@ -188,9 +257,10 @@ calls, zero hallucination risk. It classifies one of the 10 `IntentType` values,
 (vehicle, dates, location, passenger count, driver requirement, language, urgency) only when real
 evidence is present in the message, and returns `NEEDS_CLARIFICATION` whenever confidence is below
 threshold or a `BOOKING_REQUEST` is missing a required field. Output is always validated against
-`intentResultSchema` (Zod) before it leaves the engine. A real LLM provider is Phase 4 scope; the
-`AIProvider`/`NotConfiguredProvider` seam already exists in `packages/ai/provider.ts` so that phase
-implements an adapter rather than inventing the boundary under deadline pressure.
+`intentResultSchema` (Zod) before it leaves the engine. A real LLM provider remains a distinct,
+not-yet-numbered future phase — Phases 2-4 turned out deterministic/rule-based too, same as Phase 1;
+the `AIProvider`/`NotConfiguredProvider` seam already exists in `packages/ai/provider.ts` so that
+future phase implements an adapter rather than inventing the boundary under deadline pressure.
 
 ## Step 2 — Date & Location Extraction
 
@@ -245,6 +315,40 @@ implements an adapter rather than inventing the boundary under deadline pressure
   `VEHICLE_INACTIVE`), `availabilityStatus` (a real, active entry temporarily down —
   `VEHICLE_UNAVAILABLE`, a catalog-level flag only, not a date-range booking calendar; that's journey
   Step 6, a distinct later phase).
+
+## Step 4 — Ask Missing Information
+
+- **`AnswerExtractionService`** — pure, zero-I/O proposal step. Structured fields (flight number,
+  pickup time, driver requirement, contact details) are pattern-matched unconditionally, each with
+  real textual evidence (e.g. a flight number regex, an explicit am/pm or `HH:MM` time, a negation-
+  aware driver-requirement keyword check so "I don't need a driver" is never misread as the opposite
+  of what the customer said). Free text (dropoff address, special requests) is never scanned
+  opportunistically — it is only ever captured as the answer to a field this same conversation asked
+  about in an earlier turn, with an anchor-phrase regex ("drop off at …") tried first so a reply that
+  mixes an address in with other information captures just the address.
+- **`ConversationState`** — functional-core, immutable (every method returns a new instance). The
+  only place a customer's candidate answers are merged into the conversation's running answer set:
+  a single new value is a new answer, a differing value for an already-answered field is a
+  _correction_ (newest statement wins), two different values in the same message are a
+  _contradiction_ (both discarded, neither trusted), and a repeated value is a no-op — idempotent by
+  construction. Also owns the single-slot free-text question rule: a required field can _withdraw_ an
+  optional field's pending question to take the slot, but never the reverse.
+- **`MissingFieldDetector`** — the deterministic verifier, mirroring
+  `TemporalValidationService`/`VehicleValidationService`'s role in Steps 2-3. The sole authority on
+  "genuinely missing": a field's _requiredness_ is computed from real Step 1-3 data only (e.g. a
+  flight number is only required when Step 2 actually resolved an `AIRPORT` pickup location), and a
+  field already present in the answer set — from Step 1, a prior turn, or this turn — is never
+  reported as missing, however it got there.
+- **`QuestionPolicy`** — typed question templates only (English + Arabic), nothing generated from
+  customer text, so there is no internal prompt or instruction that could ever leak through a
+  rendered question. Never re-asks a field once its `askedFieldKeys` entry exists; optional fields
+  (special requests) are offered at most once, after every required field.
+- **`MissingInformationEngine`** — wires all four together: sanitize → extract → merge → detect →
+  select questions → persist-shape. The first step to carry state across HTTP calls
+  (`MissingInformationState`, one row per conversation) rather than being single-pass like Steps 1-3;
+  `buildResultFromState` reconstructs a replayed call's result from persisted state alone (never
+  re-running extraction) so a retried request can never misread its own original message as a reply
+  to a question that same message just caused to be asked.
 
 ## Observability
 

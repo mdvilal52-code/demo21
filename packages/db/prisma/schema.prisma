@@ -21,6 +21,7 @@ model Tenant {
   dateLocationExtractions  DateLocationExtraction[]
   vehicles                 Vehicle[]
   vehicleDeterminations    VehicleDetermination[]
+  missingInformationStates MissingInformationState[]
 
   @@map("tenants")
 }
@@ -40,7 +41,8 @@ model Conversation {
   createdAt   DateTime  @default(now())
   processedAt DateTime?
 
-  messages Message[]
+  messages                Message[]
+  missingInformationState MissingInformationState?
 
   @@index([tenantId])
   @@map("conversations")
@@ -53,9 +55,9 @@ model Message {
   content        String
   createdAt      DateTime     @default(now())
 
-  intentRecords            IntentRecord[]
-  dateLocationExtractions  DateLocationExtraction[]
-  vehicleDeterminations    VehicleDetermination[]
+  intentRecords           IntentRecord[]
+  dateLocationExtractions DateLocationExtraction[]
+  vehicleDeterminations   VehicleDetermination[]
 
   @@index([conversationId])
   @@map("messages")
@@ -273,4 +275,44 @@ model VehicleDetermination {
   @@index([tenantId])
   @@index([messageId])
   @@map("vehicle_determinations")
+}
+
+enum MissingInfoStatus {
+  AWAITING_CUSTOMER
+  COMPLETE
+}
+
+/// Step 4 — Ask Missing Information. Unlike IntentRecord/DateLocationExtraction/
+/// VehicleDetermination (one append-only row per message), this step is
+/// genuinely stateful across turns: exactly one mutable row per conversation
+/// (`conversationId @unique` — sufficient on its own, not composite with
+/// tenantId, since a conversation id already identifies exactly one
+/// tenant's conversation), updated in place with an optimistic `version`
+/// check on every write — never a raw entity dump, the same
+/// Zod-validated-output-verbatim convention as the other steps' JSON
+/// columns. See packages/ai/src/step4 for the engine that produces this.
+model MissingInformationState {
+  id                     String            @id @default(uuid())
+  tenantId               String
+  tenant                 Tenant            @relation(fields: [tenantId], references: [id])
+  conversationId         String            @unique
+  conversation           Conversation      @relation(fields: [conversationId], references: [id])
+  status                 MissingInfoStatus
+  answers                Json
+  askedFieldKeys         String[]
+  pendingQuestions       Json
+  corrections            Json
+  contradictions         Json
+  flags                  Json
+  turnCount              Int               @default(0)
+  version                Int               @default(0)
+  /// The message this state was last computed from — lets a retried request
+  /// against an unchanged message be recognized and skipped as a duplicate
+  /// turn instead of double-counting it.
+  lastProcessedMessageId String?
+  createdAt              DateTime          @default(now())
+  updatedAt              DateTime          @updatedAt
+
+  @@index([tenantId])
+  @@map("missing_information_states")
 }

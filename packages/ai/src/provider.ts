@@ -1,12 +1,13 @@
 import { AppError } from '@ai-concierge/domain';
 
 /**
- * Seam for a real LLM provider (Anthropic, OpenAI, …), wired up in Phase 4.
- * Phase 1's intent recognition does not use this — it runs entirely on
- * `RuleBasedIntentEngine` so there is zero network dependency and zero
- * hallucination risk while no provider is configured. This interface exists
- * now so later phases implement an adapter rather than inventing the seam
- * under deadline pressure.
+ * Seam for a real LLM provider (Anthropic, OpenAI, …) — not yet wired to any
+ * step. Phases 1-4 all turned out deterministic (`RuleBasedIntentEngine`,
+ * Step 2-4's regex/gazetteer/lexicon-based services) so there is zero
+ * network dependency and zero hallucination risk while no provider is
+ * configured. This interface exists now so whichever future phase needs a
+ * real LLM implements an adapter rather than inventing the seam under
+ * deadline pressure.
  */
 export interface AIProvider {
   readonly name: string;

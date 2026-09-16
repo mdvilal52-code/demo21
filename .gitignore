@@ -34,3 +34,6 @@ Thumbs.db
 
 # turbo
 .turbo/
+
+# local Redis snapshot (created by a plain `redis-server` in dev/sandbox use)
+*.rdb

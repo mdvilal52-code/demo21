@@ -1,5 +1,6 @@
 import {
   DateLocationExtractionOrchestrator,
+  MissingInformationEngine,
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
@@ -34,6 +35,7 @@ async function main(): Promise<void> {
   const vehicleOrchestrator = new VehicleDeterminationOrchestrator({
     catalogProvider: new PrismaVehicleCatalogProvider(prisma),
   });
+  const missingInformationEngine = new MissingInformationEngine();
 
   const ctx: AppContext = {
     config,
@@ -44,6 +46,7 @@ async function main(): Promise<void> {
     intentEngine,
     dateLocationOrchestrator,
     vehicleOrchestrator,
+    missingInformationEngine,
     observabilityStatus: observability.status,
   };
 

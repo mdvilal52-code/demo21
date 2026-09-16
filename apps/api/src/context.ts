@@ -1,6 +1,7 @@
 import type {
   DateLocationExtractionOrchestrator,
   IntentEngine,
+  MissingInformationEngine,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
 import type { PrismaClient } from '@ai-concierge/db';
@@ -18,6 +19,7 @@ export interface AppContext {
   intentEngine: IntentEngine;
   dateLocationOrchestrator: DateLocationExtractionOrchestrator;
   vehicleOrchestrator: VehicleDeterminationOrchestrator;
+  missingInformationEngine: MissingInformationEngine;
   observabilityStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
 }
 

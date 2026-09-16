@@ -1,10 +1,11 @@
 /**
- * Prompt-injection defense abstraction. The Phase 1 intent engine is
+ * Prompt-injection defense abstraction. Phases 1-4's engines are all
  * deterministic (no LLM call), so nothing here can actually be "hijacked" —
  * but every message is screened anyway so the signal exists in the audit
- * trail, and so Phase 4 (a real LLM behind the same `IntentEngine`
- * interface) inherits working detection on day one instead of bolting it on
- * under deadline pressure.
+ * trail (Step 4 surfaces it as `flags.promptInjectionDetected`), and so
+ * whichever future phase puts a real LLM behind one of these interfaces
+ * inherits working detection on day one instead of bolting it on under
+ * deadline pressure.
  */
 const INJECTION_PATTERNS: RegExp[] = [
   /ignore\s+(all\s+)?(previous|prior|above)\s+instructions?/i,

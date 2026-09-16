@@ -1,5 +1,10 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import type { IntentResult, TenantId } from '@ai-concierge/domain';
+import {
+  extractedEntitiesSchema,
+  type ExtractedEntities,
+  type IntentResult,
+  type TenantId,
+} from '@ai-concierge/domain';
 
 type Executor = PrismaClient | Prisma.TransactionClient;
 
@@ -25,4 +30,24 @@ export async function createIntentRecord(db: Executor, input: CreateIntentRecord
       modelMetadata: intentResult.modelMetadata,
     },
   });
+}
+
+/**
+ * Step 4 needs Step 1's entities regardless of *which* message in the
+ * conversation they were extracted against (Step 1 only ever runs once, on
+ * the original enquiry — later turns never re-run it) — same tenant-scoped
+ * read convention as the other steps, re-validated via Zod before it leaves
+ * this package.
+ */
+export async function findLatestIntentRecordForConversation(
+  db: Executor,
+  tenantId: TenantId,
+  conversationId: string,
+): Promise<{ entities: ExtractedEntities } | null> {
+  const row = await db.intentRecord.findFirst({
+    where: { tenantId, message: { conversationId } },
+    orderBy: { createdAt: 'desc' },
+  });
+  if (!row) return null;
+  return { entities: extractedEntitiesSchema.parse(row.entities) };
 }

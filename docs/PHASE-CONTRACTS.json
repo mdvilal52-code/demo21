@@ -1,10 +1,10 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "updatedAt": "2026-09-16",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
-  "phaseNumbering": "Phases 1-3 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle), not the original 10-phase infra grouping below. Phase ids 4-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 4-19) as work reaches them, same as phases 1-3 already turned out to differ from this document's original phase 1-3 grouping.",
+  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 5-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping. The original id-4 entry ('AI Orchestrator & Provider Abstraction') has been superseded by this reconciliation; a real LLM/AIProvider integration remains a distinct, not-yet-numbered future phase — the AIProvider seam in packages/ai/provider.ts is ready for it whenever that phase is scoped.",
   "rules": {
     "protocol": "docs/PHASE-EXECUTION-PROTOCOL.md",
     "masterPlan": "docs/MASTER-PLAN.md",
@@ -103,24 +103,24 @@
     },
     {
       "id": 4,
-      "name": "AI Orchestrator & Provider Abstraction",
-      "status": "PENDING",
-      "goal": "AI drives the journey safely — proposes, never decides.",
+      "name": "Ask Missing Information (journey Step 4)",
+      "status": "FROZEN",
+      "goal": "Take a conversation whose Steps 1-3 (intent, dates/location, vehicle) are already complete and determine only what is genuinely still missing — flight number, dropoff/hotel address, pickup time, driver requirement, special requests, contact details — asking targeted, typed questions and looping across turns until complete, never re-asking what is already known or supplied. Same AI-proposes/domain-verifies split as Steps 1-3, plus ConversationState as the piece those steps never needed: the first genuinely stateful, multi-turn journey step.",
       "deliverables": [
-        "AIProvider interface + anthropic/openai/NotConfigured adapters, env selection, timeouts, retries, cost/latency telemetry",
-        "Prompt registry (versioned per step), Zod-validated structured outputs, refusal/low-confidence handling, DLP redaction before provider calls",
-        "Step agents: intent, extraction, missing-info, alternatives, quote explanation, on-rental support, follow-up",
-        "Tool-calling with permission gates (allowed states + roles); side-effects only via workflow engine",
-        "Human escalation service: tiers 2/3/4, reasons, SLA timers, handoff context, resume",
-        "AI evaluation harness: golden conversations, recorded fixtures, deterministic offline runs, CI thresholds"
+        "packages/domain: MissingInfoFieldKey, MissingInfoStatus, AnswerSource, per-field value schemas, missingInfoAnswerSchema, pendingQuestionSchema, correctionRecordSchema, contradictionRecordSchema, missingInformationResultSchema, conversationStateSchema, MAX_MISSING_INFO_TURNS",
+        "packages/ai/step4: AnswerExtractionService (AI proposes: structured pattern extraction + anchored free-text capture, negation-aware), MissingFieldDetector (deterministic genuinely-missing verifier, Step 1-3 aware), QuestionPolicy (typed en/ar question templates, single free-text slot with required-bumps-optional), ConversationState (functional-core, immutable answer/correction/contradiction merge), MissingInformationEngine (orchestrator; processTurn + buildResultFromState for idempotent replay)",
+        "packages/db: MissingInformationState model + migration (one mutable, version-checked row per conversation), missingInformationRepository (create/find/update, optimistic concurrency), conversation-scoped Step 1-3 readers, appendMessageToConversation, findConversationWithLatestMessage",
+        "packages/contracts: missingInformation.ts (collect-missing-information params/response), conversationReply.ts (post-reply params/request/response)",
+        "apps/api: POST /v1/enquiries/:conversationId/messages (the only endpoint accepting raw customer text for an existing conversation; Idempotency-Key supported), POST /v1/enquiries/:conversationId/missing-information (Step 1-3 dependency-chain check, abuse-protection turn cap, idempotent-replay reconstruction, version-checked persistence + audit)",
+        "docs/PHASE-4.md"
       ],
       "acceptance": [
-        "journey steps 01-08 run e2e with a provider or degrade to NOT_CONFIGURED",
-        "injection suite: prompt injection cannot trigger a tool outside its allowed state",
-        "eval suite >= thresholds"
+        "every required test case passes: complete request; one missing field; multiple missing fields; contradictory answers; repeated answers; malicious input; prompt injection; PII attack; session isolation",
+        "full Phase 1 + Phase 2 + Phase 3 regression re-run and green (no working functionality broken)",
+        "all gates pass: typecheck, lint, format, 375 unit + 89 integration + 42 security tests, 4 e2e, production build — see docs/PHASE-4.md §8"
       ],
       "dependsOn": [3],
-      "phaseDoc": "docs/phases/PHASE-04.md"
+      "phaseDoc": "docs/PHASE-4.md"
     },
     {
       "id": 5,
