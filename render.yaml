@@ -1,0 +1,100 @@
+# Render Blueprint — deploys apps/api (web service) and apps/worker (background
+# worker) from this pnpm workspace monorepo, matching how they already run: a
+# persistent Fastify server (app.listen()) and a persistent BullMQ consumer,
+# neither of which fits a serverless request/response model (see PHASE-4.md /
+# ARCHITECTURE.md — this is why these two apps are not deployed to Vercel).
+#
+# Free-tier notes (see Render's own pricing/limits page for current numbers):
+#   - ai-concierge-db (Postgres, free): 1 GB, auto-expires 30 days after
+#     creation unless upgraded to a paid plan.
+#   - ai-concierge-redis (Key Value, free): 25 MB, no persistence (data is
+#     lost on restart) — fine for a BullMQ queue where jobs can be re-enqueued,
+#     not fine for anything that needs Redis as durable storage.
+#   - ai-concierge-api (web, free): spins down after 15 min with no inbound
+#     traffic; next request wakes it up (~1 min cold start).
+#   - ai-concierge-worker (background worker): Render does not offer a free
+#     plan for background workers at all, so this is on the smallest paid
+#     compute tier. Bump the `plan:` values below once this needs to behave
+#     like the "production system" CLAUDE.md describes.
+
+databases:
+  - name: ai-concierge-db
+    plan: free
+    region: oregon
+    postgresMajorVersion: '16'
+
+envVarGroups:
+  - name: ai-concierge-shared
+    envVars:
+      # Shared across api + worker so both verify/sign with the identical
+      # secret — must live in one group, not be generated per-service.
+      - key: WEBHOOK_SIGNING_SECRET
+        generateValue: true
+      # Must match a real seeded Tenant row; fill in during Blueprint setup
+      # (see the seed step in the deploy notes).
+      - key: DEFAULT_TENANT_ID
+        sync: false
+
+services:
+  - type: keyvalue
+    name: ai-concierge-redis
+    plan: free
+    region: oregon
+    ipAllowList: []
+
+  - type: web
+    name: ai-concierge-api
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @ai-concierge/api... run build
+    startCommand: node apps/api/dist/server.js
+    healthCheckPath: /health
+    envVarGroups:
+      - ai-concierge-shared
+    envVars:
+      - key: NODE_VERSION
+        value: '22'
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-concierge-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: ai-concierge-redis
+          property: connectionString
+      # Render assigns the public URL only after the first deploy; set this
+      # to that URL (dashboard -> ai-concierge-api -> the onrender.com URL).
+      - key: API_PUBLIC_URL
+        sync: false
+      # Comma-separated list of origins allowed to call this API (e.g. the
+      # deployed apps/web URL).
+      - key: CORS_ALLOWED_ORIGINS
+        sync: false
+
+  - type: worker
+    name: ai-concierge-worker
+    runtime: node
+    plan: 0.5c-512mb
+    region: oregon
+    buildCommand: corepack enable && pnpm install --frozen-lockfile && pnpm --filter @ai-concierge/worker... run build
+    startCommand: node apps/worker/dist/worker.js
+    envVarGroups:
+      - ai-concierge-shared
+    envVars:
+      - key: NODE_VERSION
+        value: '22'
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: ai-concierge-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: ai-concierge-redis
+          property: connectionString
