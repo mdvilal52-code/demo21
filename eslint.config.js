@@ -50,6 +50,20 @@ export default tseslint.config(
       'no-console': 'off',
     },
   },
+  {
+    // Plain Node scripts (not part of any workspace package's TS build,
+    // where @typescript-eslint's parser already understands Node globals).
+    files: ['scripts/**/*.mjs'],
+    languageOptions: {
+      globals: {
+        process: 'readonly',
+        console: 'readonly',
+      },
+    },
+    rules: {
+      'no-console': 'off',
+    },
+  },
   ...compat.extends('next/core-web-vitals').map((config) => ({
     ...config,
     files: ['apps/web/**/*.{ts,tsx}'],
