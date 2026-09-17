@@ -22,5 +22,11 @@ export const apiEnvSchema = baseEnvSchema.extend({
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
 
 export function loadApiEnv(source: NodeJS.ProcessEnv = process.env): ApiEnv {
-  return loadEnv(apiEnvSchema, source);
+  // Most PaaS providers (Render, Heroku, ...) assign the port to listen on
+  // via the platform-standard `PORT` variable, not our own `API_PORT`. Adopt
+  // it only when `API_PORT` wasn't set explicitly, so local/dev behavior
+  // (which never sets `PORT`) is unaffected.
+  const normalized =
+    !source.API_PORT && source.PORT ? { ...source, API_PORT: source.PORT } : source;
+  return loadEnv(apiEnvSchema, normalized);
 }
