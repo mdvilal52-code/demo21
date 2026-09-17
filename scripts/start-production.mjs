@@ -3,8 +3,10 @@
 // Service with a plain `npm start` (no Blueprint, no per-app services — see
 // render.yaml for the alternative multi-service deployment).
 //
-// Runs pending migrations, then starts three things inside this one
-// container: the Fastify API, the Next.js web UI, and the BullMQ worker.
+// Runs pending migrations and the idempotent seed (default tenant + starter
+// fleet — see packages/db/src/seed.ts), then starts three things inside
+// this one container: the Fastify API, the Next.js web UI, and the BullMQ
+// worker.
 // The API and web UI each bind to a fixed internal (loopback-only) port;
 // a small reverse proxy in front of them binds the platform-assigned
 // `PORT` and routes each request to whichever one owns that path. This is
@@ -32,6 +34,15 @@ function isApiPath(url) {
     url === '/docs' ||
     url.startsWith('/docs/')
   );
+}
+
+async function runToCompletion(name, command, args) {
+  const child = spawn(command, args, { stdio: 'inherit' });
+  const exitCode = await new Promise((resolve) => child.on('exit', resolve));
+  if (exitCode !== 0) {
+    console.error(`${name} failed with exit code ${exitCode}`);
+    process.exit(exitCode ?? 1);
+  }
 }
 
 function run(name, command, args, envOverrides = {}) {
@@ -182,16 +193,18 @@ function checkRequiredEnv() {
 async function main() {
   checkRequiredEnv();
 
-  const migrate = spawn(
-    'pnpm',
-    ['--filter', '@ai-concierge/db', 'exec', 'prisma', 'migrate', 'deploy'],
-    { stdio: 'inherit' },
-  );
-  const migrateExitCode = await new Promise((resolve) => migrate.on('exit', resolve));
-  if (migrateExitCode !== 0) {
-    console.error(`Migration failed with exit code ${migrateExitCode}`);
-    process.exit(migrateExitCode ?? 1);
-  }
+  await runToCompletion('migrate', 'pnpm', [
+    '--filter',
+    '@ai-concierge/db',
+    'exec',
+    'prisma',
+    'migrate',
+    'deploy',
+  ]);
+  // Migrations only create the schema — a brand-new database has no Tenant
+  // row yet, and DEFAULT_TENANT_ID has nothing to reference until this runs
+  // once. Idempotent (upserts), so safe on every deploy.
+  await runToCompletion('seed', 'pnpm', ['--filter', '@ai-concierge/db', 'run', 'seed']);
 
   children = [
     run('api', 'node', ['apps/api/dist/server.js'], {
