@@ -115,6 +115,44 @@ POST /v1/enquiries/:conversationId/vehicle-selection
 now with an explicit third component: `VehicleCatalogService` is the only class that touches the
 real fleet, so "never invent inventory" is enforced structurally rather than by convention.
 
+## Phase 4 scope: Ask Missing Information (journey Step 4)
+
+No new "AI proposes" step this phase — everything here reads what Steps 1-3 already resolved.
+
+```
+POST /v1/enquiries/:conversationId/missing-info
+                │
+                ▼
+  findConversationById + findLatestMessageForConversation (tenant-scoped)
+                │
+                ▼
+  fetch the message's latest IntentRecord / DateLocationExtraction /
+  VehicleDetermination in parallel (any or all may not exist yet)
+                │
+                ▼
+  MissingInfoOrchestrator.evaluate({ intent, dateLocation, vehicle,
+                                      conversationCreatedAt, now })
+                │
+                ├─ RequiredFieldsEvaluator.evaluate()
+                │      (deterministic, zero I/O: PICKUP_DATE / RETURN_DATE / PICKUP_LOCATION /
+                │       VEHICLE each present, or missing with reason NOT_PROVIDED / AMBIGUOUS /
+                │       INVALID; NOT_APPLICABLE for a non-booking intent; EXPIRED past 24h)
+                │
+                └─ buildClarificationPrompt()
+                       (deterministic template, one combined question — only when NEEDS_INFO)
+                │
+                ▼
+  one Prisma transaction: create MissingInfoCheck + write AuditEvent
+                │
+                ▼
+  201 { conversationId, messageId, missingInfo }
+```
+
+**Reads verified state, never re-parses raw text** — Steps 1-3 already did the work of turning
+customer text into trusted, deterministically-verified fields; Step 4's only job is to look at what
+exists (or doesn't) across all three and decide what's still needed, so it cannot itself introduce a
+hallucinated value.
+
 ## Monorepo layout
 
 ```
@@ -127,7 +165,8 @@ packages/
   ai/             RuleBasedIntentEngine; Step 2: DateExtractionService, LocationExtractionService,
                   TemporalValidationService, DateLocationExtractionOrchestrator, Dubai/UAE gazetteer;
                   Step 3: VehicleIntentService, VehicleCatalogService, VehicleValidationService,
-                  VehicleDeterminationOrchestrator
+                  VehicleDeterminationOrchestrator; Step 4: RequiredFieldsEvaluator,
+                  clarificationPromptBuilder, MissingInfoOrchestrator
   security/       secure headers, CORS allowlist, SSRF-safe fetch, webhook HMAC, CSRF primitive,
                   resilience primitives (timeout, circuit breaker, rate limiter)
   observability/  pino logger (with redaction), request correlation (AsyncLocalStorage), OTel bootstrap
@@ -147,14 +186,14 @@ imports, use `tsc --noEmit` for typecheck since they don't need to emit for anyo
 ## Data model
 
 `Tenant`, `Conversation`, `Message`, `IntentRecord`, `AuditEvent`, `IdempotencyKey` (Phase 1),
-`DateLocationExtraction` (Phase 2), `Vehicle` and `VehicleDetermination` (Phase 3) — see
-`packages/db/prisma/schema.prisma`. Every business table carries `tenantId`; every repository
-function takes `tenantId` explicitly and filters by it (`findFirst`/`updateMany` with `tenantId` in
-the WHERE clause). This is the **application-level** half of tenant isolation. Database-level Row
-Level Security is still not implemented — see Known Limitations in `docs/phases/PHASE-01.md`,
-`docs/PHASE-2.md` and `docs/PHASE-3.md`. `Vehicle` additionally supports soft deletion
-(`deletedAt`) — every repository query excludes soft-deleted rows, and nothing in the codebase
-issues a hard `DELETE` on that table.
+`DateLocationExtraction` (Phase 2), `Vehicle` and `VehicleDetermination` (Phase 3),
+`MissingInfoCheck` (Phase 4) — see `packages/db/prisma/schema.prisma`. Every business table carries
+`tenantId`; every repository function takes `tenantId` explicitly and filters by it
+(`findFirst`/`updateMany` with `tenantId` in the WHERE clause). This is the **application-level**
+half of tenant isolation. Database-level Row Level Security is still not implemented — see Known
+Limitations in `docs/phases/PHASE-01.md`, `docs/PHASE-2.md`, `docs/PHASE-3.md` and
+`docs/PHASE-4.md`. `Vehicle` additionally supports soft deletion (`deletedAt`) — every repository
+query excludes soft-deleted rows, and nothing in the codebase issues a hard `DELETE` on that table.
 
 ## Security posture (Phase 1)
 
@@ -180,6 +219,8 @@ issues a hard `DELETE` on that table.
 | Timeouts / circuit breaker / rate limit | `packages/security/resilience.ts` — generic primitives, applied to the location provider seam (`ResilientLocationProvider`) even though the current provider doesn't need them, so the safety net is exercised now                                       |
 | Never invent inventory                  | `VehicleCatalogProvider` interface (`packages/ai/step3`) — the matching lexicon and every resolved/alternative vehicle always come from the tenant's real `Vehicle` rows; proven with a prompt-injection payload asking for a vehicle that doesn't exist |
 | Vehicle catalog constraints             | `@@unique([tenantId, make, model])`, soft delete (`deletedAt`, never a hard `DELETE`), tenant-scoped repository functions, `AppError('CONFLICT', ...)` on a duplicate identity instead of a raw driver error                                             |
+| Never re-derives from raw text          | `RequiredFieldsEvaluator` (`packages/ai/step4`) only ever reads Steps 1-3's already-verified output; it has no code path that could itself hallucinate a date, location, or vehicle                                                                      |
+| Injection visibility carried forward    | Step 4 aggregates each earlier step's own `promptInjectionDetected` flag into one `flags.promptInjectionDetectedAnywhere` rather than re-sanitizing (there is no new raw text to sanitize)                                                               |
 
 ## AI Intent Engine
 
@@ -245,6 +286,25 @@ implements an adapter rather than inventing the boundary under deadline pressure
   `VEHICLE_INACTIVE`), `availabilityStatus` (a real, active entry temporarily down —
   `VEHICLE_UNAVAILABLE`, a catalog-level flag only, not a date-range booking calendar; that's journey
   Step 6, a distinct later phase).
+
+## Step 4 — Ask Missing Information
+
+- **`RequiredFieldsEvaluator`** — pure, zero-I/O. Checks four required fields (`PICKUP_DATE`,
+  `RETURN_DATE`, `PICKUP_LOCATION`, `VEHICLE` — matching Phase 1's own `BOOKING_REQUIRED_FIELDS`,
+  now backed by Steps 2-3's real verified values instead of Phase 1's keyword-evidence check)
+  against narrow `IntentSnapshot`/`DateLocationSnapshot`/`VehicleSnapshot` inputs. A missing field
+  carries one of three reasons: `NOT_PROVIDED` (the step never ran, or found nothing),
+  `AMBIGUOUS` (the step flagged an ambiguity), `INVALID` (the step rejected a resolved value, e.g.
+  `PAST_DATE` or `VEHICLE_INACTIVE`). A non-`BOOKING_REQUEST` intent short-circuits to
+  `NOT_APPLICABLE`; an incomplete conversation past the 24h window is `EXPIRED` instead of
+  `NEEDS_INFO`. `dropoffLocation` is read into `collected` for transparency but is never required.
+- **`buildClarificationPrompt`** — deterministic, template-based (no LLM call): one combined,
+  Oxford-comma-joined question covering every current gap, so a single customer reply can address
+  all of them rather than being asked one question at a time.
+- **`MissingInfoOrchestrator`** — wires the two together; fully synchronous (no I/O of its own — the
+  three snapshots are fetched by the API service layer and handed in already resolved), computes
+  `expiresAt` (`conversationCreatedAt` + `MISSING_INFO_TIMEOUT_HOURS`), and is the only place a
+  `MissingInfoResult` is constructed and Zod-validated.
 
 ## Observability
 

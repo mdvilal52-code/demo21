@@ -1,10 +1,10 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.3.0",
-  "updatedAt": "2026-09-16",
+  "version": "0.4.0",
+  "updatedAt": "2026-09-17",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
-  "phaseNumbering": "Phases 1-3 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle), not the original 10-phase infra grouping below. Phase ids 4-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 4-19) as work reaches them, same as phases 1-3 already turned out to differ from this document's original phase 1-3 grouping.",
+  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 5-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping.",
   "rules": {
     "protocol": "docs/PHASE-EXECUTION-PROTOCOL.md",
     "masterPlan": "docs/MASTER-PLAN.md",
@@ -103,24 +103,24 @@
     },
     {
       "id": 4,
-      "name": "AI Orchestrator & Provider Abstraction",
-      "status": "PENDING",
-      "goal": "AI drives the journey safely — proposes, never decides.",
+      "name": "Ask Missing Information (journey Step 4)",
+      "status": "FROZEN",
+      "goal": "Given a conversation, read whatever Steps 1-3 already resolved and verified (never raw text re-parsed) and deterministically decide what's still needed before the booking can proceed, generating one combined clarification question when something is missing.",
       "deliverables": [
-        "AIProvider interface + anthropic/openai/NotConfigured adapters, env selection, timeouts, retries, cost/latency telemetry",
-        "Prompt registry (versioned per step), Zod-validated structured outputs, refusal/low-confidence handling, DLP redaction before provider calls",
-        "Step agents: intent, extraction, missing-info, alternatives, quote explanation, on-rental support, follow-up",
-        "Tool-calling with permission gates (allowed states + roles); side-effects only via workflow engine",
-        "Human escalation service: tiers 2/3/4, reasons, SLA timers, handoff context, resume",
-        "AI evaluation harness: golden conversations, recorded fixtures, deterministic offline runs, CI thresholds"
+        "packages/domain: RequiredField, MissingFieldReason, MissingInfoStatus, MISSING_INFO_TIMEOUT_HOURS, missingFieldSchema, collectedBookingInfoSchema, missingInfoResultSchema",
+        "packages/ai/step4: RequiredFieldsEvaluator (pure, zero I/O; narrow IntentSnapshot/DateLocationSnapshot/VehicleSnapshot inputs; COMPLETE/NEEDS_INFO/EXPIRED/NOT_APPLICABLE + NOT_PROVIDED/AMBIGUOUS/INVALID reasons), clarificationPromptBuilder (deterministic, template-based, Oxford-comma joined), MissingInfoOrchestrator",
+        "packages/db: MissingInfoCheck model + migration, missingInfoCheckRepository, findLatestIntentRecordForMessage added to intentRepository, findLatestVehicleDeterminationForMessage now includes the resolved vehicle relation",
+        "packages/contracts: checkMissingInfoParamsSchema / checkMissingInfoResponseSchema",
+        "apps/api: POST /v1/enquiries/:conversationId/missing-info (missingInfoService.ts + routes/v1/missingInfo.ts)",
+        "docs/PHASE-4.md"
       ],
       "acceptance": [
-        "journey steps 01-08 run e2e with a provider or degrade to NOT_CONFIGURED",
-        "injection suite: prompt injection cannot trigger a tool outside its allowed state",
-        "eval suite >= thresholds"
+        "every scenario passes: all four fields resolved (COMPLETE); a step never run (NOT_PROVIDED); an ambiguous Step 2/3 result (AMBIGUOUS); a rejected Step 2/3 result e.g. past date or inactive vehicle (INVALID); still incomplete past 24h (EXPIRED); a non-booking intent (NOT_APPLICABLE); prompt-injection flag aggregation; tenant isolation",
+        "full Phase 1-3 regression re-run and green (no working functionality broken)",
+        "all gates pass: typecheck, lint, format, 302 unit + 64 integration + 37 security tests, 4 e2e, production build — see docs/PHASE-4.md §8"
       ],
       "dependsOn": [3],
-      "phaseDoc": "docs/phases/PHASE-04.md"
+      "phaseDoc": "docs/PHASE-4.md"
     },
     {
       "id": 5,

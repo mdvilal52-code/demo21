@@ -1,5 +1,6 @@
 import {
   DateLocationExtractionOrchestrator,
+  MissingInfoOrchestrator,
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
@@ -64,6 +65,7 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
     vehicleOrchestrator: new VehicleDeterminationOrchestrator({
       catalogProvider: new PrismaVehicleCatalogProvider(prisma),
     }),
+    missingInfoOrchestrator: new MissingInfoOrchestrator(),
     observabilityStatus: 'NOT_CONFIGURED',
   };
 

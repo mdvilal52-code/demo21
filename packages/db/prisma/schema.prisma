@@ -21,6 +21,7 @@ model Tenant {
   dateLocationExtractions  DateLocationExtraction[]
   vehicles                 Vehicle[]
   vehicleDeterminations    VehicleDetermination[]
+  missingInfoChecks        MissingInfoCheck[]
 
   @@map("tenants")
 }
@@ -56,6 +57,7 @@ model Message {
   intentRecords            IntentRecord[]
   dateLocationExtractions  DateLocationExtraction[]
   vehicleDeterminations    VehicleDetermination[]
+  missingInfoChecks        MissingInfoCheck[]
 
   @@index([conversationId])
   @@map("messages")
@@ -273,4 +275,35 @@ model VehicleDetermination {
   @@index([tenantId])
   @@index([messageId])
   @@map("vehicle_determinations")
+}
+
+enum MissingInfoStatus {
+  COMPLETE
+  NEEDS_INFO
+  EXPIRED
+  NOT_APPLICABLE
+}
+
+/// Step 4 — Ask Missing Information. One row per completeness check against
+/// a message — same append-only-history convention as IntentRecord/
+/// DateLocationExtraction/VehicleDetermination. Reads what Steps 1-3 already
+/// resolved; never re-parses raw text.
+model MissingInfoCheck {
+  id                  String            @id @default(uuid())
+  tenantId            String
+  tenant              Tenant            @relation(fields: [tenantId], references: [id])
+  messageId           String
+  message             Message           @relation(fields: [messageId], references: [id])
+  status              MissingInfoStatus
+  collected           Json
+  missingFields       Json
+  clarificationPrompt String?
+  expiresAt           DateTime
+  flags               Json
+  modelMetadata       Json
+  createdAt           DateTime          @default(now())
+
+  @@index([tenantId])
+  @@index([messageId])
+  @@map("missing_info_checks")
 }

@@ -26,3 +26,8 @@ export * from './step3/vehicleIntentService.js';
 export * from './step3/vehicleCatalogService.js';
 export * from './step3/vehicleValidationService.js';
 export * from './step3/orchestrator.js';
+
+// Step 4 — Ask Missing Information
+export * from './step4/requiredFieldsEvaluator.js';
+export * from './step4/clarificationPromptBuilder.js';
+export * from './step4/orchestrator.js';

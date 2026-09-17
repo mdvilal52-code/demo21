@@ -26,3 +26,15 @@ export async function createIntentRecord(db: Executor, input: CreateIntentRecord
     },
   });
 }
+
+/** Tenant-scoped read — same isolation convention as the other repositories. */
+export async function findLatestIntentRecordForMessage(
+  db: Executor,
+  tenantId: TenantId,
+  messageId: string,
+) {
+  return db.intentRecord.findFirst({
+    where: { tenantId, messageId },
+    orderBy: { createdAt: 'desc' },
+  });
+}

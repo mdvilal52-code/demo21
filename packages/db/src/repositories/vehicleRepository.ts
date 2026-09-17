@@ -16,7 +16,7 @@ type Executor = PrismaClient | Prisma.TransactionClient;
  * change, the same "never trust it just because it's our own DB" posture
  * applied to reads.
  */
-function toDomainVehicle(row: PrismaVehicle): Vehicle {
+export function toDomainVehicle(row: PrismaVehicle): Vehicle {
   return vehicleSchema.parse({
     id: row.id,
     make: row.make,

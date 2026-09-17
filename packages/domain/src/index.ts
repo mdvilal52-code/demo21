@@ -6,3 +6,4 @@ export * from './intent.js';
 export * from './conversation.js';
 export * from './temporal.js';
 export * from './vehicle.js';
+export * from './missingInfo.js';

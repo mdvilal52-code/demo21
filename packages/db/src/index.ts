@@ -6,3 +6,4 @@ export * from './repositories/idempotencyRepository.js';
 export * from './repositories/dateLocationExtractionRepository.js';
 export * from './repositories/vehicleRepository.js';
 export * from './repositories/vehicleDeterminationRepository.js';
+export * from './repositories/missingInfoCheckRepository.js';

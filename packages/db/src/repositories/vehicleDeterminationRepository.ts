@@ -30,7 +30,12 @@ export async function createVehicleDetermination(
   });
 }
 
-/** Tenant-scoped read — same isolation convention as the other repositories. */
+/**
+ * Tenant-scoped read — same isolation convention as the other repositories.
+ * Includes the related `resolvedVehicle` row (map via `toDomainVehicle` from
+ * `vehicleRepository.ts` when the caller needs the public domain shape, e.g.
+ * Step 4's completeness check) rather than just the bare `resolvedVehicleId`.
+ */
 export async function findLatestVehicleDeterminationForMessage(
   db: Executor,
   tenantId: TenantId,
@@ -39,5 +44,6 @@ export async function findLatestVehicleDeterminationForMessage(
   return db.vehicleDetermination.findFirst({
     where: { tenantId, messageId },
     orderBy: { createdAt: 'desc' },
+    include: { resolvedVehicle: true },
   });
 }
