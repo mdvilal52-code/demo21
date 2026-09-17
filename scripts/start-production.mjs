@@ -146,13 +146,35 @@ const REQUIRED_ENV_VARS = [
   'DEFAULT_TENANT_ID',
 ];
 
+// Mirrors the format rules in packages/config/src/env.ts's baseEnvSchema
+// (kept intentionally minimal — this is a fast pre-flight check, not a
+// replacement for that schema, which still runs for real inside api/worker).
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 function checkRequiredEnv() {
-  const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
-  if (missing.length > 0) {
-    console.error(
-      `Missing required environment variable(s): ${missing.join(', ')}\n` +
-        'Set these on the service in the Render dashboard (Environment tab) — see .env.example for what each one looks like.',
+  const problems = [];
+  for (const key of REQUIRED_ENV_VARS) {
+    if (!process.env[key]) problems.push(`${key}: not set`);
+  }
+  if (process.env.DATABASE_URL && !/^postgres(ql)?:\/\//.test(process.env.DATABASE_URL)) {
+    problems.push(`DATABASE_URL: must start with postgres:// or postgresql://`);
+  }
+  if (process.env.REDIS_URL && !/^rediss?:\/\//.test(process.env.REDIS_URL)) {
+    problems.push(`REDIS_URL: must start with redis:// or rediss://`);
+  }
+  if (process.env.WEBHOOK_SIGNING_SECRET && process.env.WEBHOOK_SIGNING_SECRET.length < 16) {
+    problems.push('WEBHOOK_SIGNING_SECRET: must be at least 16 characters');
+  }
+  if (process.env.DEFAULT_TENANT_ID && !UUID_RE.test(process.env.DEFAULT_TENANT_ID)) {
+    problems.push(
+      `DEFAULT_TENANT_ID: must be a UUID, e.g. 00000000-0000-0000-0000-000000000001 ` +
+        `(got "${process.env.DEFAULT_TENANT_ID}")`,
     );
+  }
+  if (problems.length > 0) {
+    console.error('Environment configuration problem(s):');
+    for (const problem of problems) console.error(`  - ${problem}`);
+    console.error('Fix these on the service in the Render dashboard (Environment tab).');
     process.exit(1);
   }
 }
