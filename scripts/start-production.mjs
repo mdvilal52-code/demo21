@@ -134,7 +134,32 @@ function shutdown(exitCode = 0) {
   ).then(() => process.exit(exitCode));
 }
 
+// Everything apps/api and apps/worker require with no default (see
+// packages/config/src/env.ts's baseEnvSchema) — checked up front so a
+// missing-config deploy fails once, with every gap listed, instead of
+// dying on whichever check happens to run first (Prisma's own DATABASE_URL
+// lookup) and rediscovering the next one a full deploy cycle later.
+const REQUIRED_ENV_VARS = [
+  'DATABASE_URL',
+  'REDIS_URL',
+  'WEBHOOK_SIGNING_SECRET',
+  'DEFAULT_TENANT_ID',
+];
+
+function checkRequiredEnv() {
+  const missing = REQUIRED_ENV_VARS.filter((key) => !process.env[key]);
+  if (missing.length > 0) {
+    console.error(
+      `Missing required environment variable(s): ${missing.join(', ')}\n` +
+        'Set these on the service in the Render dashboard (Environment tab) — see .env.example for what each one looks like.',
+    );
+    process.exit(1);
+  }
+}
+
 async function main() {
+  checkRequiredEnv();
+
   const migrate = spawn(
     'pnpm',
     ['--filter', '@ai-concierge/db', 'exec', 'prisma', 'migrate', 'deploy'],
