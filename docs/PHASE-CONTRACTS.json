@@ -1,8 +1,8 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.4.0",
-  "updatedAt": "2026-09-17",
+  "version": "0.5.0",
+  "updatedAt": "2026-09-19",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
   "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 5-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping.",
   "rules": {
@@ -125,21 +125,22 @@
     {
       "id": 5,
       "name": "Channels, Documents, Payments, CRM & Fulfilment",
-      "status": "PENDING",
+      "status": "IN_PROGRESS",
       "goal": "Every external touchpoint behind a clean interface; full 19-step journey runnable.",
+      "progressNote": "First slice delivered (docs/PHASE-5.md): a real WhatsApp (Meta Cloud API) inbound/outbound adapter with signature verification, plus runFullEnquiryPipeline, a fixed hardcoded sequence that runs Steps 1-4 automatically for one inbound message and replies over WhatsApp with whatever Step 4 determined. This is NOT the real Event/Workflow Engine (no persisted state, no multi-message journey resumption) and does NOT cover the rest of this phase's deliverables below (Web chat/Email adapters, documents, payments, CRM, delivery/return) — those remain PENDING.",
       "deliverables": [
-        "Gateway inbound model; WhatsApp (Meta Cloud API + signature verify), Web chat (REST + SSE), Email (inbound webhook + outbound); templates, rate limits, receipts; NOT_CONFIGURED per adapter",
-        "Document pipeline: presigned S3 uploads, MIME/size validation, AV-scan interface, extraction interface, checklist, T2 review queue",
-        "PaymentProvider interface + instructions + webhook reconciliation + refunds; NOT_CONFIGURED -> explicit manual path flagged in admin",
-        "CRM adapter (internal default), delivery/return coordination (slots, assignment, checklists, photos), invoice PDF, follow-up scheduler"
+        "Gateway inbound model; WhatsApp (Meta Cloud API + signature verify) [DONE — docs/PHASE-5.md], Web chat (REST + SSE) [PENDING], Email (inbound webhook + outbound) [PENDING]; templates, rate limits, receipts; NOT_CONFIGURED per adapter",
+        "Document pipeline: presigned S3 uploads, MIME/size validation, AV-scan interface, extraction interface, checklist, T2 review queue [PENDING]",
+        "PaymentProvider interface + instructions + webhook reconciliation + refunds; NOT_CONFIGURED -> explicit manual path flagged in admin [PENDING]",
+        "CRM adapter (internal default), delivery/return coordination (slots, assignment, checklists, photos), invoice PDF, follow-up scheduler [PENDING]"
       ],
       "acceptance": [
         "full journey 01-19 passes e2e with test doubles inside tests only",
         "production wiring shows real provider status per adapter in admin Settings",
-        "webhook signature + replay tests"
+        "webhook signature + replay tests [DONE for WhatsApp — docs/PHASE-5.md §7-8]"
       ],
       "dependsOn": [4],
-      "phaseDoc": "docs/phases/PHASE-05.md"
+      "phaseDoc": "docs/PHASE-5.md"
     },
     {
       "id": 6,

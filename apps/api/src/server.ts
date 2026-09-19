@@ -4,6 +4,7 @@ import {
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
+import { MetaWhatsAppProvider, NotConfiguredWhatsAppProvider } from '@ai-concierge/channels';
 import { createPrismaClient } from '@ai-concierge/db';
 import { createLogger, bootstrapObservability } from '@ai-concierge/observability';
 import { buildApp } from './app.js';
@@ -36,6 +37,14 @@ async function main(): Promise<void> {
     catalogProvider: new PrismaVehicleCatalogProvider(prisma),
   });
   const missingInfoOrchestrator = new MissingInfoOrchestrator();
+  const whatsappProvider =
+    config.WHATSAPP_ACCESS_TOKEN && config.WHATSAPP_PHONE_NUMBER_ID
+      ? new MetaWhatsAppProvider({
+          accessToken: config.WHATSAPP_ACCESS_TOKEN,
+          phoneNumberId: config.WHATSAPP_PHONE_NUMBER_ID,
+          apiVersion: config.WHATSAPP_API_VERSION,
+        })
+      : new NotConfiguredWhatsAppProvider();
 
   const ctx: AppContext = {
     config,
@@ -47,6 +56,7 @@ async function main(): Promise<void> {
     dateLocationOrchestrator,
     vehicleOrchestrator,
     missingInfoOrchestrator,
+    whatsappProvider,
     observabilityStatus: observability.status,
   };
 

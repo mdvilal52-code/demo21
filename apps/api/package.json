@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@ai-concierge/ai": "workspace:*",
+    "@ai-concierge/channels": "workspace:*",
     "@ai-concierge/config": "workspace:*",
     "@ai-concierge/contracts": "workspace:*",
     "@ai-concierge/db": "workspace:*",

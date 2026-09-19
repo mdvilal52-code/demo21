@@ -1,0 +1,275 @@
+# Phase 5 (in progress) — WhatsApp Channel + Automated Step 1-4 Pipeline
+
+Status: **IN_PROGRESS** (first slice of `PHASE-CONTRACTS.json` id 5,
+"Channels, Documents, Payments, CRM & Fulfilment" — not FROZEN; see §2 for exactly what is and
+isn't in this slice)
+
+## 1. Pre-flight
+
+- Read `docs/PHASE-EXECUTION-PROTOCOL.md`, `docs/PHASE-CONTRACTS.json`, `docs/MASTER-PLAN.md`.
+- Read `docs/PHASE-4.md` (previous phase) and its §13 forward contract, which named journey Step 5
+  (Eligibility) as the "correct" next journey step per the numbering Phases 1-4 actually followed,
+  while flagging that `PHASE-CONTRACTS.json`'s own phase-id-5 entry is still the original 10-phase
+  placeholder ("Channels, Documents, Payments, CRM & Fulfilment"), not yet reconciled.
+- This phase was explicitly requested out of that order: the user asked for a working WhatsApp
+  demo of Steps 1-4 before Eligibility (Step 5) exists. Scoped narrowly to exactly that (WhatsApp
+  inbound/outbound + automatic Step 1-4 orchestration), not the full original phase-id-5 deliverable
+  list — see §2.
+- Inspected the repository; local PostgreSQL 16 + Redis 7 confirmed reachable; ran the existing
+  Phase 1-4 suite before changing anything (407-test baseline green).
+
+## 2. Scope
+
+Goal: a customer can message a real WhatsApp number, and Steps 1-4 (already frozen, unchanged)
+run automatically against that one message, replying over WhatsApp with whatever Step 4 actually
+determined — a clarification question, or an acknowledgement once nothing is missing.
+
+**In scope (built this phase):**
+
+- Real WhatsApp (Meta Cloud API) inbound webhook: verification handshake, signature verification,
+  message parsing.
+- Real WhatsApp outbound send (`MetaWhatsAppProvider`), with an explicit `NotConfiguredWhatsAppProvider`
+  when no credentials are set — never a fake send.
+- `runFullEnquiryPipeline`: a fixed, hardcoded sequence that calls Steps 1-4's own already-tested
+  service functions in order for one message. This is **not** the real Event/Workflow Engine
+  (MASTER-PLAN.md's persisted journey state machine) — it is a single-message convenience sequence
+  with no state machine, no resumability across multiple customer replies, and no support for the
+  15 journey steps after Step 4.
+- A deterministic, template-based WhatsApp reply builder (never an LLM call).
+
+**Out of scope (deferred, still PENDING):**
+
+- Web chat (SSE) and Email adapters — `PHASE-CONTRACTS.json` id 5's other channel deliverables.
+- Document pipeline, `PaymentProvider`, CRM adapter, delivery/return coordination, invoice PDF,
+  follow-up scheduler — the rest of id 5's deliverable list.
+- Journey Step 5 (Eligibility) and everything after it.
+- The real Event/Workflow Engine (persisted state machine, retries, timeouts, saga compensation) —
+  still not built; unchanged from every prior phase's notes.
+- A real conversational loop: this phase processes one inbound message as one fresh enquiry. If a
+  customer replies again on WhatsApp with the missing details, that reply currently starts a
+  **new** conversation (Step 1 always creates one) rather than being matched back to the original —
+  closing that gap requires the Event/Workflow Engine's journey-resumption, not a channel adapter.
+
+## 3. Design decisions
+
+- **Channel-agnostic pipeline, channel-specific adapter.** `runFullEnquiryPipeline`
+  (`apps/api/src/services/enquiryPipelineService.ts`) takes `{ tenantId, channel, customerRef,
+message }` and calls `submitEnquiry` → `extractDatesAndLocation` → `determineVehicle` →
+  `checkMissingInfo` — the exact same four functions each REST endpoint already calls. Nothing in
+  this phase re-implements Steps 1-4's logic; a future Web chat or Email adapter reuses the same
+  pipeline function.
+- **Every inbound WhatsApp message is a new enquiry, not a continued conversation.** Given the
+  Event/Workflow Engine doesn't exist yet, there is no mechanism to resolve "which existing
+  conversation is this reply for". Documented as a known limitation (§9) rather than built around
+  with something ad hoc (e.g. guessing by phone number + recency), which would be exactly the kind
+  of state-machine logic that phase is supposed to own.
+- **A result object, not a thrown error, for outbound sends.** `WhatsAppProvider.sendTextMessage`
+  returns `{ status: 'SENT' | 'NOT_CONFIGURED' | 'FAILED', ... }` rather than throwing. A failed or
+  absent outbound send must never fail the inbound webhook ack Meta is waiting on; every branch is
+  explicit and audited, never a fake `SENT`.
+- **The Graph API host is hardcoded, not config-driven.** `MetaWhatsAppProvider` calls exactly
+  `graph.facebook.com` via `ssrfSafeFetch`, independent of the generic `OUTBOUND_ALLOWED_HOSTS` env
+  var — least privilege: this provider can reach exactly one third-party host, ever.
+- **Signature verification runs against the raw request body**, captured by a Fastify content-type
+  parser scoped to only the `/webhooks/whatsapp` routes (Fastify's plugin encapsulation leaves
+  every other route's default JSON parsing untouched). The POST route deliberately has no `body`
+  schema — shape validation happens manually, after signature verification, never before.
+- **Claim-before-work idempotency, not check-then-act.** The pipeline plus an outbound HTTP call
+  can take seconds; Meta redelivers a webhook that hasn't answered fast enough. An initial design
+  (`find` the idempotency key, run everything, `save` it at the end) left a wide window for two
+  concurrent deliveries to both run the pipeline and both send a reply — caught by this phase's own
+  `/code-review` gate (see §5) before it shipped. Fixed with `claimIdempotencyKey` (an atomic
+  insert — two racing requests can't both win it), `completeIdempotencyKey` on success, and
+  `releaseIdempotencyKeyClaim` on failure so a genuine retry isn't stuck behind a claim that will
+  never complete. Proven with a truly concurrent (`Promise.all`) redelivery test, not just a
+  sequential one.
+- **Exact-64-hex-character signature check.** Node's `Buffer.from(str, 'hex')` silently stops
+  decoding at the first invalid character rather than rejecting the string, so a well-formed
+  64-character signature with trailing garbage appended would otherwise still decode to the
+  correct 32 bytes and pass comparison. Not itself a forgery path (an attacker would already need
+  the real signature to build such a string), but closed outright rather than left as a curiosity —
+  found by this phase's own security tests.
+- **Phase 1's intent lexicon is unchanged.** The exact phrase used in the original request for this
+  phase — "Hi I wants Lamborghini Urus 15-19 Oct, Dubai" — contains no keyword from
+  `BOOKING_REQUEST`'s list (`book`, `rent`, `reserve`, `hire`, `reservation`, or the exact phrases
+  "i need a car"/"i want a car") and so classifies as a non-booking intent (`NOT_APPLICABLE` at
+  Step 4), not a bug introduced here. Broadening Phase 1's frozen, already-tested lexicon (e.g. so
+  naming a specific vehicle also counts as booking evidence) is a real, reasonable product
+  improvement, but a keyword-scored classifier can have non-obvious ripple effects on _other_
+  intents' classification — exactly the kind of change `docs/PHASE-EXECUTION-PROTOCOL.md`'s "do
+  only the current phase" / "preserve backward compatibility" rules guard against making casually.
+  Left untouched; flagged for the user to decide. This phase's own tests and demo instructions use
+  an explicit verb ("I want to **rent** a Lamborghini Urus..."), matching the phrasing the existing
+  Phase 1-4 test suite already uses throughout.
+
+## 4. What was built
+
+- `packages/channels` (new package) — `src/whatsapp/types.ts` (tolerant Zod schema for Meta's
+  webhook envelope), `inboundParser.ts` (`parseWhatsAppTextMessages`), `signature.ts`
+  (`verifyMetaSignature`), `provider.ts` (`WhatsAppProvider`, `NotConfiguredWhatsAppProvider`,
+  `MetaWhatsAppProvider`), `replyBuilder.ts` (`buildWhatsAppReplyText`).
+- `apps/api/src/services/enquiryPipelineService.ts` — `runFullEnquiryPipeline`.
+- `apps/api/src/routes/webhooks/whatsapp.ts` — `GET /webhooks/whatsapp` (verification handshake),
+  `POST /webhooks/whatsapp` (inbound message processing).
+- `packages/db/src/repositories/idempotencyRepository.ts` — additive: `claimIdempotencyKey`,
+  `completeIdempotencyKey`, `releaseIdempotencyKeyClaim` (existing `findIdempotencyKey`/
+  `saveIdempotencyKey`, used by Step 1's own endpoint, unchanged).
+- `packages/contracts/src/whatsapp.ts` — `whatsappVerifyQuerySchema`,
+  `whatsappInboundAckResponseSchema`.
+- `apps/api/src/env.ts` — `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_APP_SECRET`, `WHATSAPP_ACCESS_TOKEN`,
+  `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_API_VERSION` (all optional; unset ⇒ `NOT_CONFIGURED`).
+- `apps/api/src/context.ts`, `server.ts`, `app.ts` — `whatsappProvider` wired into `AppContext`;
+  new route registered.
+- `.env.example`, `render.yaml` — new WhatsApp variables documented, with where each one comes from
+  in the Meta dashboard.
+
+No Prisma migration — `IdempotencyKey` (Phase 1) is reused as-is; no schema change.
+
+## 5. APIs
+
+| Method | Path                 | Purpose                                                                               |
+| ------ | -------------------- | ------------------------------------------------------------------------------------- |
+| GET    | `/webhooks/whatsapp` | Meta's webhook verification handshake (`hub.mode`/`hub.verify_token`/`hub.challenge`) |
+| POST   | `/webhooks/whatsapp` | Inbound WhatsApp message(s); runs Steps 1-4 and replies over WhatsApp                 |
+
+Request/response schemas: `packages/contracts/src/whatsapp.ts`; live in the OpenAPI doc at `/docs`.
+
+## 6. Database schema
+
+No new tables or migrations. `IdempotencyKey` (Phase 1, `packages/db/prisma/schema.prisma`) gained
+three additive repository functions in `idempotencyRepository.ts` (claim/complete/release) — the
+table shape is unchanged; a claimed-but-not-yet-completed row is simply one with
+`responseStatus: 0, responseBody: {}` until `completeIdempotencyKey` fills in the real outcome.
+
+## 7. Security decisions
+
+**Implemented and tested:**
+
+- **Webhook authenticity.** `X-Hub-Signature-256` verified against the raw request body (captured
+  before JSON parsing) with a constant-time compare; exact-64-hex-character check (see §3);
+  missing/wrong secret is `501 NOT_CONFIGURED` / `401 UNAUTHORIZED`, never processed.
+- **Never trusts the webhook payload's shape.** `parseWhatsAppTextMessages` tolerates missing
+  fields, wrong types, delivery-status callbacks, and non-text message types — proven with
+  prototype-pollution-shaped keys, wrong-typed `entry`/`changes`/`messages`, and malformed JSON,
+  none of which throw or crash the process.
+- **Idempotent by Meta's own message id**, claimed atomically before any work starts (see §3);
+  proven with a genuinely concurrent redelivery, not just a sequential one.
+- **Outbound egress restricted to exactly one host** (`graph.facebook.com`), via `ssrfSafeFetch`,
+  independent of the generic outbound allowlist.
+- **Never a fake send.** `NotConfiguredWhatsAppProvider`/a Graph API error both return an explicit,
+  audited, non-`SENT` status — the webhook still acks 200 (Meta's requirement), but nothing claims
+  a message went out that didn't.
+- **Prompt-injection / SQL-injection visibility carried through unchanged** — the WhatsApp message
+  body flows into the exact same `submitEnquiry` → `RuleBasedIntentEngine.recognize` path Step 1
+  already sanitizes and audits; proven end to end with both payload types reaching the webhook.
+- **Audit event on every reply** (`whatsapp.reply_sent`) in addition to each reused step's own
+  existing audit events.
+- **Zod-validated at every new boundary** — the Meta webhook envelope, the verification
+  querystring, the ack response.
+
+**Explicitly deferred (documented, not silently skipped):**
+
+- Database-level Row Level Security — still application-level only, unchanged from Phases 1-4.
+- A real conversational loop / journey resumption (§2) — Event/Workflow Engine scope.
+- Rate limiting specific to the webhook path beyond the API-wide `@fastify/rate-limit` — Meta's own
+  retry/backoff behavior is trusted for now; a dedicated per-sender limit is Phase 6 (Security
+  Engine & Zero Trust) scope.
+
+## 8. Test results
+
+All commands run against real local PostgreSQL 16 + Redis 7 (same sandbox as Phases 1-4; Docker
+daemon still unavailable here).
+
+| Gate                | Command                        | Result                                                              |
+| ------------------- | ------------------------------ | ------------------------------------------------------------------- |
+| Typecheck           | `pnpm typecheck`               | ✅ 12/12 packages                                                   |
+| Lint                | `pnpm lint`                    | ✅ 0 errors, 0 warnings                                             |
+| Format              | `pnpm format:check`            | ✅ clean                                                            |
+| Unit                | `pnpm test:unit`               | ✅ 348 tests (was 302 in Phase 4 — 46 new)                          |
+| Integration         | `pnpm test:integration`        | ✅ 73 tests (was 64 — 9 new)                                        |
+| Security            | `pnpm test:security`           | ✅ 55 tests (was 37 — 18 new)                                       |
+| E2E                 | `pnpm test:e2e`                | ✅ 4 tests, unchanged (no UI touched)                               |
+| Build               | `pnpm build`                   | ✅ every package (incl. new `@ai-concierge/channels`) + Next.js     |
+| Code review         | `/code-review` (medium)        | ✅ 1 finding (idempotency race), fixed and re-verified              |
+| Architecture review | checklist vs MASTER-PLAN §1/§6 | ✅ matches target `packages/channels` responsibility; no deviations |
+| Regression          | `pnpm test` (final commit)     | ✅ full Phase 1-4 suite + this phase's, all green                   |
+
+**Total: 480 automated tests, all passing.**
+
+Key new scenarios (`apps/api/src/whatsapp.integration.test.ts`,
+`apps/api/src/whatsapp.security.test.ts`, `packages/channels/src/whatsapp/*.test.ts`):
+
+| Case                                                                | Result                                                          |
+| ------------------------------------------------------------------- | --------------------------------------------------------------- |
+| Meta verification handshake (correct/wrong token, wrong `hub.mode`) | 200 + echoed challenge / 403                                    |
+| Real fleet vehicle + real dates + real location in one message      | Steps 1-4 all run; `COMPLETE`; WhatsApp reply names the vehicle |
+| Only a vehicle mentioned, no dates/location                         | `NEEDS_INFO`; WhatsApp reply is the exact clarification prompt  |
+| Redelivered message id (sequential, then genuinely concurrent)      | processed exactly once; exactly one reply sent                  |
+| Delivery-status callback (no `messages` array)                      | 200 ack, nothing processed, nothing sent                        |
+| Missing / wrong / tampered / non-hex-length signature               | 401, no processing, no internal detail leaked                   |
+| No `WHATSAPP_APP_SECRET` / `WHATSAPP_VERIFY_TOKEN` configured       | 501 `NOT_CONFIGURED`, never a fake success                      |
+| Prompt injection / SQL injection in the message body                | flagged / inert, exactly as Steps 1-4 already prove             |
+| Malformed JSON body                                                 | 400, not a 500 crash                                            |
+| Prototype-pollution-shaped / wrong-typed webhook payload            | parses to nothing, never throws                                 |
+
+## 9. Known limitations
+
+- **No real conversational loop.** Every inbound WhatsApp message is processed as a brand-new
+  enquiry; a follow-up reply from the same customer is not matched back to their earlier
+  conversation. Fixing this is Event/Workflow Engine scope, not a channel-adapter concern.
+- **Intent classification is keyword-based and English-only** (unchanged from Phase 1). A message
+  naming only a vehicle and dates, with no booking verb, currently classifies as a non-booking
+  enquiry (`NOT_APPLICABLE`) rather than `COMPLETE` — see §3's note on the exact phrase from the
+  original request. Left to the user to decide whether to broaden Phase 1's lexicon.
+- **No per-sender rate limiting on the webhook** beyond the API-wide limiter — see §7.
+- **`MetaWhatsAppProvider` is untested against the real Meta API** in this sandbox (no real
+  WhatsApp Business credentials available here) — its HTTP call shape, headers, and response
+  parsing are unit-tested against a fake `fetch`, and the adapter reports `NOT_CONFIGURED` until a
+  real `WHATSAPP_ACCESS_TOKEN`/`WHATSAPP_PHONE_NUMBER_ID` are supplied, per the "never fake a
+  working integration" rule. See the runbook in the final chat summary for how to plug in real
+  credentials and verify it end to end against Meta.
+- **No Docker daemon in this dev sandbox** (same as Phases 1-4) — `docker-compose.yml` unaffected.
+
+## 10. Files created
+
+- `packages/channels/**` (package.json, tsconfig.json, `src/whatsapp/{types,inboundParser,
+signature,provider,replyBuilder}.ts` + matching `.test.ts` + `whatsapp.security.test.ts`)
+- `apps/api/src/services/enquiryPipelineService.ts`
+- `apps/api/src/routes/webhooks/whatsapp.ts`
+- `apps/api/src/test/fakeWhatsAppProvider.ts`
+- `apps/api/src/whatsapp.integration.test.ts`, `apps/api/src/whatsapp.security.test.ts`
+- `packages/contracts/src/whatsapp.ts`
+- `docs/PHASE-5.md` (this file)
+
+## 11. Files modified
+
+- `packages/db/src/repositories/idempotencyRepository.ts` (+ `.test.ts`) — additive
+  claim/complete/release functions.
+- `apps/api/src/env.ts`, `context.ts`, `server.ts`, `app.ts`, `test/buildTestApp.ts` — WhatsApp
+  config/provider wired through; existing behavior unchanged (`NotConfiguredWhatsAppProvider` by
+  default).
+- `packages/contracts/src/index.ts` — new export added.
+- `apps/api/package.json` — `@ai-concierge/channels` dependency added.
+- `.env.example`, `render.yaml` — new optional WhatsApp variables documented.
+- `docs/ARCHITECTURE.md`, `docs/PHASE-CONTRACTS.json` — updated for this phase.
+
+No working Phase 1-4 functionality was changed; `pnpm test` (full regression) re-run green on the
+final commit.
+
+## 12. Migration status
+
+No new migration this phase (see §6).
+
+## 13. Next steps (proposed, not started)
+
+Per `docs/PHASE-4.md` §13 and `MASTER-PLAN.md` §4, journey Step 5 is **Eligibility**
+(`ELIGIBILITY_CHECK`) — still the logically "correct" next journey step. Separately, the remainder
+of this phase's original id-5 scope (Web chat/Email adapters, documents, payments, CRM,
+delivery/return) is still `PENDING`. Two open decisions for the user, not made unilaterally here:
+
+1. Broaden Phase 1's intent lexicon so a message naming a specific vehicle (with no explicit
+   booking verb) also counts as booking evidence — see §3/§9.
+2. Which comes next: Eligibility (Step 5), the rest of the channels/documents/payments/CRM phase,
+   or the real Event/Workflow Engine (needed for the conversational-loop gap in §9).
+
+Do not start either until asked.

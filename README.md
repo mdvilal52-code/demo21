@@ -5,9 +5,11 @@ an AI orchestrator drives a 19-step rental journey (enquiry → quote → docume
 delivery → return → invoice → follow-up) with human escalation, zero-trust security, an admin
 dashboard and a customer mobile app.
 
-> **Status: planning only.** No application code has been written yet. This repository currently
-> contains the plan, the phase contracts and the design system. Implementation happens **one phase
-> at a time**, on request, following `docs/PHASE-EXECUTION-PROTOCOL.md`.
+> **Status: in progress.** Journey Steps 1-4 (Enquiry/Intent, Extract Dates & Location, Determine
+> Vehicle, Ask Missing Information) are `FROZEN`; a WhatsApp channel + automated Step 1-4 pipeline
+> is `IN_PROGRESS` (see `docs/PHASE-5.md`). See `docs/PHASE-CONTRACTS.json` for authoritative
+> per-phase status. Implementation happens **one phase at a time**, on request, following
+> `docs/PHASE-EXECUTION-PROTOCOL.md`.
 
 ## Read first
 

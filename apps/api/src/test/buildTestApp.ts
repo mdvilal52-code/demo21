@@ -4,6 +4,7 @@ import {
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
+import { NotConfiguredWhatsAppProvider, type WhatsAppProvider } from '@ai-concierge/channels';
 import {
   createTestPrismaClient,
   createTestRedisClient,
@@ -23,7 +24,14 @@ export interface TestApp {
   close: () => Promise<void>;
 }
 
-export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<TestApp> {
+export interface TestAppCtxOverrides {
+  whatsappProvider?: WhatsAppProvider;
+}
+
+export async function buildTestApp(
+  overrides: Partial<ApiEnv> = {},
+  ctxOverrides: TestAppCtxOverrides = {},
+): Promise<TestApp> {
   const config: ApiEnv = {
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
@@ -45,6 +53,7 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
     // override this with their own low value on a dedicated app instance.
     RATE_LIMIT_MAX: 1000,
     RATE_LIMIT_WINDOW_MS: 60_000,
+    WHATSAPP_API_VERSION: 'v21.0',
     ...overrides,
   };
 
@@ -66,6 +75,7 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
       catalogProvider: new PrismaVehicleCatalogProvider(prisma),
     }),
     missingInfoOrchestrator: new MissingInfoOrchestrator(),
+    whatsappProvider: ctxOverrides.whatsappProvider ?? new NotConfiguredWhatsAppProvider(),
     observabilityStatus: 'NOT_CONFIGURED',
   };
 

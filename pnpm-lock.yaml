@@ -35,6 +35,9 @@ importers:
       '@ai-concierge/ai':
         specifier: workspace:*
         version: link:../../packages/ai
+      '@ai-concierge/channels':
+        specifier: workspace:*
+        version: link:../../packages/channels
       '@ai-concierge/config':
         specifier: workspace:*
         version: link:../../packages/config
@@ -224,6 +227,25 @@ importers:
       '@ai-concierge/security':
         specifier: workspace:*
         version: link:../security
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.4
+        version: 2.1.9(@types/node@22.20.3)
+
+  packages/channels:
+    dependencies:
+      '@ai-concierge/domain':
+        specifier: workspace:*
+        version: link:../domain
+      '@ai-concierge/security':
+        specifier: workspace:*
+        version: link:../security
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
     devDependencies:
       typescript:
         specifier: ^5.6.3

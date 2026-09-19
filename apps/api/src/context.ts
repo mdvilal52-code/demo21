@@ -4,6 +4,7 @@ import type {
   MissingInfoOrchestrator,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
+import type { WhatsAppProvider } from '@ai-concierge/channels';
 import type { PrismaClient } from '@ai-concierge/db';
 import type { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
@@ -20,6 +21,7 @@ export interface AppContext {
   dateLocationOrchestrator: DateLocationExtractionOrchestrator;
   vehicleOrchestrator: VehicleDeterminationOrchestrator;
   missingInfoOrchestrator: MissingInfoOrchestrator;
+  whatsappProvider: WhatsAppProvider;
   observabilityStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
 }
 
