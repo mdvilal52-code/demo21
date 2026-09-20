@@ -44,6 +44,11 @@ services:
       # values for these.
       - key: DATABASE_URL
         sync: false
+      # BullMQ needs this Redis reachable with maxmemory-policy=noeviction —
+      # any eviction policy (Render's free Key Value plan defaults to
+      # allkeys-lru) lets Redis silently drop queued job keys under memory
+      # pressure. Set it in the provider's dashboard/config; both services
+      # log a startup warning (and BullMQ prints its own) when it's wrong.
       - key: REDIS_URL
         sync: false
       # Generated once by Render and stored as a secret; never visible here.
