@@ -1,4 +1,8 @@
-import Fastify, { type FastifyBaseLogger, type FastifyInstance } from 'fastify';
+import Fastify, {
+  LogController,
+  type FastifyBaseLogger,
+  type FastifyInstance,
+} from 'fastify';
 import {
   serializerCompiler,
   validatorCompiler,
@@ -22,7 +26,7 @@ export async function buildApp(
   const app = Fastify({
     loggerInstance: logger,
     bodyLimit: ctx.config.API_BODY_LIMIT_BYTES,
-    disableRequestLogging: true,
+    logController: new LogController({ disableRequestLogging: true }),
     requestIdHeader: 'x-request-id',
   }).withTypeProvider<ZodTypeProvider>();
 

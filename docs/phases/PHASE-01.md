@@ -149,6 +149,7 @@ UPSTREAM_UNAVAILABLE` even though the conversation was saved.
   (auth) until Phase 6.
 - **Fastify `disableRequestLogging` is deprecated** (removed in Fastify 6, we're on 5.x) — noted,
   not urgent; our own `observabilityPlugin` already replaces Fastify's built-in request logging.
+  Fixed post-freeze: `apps/api/src/app.ts` now uses the `logController` replacement option.
 - **Swagger UI CSP** — the strict default CSP (`packages/security/headers.ts`) has not been
   specifically verified against `/docs`' inline-style needs; JSON API responses are unaffected.
 
