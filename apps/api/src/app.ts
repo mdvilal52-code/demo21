@@ -10,6 +10,7 @@ import { observabilityPlugin } from './plugins/observability.js';
 import { registerSwagger } from './plugins/swagger.js';
 import { registerErrorHandler } from './plugins/errorHandler.js';
 import { healthRoutes } from './routes/health.js';
+import { privacyRoutes } from './routes/privacy.js';
 import { enquiryRoutes } from './routes/v1/enquiries.js';
 import { temporalRoutes } from './routes/v1/temporal.js';
 import { vehicleRoutes } from './routes/v1/vehicle.js';
@@ -38,6 +39,7 @@ export async function buildApp(
   registerErrorHandler(app);
 
   await app.register(healthRoutes);
+  await app.register(privacyRoutes);
   await app.register(enquiryRoutes);
   await app.register(temporalRoutes);
   await app.register(vehicleRoutes);
