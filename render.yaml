@@ -1,14 +1,15 @@
-# Render Blueprint for the full system: API, background worker, and web
-# frontend. Deploying only the first service (ai-concierge-api) gets you
-# every HTTP endpoint (Steps 1-4) working, but two things silently won't:
-#   - the BullMQ post-enquiry job never gets consumed, so
-#     conversation.processedAt and its audit event never get written
-#     (Phase 1's enqueue is "best-effort" — it doesn't fail the request,
-#     it just has nothing listening on the other end)
-#   - there is no browser UI at all — only the raw JSON API
-# The worker and web services below close both gaps. Deploy all three
-# together (Render dashboard -> New + -> Blueprint, point at this repo) for
-# every feature to actually work end to end.
+# Render Blueprint for the system: API and web frontend. (A background
+# worker service is defined further down but commented out — Render's free
+# plan doesn't offer the "worker" service type, and leaving it active makes
+# the *whole* Blueprint sync fail, which silently blocks ai-concierge-api
+# and ai-concierge-web from redeploying too. Re-enable it once you're on a
+# paid plan.)
+#
+# Without the worker, every HTTP endpoint (Steps 1-4, the WhatsApp webhook)
+# still works end to end. What silently won't: the BullMQ post-enquiry job
+# never gets consumed, so conversation.processedAt and its audit event
+# never get written (Phase 1's enqueue is "best-effort" — it doesn't fail
+# the request, it just has nothing listening on the other end).
 #
 # This is a pnpm workspace monorepo, so Render's zero-config Node detection
 # (which just runs `npm install` / `npm start` at the repo root) does not
@@ -82,28 +83,36 @@ services:
       # PORT is provided automatically by Render; apps/api/src/env.ts
       # adopts it into API_PORT when API_PORT itself isn't set.
 
-  - type: worker
-    name: ai-concierge-worker
-    runtime: node
-    plan: free
-    buildCommand: corepack enable && corepack prepare pnpm@10.33.0 --activate && pnpm install --frozen-lockfile && pnpm run build
-    startCommand: node apps/worker/dist/worker.js
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: LOG_LEVEL
-        value: info
-      # Must be the *same* database/queue the API service uses above.
-      - key: DATABASE_URL
-        sync: false
-      - key: REDIS_URL
-        sync: false
-      - key: WEBHOOK_SIGNING_SECRET
-        generateValue: true
-      - key: DEFAULT_TENANT_ID
-        value: 00000000-0000-0000-0000-000000000001
-      - key: OUTBOUND_ALLOWED_HOSTS
-        value: localhost,127.0.0.1
+  # Disabled: Render's free plan does not offer the "worker" service type
+  # ("service type is not available for this plan"). Leaving it in the
+  # Blueprint makes the *entire* Blueprint sync fail — which silently
+  # blocks ai-concierge-api and ai-concierge-web from redeploying too, even
+  # though they'd succeed on their own. Uncomment this block once the
+  # Render account is on a paid plan that supports background workers.
+  # Until then, the BullMQ post-enquiry job is enqueued but never
+  # consumed (see the file header comment above).
+  # - type: worker
+  #   name: ai-concierge-worker
+  #   runtime: node
+  #   plan: free
+  #   buildCommand: corepack enable && corepack prepare pnpm@10.33.0 --activate && pnpm install --frozen-lockfile && pnpm run build
+  #   startCommand: node apps/worker/dist/worker.js
+  #   envVars:
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: LOG_LEVEL
+  #       value: info
+  #     # Must be the *same* database/queue the API service uses above.
+  #     - key: DATABASE_URL
+  #       sync: false
+  #     - key: REDIS_URL
+  #       sync: false
+  #     - key: WEBHOOK_SIGNING_SECRET
+  #       generateValue: true
+  #     - key: DEFAULT_TENANT_ID
+  #       value: 00000000-0000-0000-0000-000000000001
+  #     - key: OUTBOUND_ALLOWED_HOSTS
+  #       value: localhost,127.0.0.1
 
   - type: web
     name: ai-concierge-web
