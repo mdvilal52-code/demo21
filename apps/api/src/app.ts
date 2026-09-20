@@ -1,8 +1,4 @@
-import Fastify, {
-  LogController,
-  type FastifyBaseLogger,
-  type FastifyInstance,
-} from 'fastify';
+import Fastify, { LogController, type FastifyBaseLogger, type FastifyInstance } from 'fastify';
 import {
   serializerCompiler,
   validatorCompiler,
