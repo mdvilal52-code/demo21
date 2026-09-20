@@ -22,10 +22,15 @@ export const apiEnvSchema = baseEnvSchema.extend({
   // adapter NOT_CONFIGURED until every one of them is set (see
   // lib/whatsappClient.ts). Never all required: a partial set is still
   // NOT_CONFIGURED, not a startup failure.
-  WHATSAPP_ACCESS_TOKEN: z.string().min(1).optional(),
-  WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
-  WHATSAPP_VERIFY_TOKEN: z.string().min(1).optional(),
-  WHATSAPP_APP_SECRET: z.string().min(1).optional(),
+  // .trim() on all four: a stray newline/space from copying out of the Meta
+  // App Dashboard or a platform's env var text box changes the bytes used
+  // for HMAC signing/verification and the Bearer token sent to Graph API,
+  // while still reading as "set" — a signature check that fails on every
+  // single request (never intermittently) is this class of bug.
+  WHATSAPP_ACCESS_TOKEN: z.string().trim().min(1).optional(),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().trim().min(1).optional(),
+  WHATSAPP_VERIFY_TOKEN: z.string().trim().min(1).optional(),
+  WHATSAPP_APP_SECRET: z.string().trim().min(1).optional(),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
