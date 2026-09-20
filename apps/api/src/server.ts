@@ -6,7 +6,11 @@ import {
 } from '@ai-concierge/ai';
 import { MetaWhatsAppProvider, NotConfiguredWhatsAppProvider } from '@ai-concierge/channels';
 import { createPrismaClient } from '@ai-concierge/db';
-import { createLogger, bootstrapObservability } from '@ai-concierge/observability';
+import {
+  createLogger,
+  bootstrapObservability,
+  checkRedisEvictionPolicy,
+} from '@ai-concierge/observability';
 import { buildApp } from './app.js';
 import type { AppContext } from './context.js';
 import { loadApiEnv } from './env.js';
@@ -30,6 +34,7 @@ async function main(): Promise<void> {
 
   const prisma = createPrismaClient(config.DATABASE_URL);
   const redis = createRedisClient(config.REDIS_URL);
+  await checkRedisEvictionPolicy(redis, logger);
   const postEnquiryQueue = createPostEnquiryQueue(redis.duplicate());
   const intentEngine = new RuleBasedIntentEngine();
   const dateLocationOrchestrator = new DateLocationExtractionOrchestrator();

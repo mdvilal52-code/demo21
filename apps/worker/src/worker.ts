@@ -2,7 +2,11 @@ import { Worker, type Job } from 'bullmq';
 import { Redis } from 'ioredis';
 import { createPrismaClient } from '@ai-concierge/db';
 import { postEnquiryJobSchema, QUEUE_NAMES } from '@ai-concierge/contracts';
-import { bootstrapObservability, createLogger } from '@ai-concierge/observability';
+import {
+  bootstrapObservability,
+  checkRedisEvictionPolicy,
+  createLogger,
+} from '@ai-concierge/observability';
 import { loadWorkerEnv } from './env.js';
 import { processPostEnquiryJob } from './processors/postEnquiryProcessor.js';
 
@@ -22,6 +26,7 @@ async function main(): Promise<void> {
 
   const prisma = createPrismaClient(config.DATABASE_URL);
   const connection = new Redis(config.REDIS_URL, { maxRetriesPerRequest: null });
+  await checkRedisEvictionPolicy(connection, logger);
 
   const worker = new Worker(
     QUEUE_NAMES.POST_ENQUIRY_PROCESSING,
