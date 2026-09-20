@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import {
   buildWhatsAppReplyText,
   parseWhatsAppTextMessages,
@@ -168,6 +168,24 @@ export const whatsappWebhookRoutes: FastifyPluginAsyncZod = async (app) => {
         typeof signatureHeader !== 'string' ||
         !verifyMetaSignature(rawBody, signatureHeader, appSecret)
       ) {
+        // Temporary diagnostics for the current live signature-mismatch
+        // investigation — remove once root-caused. None of this exposes
+        // appSecret itself: an HMAC digest can't be reversed to the key it
+        // was computed with, so logging both digests side by side is safe
+        // and is the fastest way to tell "wrong secret" apart from "this
+        // traffic was never signed by Meta at all".
+        request.log.warn(
+          {
+            userAgent: request.headers['user-agent'],
+            remoteIp: request.ip,
+            contentType: request.headers['content-type'],
+            rawBodyLength: rawBody.length,
+            rawBodyPreview: rawBody.slice(0, 300),
+            receivedSignatureHeader: signatureHeader ?? null,
+            expectedSignatureHeader: `sha256=${createHmac('sha256', appSecret).update(rawBody).digest('hex')}`,
+          },
+          'WhatsApp webhook signature mismatch — diagnostics',
+        );
         throw new AppError('UNAUTHORIZED', 'Invalid WhatsApp webhook signature');
       }
 
