@@ -25,6 +25,9 @@ test-results/
 npm-debug.log*
 pnpm-debug.log*
 
+# local Redis persistence dump (created by a bare `redis-server` run from the repo root)
+dump.rdb
+
 # os / editor
 .DS_Store
 Thumbs.db

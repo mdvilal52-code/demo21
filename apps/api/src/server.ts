@@ -15,6 +15,7 @@ import type { AppContext } from './context.js';
 import { loadApiEnv } from './env.js';
 import { createPostEnquiryQueue } from './lib/queue.js';
 import { createRedisClient } from './lib/redis.js';
+import { createWhatsAppClient } from './lib/whatsappClient.js';
 import { PrismaVehicleCatalogProvider } from './services/vehicleCatalogProvider.js';
 
 async function main(): Promise<void> {
@@ -41,6 +42,7 @@ async function main(): Promise<void> {
     catalogProvider: new PrismaVehicleCatalogProvider(prisma),
   });
   const missingInfoOrchestrator = new MissingInfoOrchestrator();
+  const { client: whatsappClient, status: whatsappStatus } = createWhatsAppClient(config);
 
   const ctx: AppContext = {
     config,
@@ -53,7 +55,10 @@ async function main(): Promise<void> {
     vehicleOrchestrator,
     missingInfoOrchestrator,
     observabilityStatus: observability.status,
+    whatsappClient,
+    whatsappStatus,
   };
+  logger.info({ whatsappStatus }, 'WhatsApp adapter status');
 
   const app = await buildApp(ctx, logger);
 

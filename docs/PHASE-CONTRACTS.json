@@ -1,10 +1,10 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.4.0",
-  "updatedAt": "2026-09-17",
+  "version": "0.5.0",
+  "updatedAt": "2026-09-20",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
-  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 5-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping.",
+  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 6-10 below are still the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping. Phase id 5 has now been reconciled too, but NOT to journey Step 5 (Eligibility, per MASTER-PLAN.md §4) — it was explicitly requested and built ahead of Eligibility as just the WhatsApp slice of the original phase-5 grouping (see docs/PHASE-5.md §0). Two pieces of the original plan are therefore still open and unnumbered: journey Step 5 (Eligibility) itself, and the rest of the original phase-5 grouping (documents, payments, CRM, fulfilment, Web-chat/Email channels) — both remain PENDING in spirit, without an id yet, until picked up.",
   "rules": {
     "protocol": "docs/PHASE-EXECUTION-PROTOCOL.md",
     "masterPlan": "docs/MASTER-PLAN.md",
@@ -124,22 +124,26 @@
     },
     {
       "id": 5,
-      "name": "Channels, Documents, Payments, CRM & Fulfilment",
-      "status": "PENDING",
-      "goal": "Every external touchpoint behind a clean interface; full 19-step journey runnable.",
+      "name": "WhatsApp Channel Adapter (Meta Cloud API)",
+      "status": "FROZEN",
+      "goal": "Let a real WhatsApp message reach the existing, frozen Steps 1-4 pipeline and get an automatic reply (including the Step 4 clarification question) without changing that pipeline's business logic. Explicitly requested and built ahead of journey Step 5 (Eligibility) and the rest of the original phase-5 grouping — see docs/PHASE-5.md §0 for the reconciliation note.",
       "deliverables": [
-        "Gateway inbound model; WhatsApp (Meta Cloud API + signature verify), Web chat (REST + SSE), Email (inbound webhook + outbound); templates, rate limits, receipts; NOT_CONFIGURED per adapter",
-        "Document pipeline: presigned S3 uploads, MIME/size validation, AV-scan interface, extraction interface, checklist, T2 review queue",
-        "PaymentProvider interface + instructions + webhook reconciliation + refunds; NOT_CONFIGURED -> explicit manual path flagged in admin",
-        "CRM adapter (internal default), delivery/return coordination (slots, assignment, checklists, photos), invoice PDF, follow-up scheduler"
+        "apps/api/src/lib: whatsappSignature.ts (Meta's sha256= header over the existing generic HMAC verifier), whatsappWebhookPayload.ts (Zod schema + message extraction), whatsappClient.ts (WhatsAppClient/NotConfiguredWhatsAppClient/MetaCloudApiWhatsAppClient via ssrfSafeFetch + createWhatsAppClient factory)",
+        "apps/api/src/services: whatsappReply.ts (Step 4 result -> reply text), whatsappService.ts (handleInboundWhatsAppMessage: idempotency dedupe by Meta message id, then submitEnquiry -> extractDatesAndLocation -> determineVehicle -> checkMissingInfo -> reply)",
+        "apps/api/src/routes/webhooks/whatsapp.ts: GET verification + POST handling, raw-body signature verification scoped to this route only, rate-limit-exempt",
+        "apps/api: WHATSAPP_ACCESS_TOKEN/WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_VERIFY_TOKEN/WHATSAPP_APP_SECRET (all optional, NOT_CONFIGURED until all four are set); whatsappClient/whatsappStatus on AppContext",
+        "render.yaml, .env.example updated with the four new env vars",
+        "docs/PHASE-5.md"
       ],
       "acceptance": [
-        "full journey 01-19 passes e2e with test doubles inside tests only",
-        "production wiring shows real provider status per adapter in admin Settings",
-        "webhook signature + replay tests"
+        "a real inbound WhatsApp text message creates a conversation, runs Steps 1-4 for real, and produces an automatic reply — proven end to end against real local Postgres/Redis (app.inject, real HMAC signatures, real DB rows), not mocked at the boundary being tested",
+        "webhook signature verification (missing/wrong/tampered -> 401) and redelivered-message-id dedupe (single conversation, single reply) both proven",
+        "NOT_CONFIGURED reported (501) when WHATSAPP_APP_SECRET is unset, matching every other provider seam's convention",
+        "full Phase 1-4 regression re-run and green (no working functionality broken)",
+        "all gates pass: typecheck, lint, format, 340 unit + 69 integration + 48 security tests, 4 e2e, production build — see docs/PHASE-5.md §8"
       ],
       "dependsOn": [4],
-      "phaseDoc": "docs/phases/PHASE-05.md"
+      "phaseDoc": "docs/PHASE-5.md"
     },
     {
       "id": 6,

@@ -9,6 +9,7 @@ import type { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 import type { ApiEnv } from './env.js';
+import type { WhatsAppClient } from './lib/whatsappClient.js';
 
 export interface AppContext {
   config: ApiEnv;
@@ -21,6 +22,8 @@ export interface AppContext {
   vehicleOrchestrator: VehicleDeterminationOrchestrator;
   missingInfoOrchestrator: MissingInfoOrchestrator;
   observabilityStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
+  whatsappClient: WhatsAppClient;
+  whatsappStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
 }
 
 declare module 'fastify' {

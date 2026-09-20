@@ -20,7 +20,9 @@ describe('checkRedisEvictionPolicy', () => {
     const redis: RedisConfigReader = {
       config: async () => ['maxmemory-policy', 'allkeys-lru'],
     };
-    const lines = (await captureLogs((logger) => checkRedisEvictionPolicy(redis, logger))) as Array<{
+    const lines = (await captureLogs((logger) =>
+      checkRedisEvictionPolicy(redis, logger),
+    )) as Array<{
       level: number;
       maxMemoryPolicy?: string;
     }>;

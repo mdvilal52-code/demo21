@@ -15,6 +15,7 @@ import { Queue } from 'bullmq';
 import { buildApp } from '../app.js';
 import type { AppContext } from '../context.js';
 import type { ApiEnv } from '../env.js';
+import { createWhatsAppClient } from '../lib/whatsappClient.js';
 import { PrismaVehicleCatalogProvider } from '../services/vehicleCatalogProvider.js';
 
 export interface TestApp {
@@ -54,6 +55,8 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
     connection: redis.duplicate(),
   });
 
+  const { client: whatsappClient, status: whatsappStatus } = createWhatsAppClient(config);
+
   const ctx: AppContext = {
     config,
     logger: createLogger({ level: 'silent', serviceName: 'api-test' }),
@@ -67,6 +70,8 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
     }),
     missingInfoOrchestrator: new MissingInfoOrchestrator(),
     observabilityStatus: 'NOT_CONFIGURED',
+    whatsappClient,
+    whatsappStatus,
   };
 
   const app = await buildApp(ctx, ctx.logger);

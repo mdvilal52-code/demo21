@@ -17,6 +17,15 @@ export const apiEnvSchema = baseEnvSchema.extend({
   API_BODY_LIMIT_BYTES: z.coerce.number().int().positive().default(102_400),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
+
+  // Meta WhatsApp Cloud API — all four optional so the API boots with the
+  // adapter NOT_CONFIGURED until every one of them is set (see
+  // lib/whatsappClient.ts). Never all required: a partial set is still
+  // NOT_CONFIGURED, not a startup failure.
+  WHATSAPP_ACCESS_TOKEN: z.string().min(1).optional(),
+  WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
+  WHATSAPP_VERIFY_TOKEN: z.string().min(1).optional(),
+  WHATSAPP_APP_SECRET: z.string().min(1).optional(),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
