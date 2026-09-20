@@ -26,11 +26,16 @@ services:
     runtime: node
     plan: free
     buildCommand: corepack enable && corepack prepare pnpm@10.33.0 --activate && pnpm install --frozen-lockfile && pnpm run build
-    # `prisma migrate deploy` only applies pending migrations, so it's safe
-    # to re-run on every start; the more correct place for it long-term is
-    # Render's own "Pre-Deploy Command" setting, once you're on a plan that
-    # has it.
-    startCommand: pnpm --filter @ai-concierge/db exec prisma migrate deploy && node apps/api/dist/server.js
+    # `prisma migrate deploy` only applies pending migrations, and the seed
+    # is upsert-based (packages/db/src/seed.ts) — both safe to re-run on
+    # every start; the more correct place for them long-term is Render's own
+    # "Pre-Deploy Command" setting, once you're on a plan that has it.
+    # The seed step is required, not cosmetic: migrations only create the
+    # schema, so on a fresh database DEFAULT_TENANT_ID has no Tenant row to
+    # reference yet, and every write that references it (POST /v1/enquiries,
+    # a WhatsApp webhook creating a Conversation, ...) fails its foreign key
+    # constraint until this has run at least once.
+    startCommand: pnpm --filter @ai-concierge/db exec prisma migrate deploy && pnpm --filter @ai-concierge/db run seed && node apps/api/dist/server.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
