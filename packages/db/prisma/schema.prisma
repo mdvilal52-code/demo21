@@ -32,18 +32,40 @@ enum Channel {
   EMAIL
 }
 
+/// Tracks where a multi-turn channel conversation (currently WhatsApp) is in
+/// the Stage 1-4 flow, so a short reply like "Yes" can be interpreted using
+/// context instead of being re-classified from scratch. NEW is the default
+/// for every conversation (including REST/Web, which don't use it yet).
+enum ConversationStage {
+  NEW
+  AWAITING_BOOKING_CONFIRMATION
+  COLLECTING_VEHICLE
+  COLLECTING_DETAILS
+  COMPLETE
+}
+
 model Conversation {
-  id          String    @id @default(uuid())
+  id          String            @id @default(uuid())
   tenantId    String
-  tenant      Tenant    @relation(fields: [tenantId], references: [id])
+  tenant      Tenant            @relation(fields: [tenantId], references: [id])
   channel     Channel
   customerRef String
-  createdAt   DateTime  @default(now())
+  stage       ConversationStage @default(NEW)
+  /// Start of the *current* booking cycle — defaults to `createdAt` for a
+  /// brand-new conversation, and is bumped to "now" whenever the WhatsApp
+  /// stage machine resets from COMPLETE back to NEW for a repeat customer's
+  /// next, unrelated request. Steps 2-3's cross-message merge
+  /// (`whatsappConversationState.ts`) only looks at rows from this point
+  /// forward, so a finished booking's dates/vehicle never bleed into a later,
+  /// separate one in the same preserved conversation thread.
+  cycleStartedAt DateTime       @default(now())
+  createdAt   DateTime          @default(now())
   processedAt DateTime?
 
   messages Message[]
 
   @@index([tenantId])
+  @@index([tenantId, channel, customerRef])
   @@map("conversations")
 }
 

@@ -47,3 +47,33 @@ export async function findLatestVehicleDeterminationForMessage(
     include: { resolvedVehicle: true },
   });
 }
+
+/**
+ * Every determination run across every message in a conversation, oldest
+ * first — same cross-message carry-forward purpose as
+ * `findDateLocationExtractionsForConversation`, so a vehicle resolved in an
+ * earlier message (e.g. "Lamborghini Urus") is still known once a later
+ * message only supplies dates/location. Additive:
+ * `findLatestVehicleDeterminationForMessage` above is unchanged and still
+ * exactly what Step 3's own REST endpoint uses.
+ *
+ * `since`, when given, excludes rows from before the conversation's current
+ * booking cycle (`Conversation.cycleStartedAt`) — see
+ * `findDateLocationExtractionsForConversation` for why this matters.
+ */
+export async function findVehicleDeterminationsForConversation(
+  db: Executor,
+  tenantId: TenantId,
+  conversationId: string,
+  since?: Date,
+) {
+  return db.vehicleDetermination.findMany({
+    where: {
+      tenantId,
+      message: { conversationId },
+      ...(since ? { createdAt: { gte: since } } : {}),
+    },
+    orderBy: { createdAt: 'asc' },
+    include: { resolvedVehicle: true },
+  });
+}

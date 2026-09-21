@@ -1,15 +1,18 @@
 import type { IntentEngine, DateLocationExtractionOrchestrator } from '@ai-concierge/ai';
 import type { VehicleDeterminationOrchestrator, MissingInfoOrchestrator } from '@ai-concierge/ai';
-import { findIdempotencyKey, type PrismaClient } from '@ai-concierge/db';
+import {
+  findIdempotencyKey,
+  findLatestConversationForCustomer,
+  updateConversationStage,
+  PrismaAuditWriter,
+  type PrismaClient,
+} from '@ai-concierge/db';
 import { messageContentSchema, type TenantId } from '@ai-concierge/domain';
 import type { Queue } from 'bullmq';
 import type { FastifyBaseLogger } from 'fastify';
 import { submitEnquiry } from './enquiryService.js';
-import { extractDatesAndLocation } from './dateLocationService.js';
-import { determineVehicle } from './vehicleService.js';
-import { checkMissingInfo } from './missingInfoService.js';
+import { advanceWhatsAppConversation } from './whatsappConversationState.js';
 import {
-  buildWhatsAppReplyText,
   WHATSAPP_MESSAGE_TOO_LONG_REPLY,
   WHATSAPP_UNSUPPORTED_MESSAGE_TYPE_REPLY,
 } from './whatsappReply.js';
@@ -42,18 +45,18 @@ async function safeReply(deps: WhatsAppServiceDeps, to: string, body: string): P
 }
 
 /**
- * Runs one inbound WhatsApp text message through the exact same Steps 1-4
- * pipeline a REST client drives via four separate calls (submitEnquiry ->
- * extractDatesAndLocation -> determineVehicle -> checkMissingInfo), then
- * replies with whatever Step 4 decided. No new business logic: this is a
- * channel adapter over already-frozen, already-tested pipeline logic.
+ * Runs one inbound WhatsApp text message through the Steps 1-4 pipeline
+ * (submitEnquiry -> the conversation-stage machine -> Steps 2-4 as needed),
+ * then replies with whatever that decided. Still a channel adapter, not new
+ * business logic: Steps 2-4 themselves are untouched, called exactly as
+ * before via `whatsappConversationState.ts`.
  *
- * Each inbound message starts a fresh conversation (matching submitEnquiry's
- * own contract exactly) — there's no cross-message thread memory yet. A
- * customer's follow-up reply to a clarification question is processed as an
- * independent new enquiry, not merged with what an earlier message resolved.
- * That conversational loop is explicitly later-phase scope (PHASE-4.md §13 /
- * MASTER-PLAN.md's Event/Workflow Engine), not a channel-adapter concern.
+ * Every inbound message resumes the customer's most recent WhatsApp
+ * conversation (found by tenant + channel + the sender's WhatsApp id)
+ * instead of always starting a fresh, context-free one — the fix for a
+ * short reply like "Yes" otherwise being indistinguishable from a new
+ * greeting. `stage` on that conversation is what makes a reply like "Yes"
+ * interpretable at all: see `whatsappConversationState.ts` for why.
  */
 export async function handleInboundWhatsAppMessage(
   deps: WhatsAppServiceDeps,
@@ -87,6 +90,13 @@ export async function handleInboundWhatsAppMessage(
   }
 
   try {
+    const existingConversation = await findLatestConversationForCustomer(
+      deps.prisma,
+      input.tenantId,
+      'WHATSAPP',
+      message.from,
+    );
+
     const enquiry = await submitEnquiry(
       {
         prisma: deps.prisma,
@@ -100,40 +110,55 @@ export async function handleInboundWhatsAppMessage(
         message: textResult.data,
         requestId: input.requestId,
         idempotencyKey: message.id,
+        conversationId: existingConversation?.id,
       },
     );
 
-    await extractDatesAndLocation(
-      { prisma: deps.prisma, orchestrator: deps.dateLocationOrchestrator },
+    const { replyText, nextStage, nextCycleStartedAt } = await advanceWhatsAppConversation(
+      {
+        prisma: deps.prisma,
+        dateLocationOrchestrator: deps.dateLocationOrchestrator,
+        vehicleOrchestrator: deps.vehicleOrchestrator,
+        missingInfoOrchestrator: deps.missingInfoOrchestrator,
+      },
       {
         tenantId: input.tenantId,
-        conversationId: enquiry.conversationId,
         requestId: input.requestId,
+        conversationId: enquiry.conversationId,
+        stage: existingConversation?.stage ?? 'NEW',
+        cycleStartedAt: existingConversation?.cycleStartedAt ?? new Date(),
+        intent: enquiry.intent,
+        messageText: textResult.data,
       },
     );
 
-    await determineVehicle(
-      { prisma: deps.prisma, orchestrator: deps.vehicleOrchestrator },
-      {
-        tenantId: input.tenantId,
-        conversationId: enquiry.conversationId,
-        requestId: input.requestId,
-      },
-    );
+    // Send before persisting the new stage: if the send fails, the stage
+    // must stay exactly what it was, so the customer's next message is
+    // still interpreted against the question they actually received (the
+    // outer catch below sends a generic fallback for this attempt).
+    await deps.whatsappClient.sendTextMessage(message.from, replyText);
 
-    const missingInfo = await checkMissingInfo(
-      { prisma: deps.prisma, orchestrator: deps.missingInfoOrchestrator },
-      {
-        tenantId: input.tenantId,
-        conversationId: enquiry.conversationId,
-        requestId: input.requestId,
-      },
-    );
-
-    await deps.whatsappClient.sendTextMessage(
-      message.from,
-      buildWhatsAppReplyText(missingInfo.missingInfo),
-    );
+    await deps.prisma.$transaction(async (tx) => {
+      const result = await updateConversationStage(
+        tx,
+        input.tenantId,
+        enquiry.conversationId,
+        nextStage,
+        nextCycleStartedAt,
+      );
+      if (result.count > 0) {
+        const auditWriter = new PrismaAuditWriter(tx);
+        await auditWriter.record({
+          tenantId: input.tenantId,
+          actor: 'system:whatsapp-conversation-stage',
+          action: 'conversation.stage_advanced',
+          entityType: 'Conversation',
+          entityId: enquiry.conversationId,
+          after: { stage: nextStage },
+          requestId: input.requestId,
+        });
+      }
+    });
   } catch (error) {
     deps.logger.error(
       { err: error, whatsappMessageId: message.id },

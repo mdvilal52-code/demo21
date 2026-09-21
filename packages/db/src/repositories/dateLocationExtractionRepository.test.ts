@@ -8,9 +8,13 @@ import {
 } from '@ai-concierge/testing';
 import type { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { createConversationWithMessage } from './conversationRepository.js';
+import {
+  createConversationWithMessage,
+  appendMessageToConversation,
+} from './conversationRepository.js';
 import {
   createDateLocationExtraction,
+  findDateLocationExtractionsForConversation,
   findLatestDateLocationExtractionForMessage,
 } from './dateLocationExtractionRepository.js';
 
@@ -141,5 +145,94 @@ describe('dateLocationExtractionRepository', () => {
         severity: 'ERROR',
       },
     ]);
+  });
+
+  it('returns every extraction across a conversation, oldest first, scoped to the correct tenant', async () => {
+    const { conversation, message: firstMessage } = await createConversationWithMessage(prisma, {
+      tenantId: TEST_TENANT_ID,
+      channel: 'WHATSAPP',
+      customerRef: '971500000001',
+      content: 'pickup 15 Oct from Dubai Marina',
+    });
+    await createDateLocationExtraction(prisma, {
+      tenantId: TEST_TENANT_ID,
+      messageId: firstMessage.id,
+      result: { ...SAMPLE_RESULT, returnDate: null, dropoffLocation: null },
+    });
+
+    const appended = await appendMessageToConversation(prisma, {
+      tenantId: TEST_TENANT_ID,
+      conversationId: conversation.id,
+      content: 'return 19 Oct',
+    });
+    await createDateLocationExtraction(prisma, {
+      tenantId: TEST_TENANT_ID,
+      messageId: appended!.message.id,
+      result: { ...SAMPLE_RESULT, pickupDate: null, pickupLocation: null },
+    });
+
+    const rows = await findDateLocationExtractionsForConversation(
+      prisma,
+      TEST_TENANT_ID,
+      conversation.id,
+    );
+    expect(rows).toHaveLength(2);
+    expect(rows[0]?.messageId).toBe(firstMessage.id);
+    expect(rows[0]?.pickupDate?.toISOString()).toBe('2026-10-15T06:00:00.000Z');
+    expect(rows[0]?.returnDate).toBeNull();
+    expect(rows[1]?.messageId).toBe(appended!.message.id);
+    expect(rows[1]?.pickupDate).toBeNull();
+    expect(rows[1]?.returnDate?.toISOString()).toBe('2026-10-19T06:00:00.000Z');
+
+    const fromOtherTenant = await findDateLocationExtractionsForConversation(
+      prisma,
+      OTHER_TENANT_ID,
+      conversation.id,
+    );
+    expect(fromOtherTenant).toHaveLength(0);
+  });
+
+  it('excludes rows from before a given `since` cutoff (booking-cycle scoping)', async () => {
+    const { conversation, message: firstMessage } = await createConversationWithMessage(prisma, {
+      tenantId: TEST_TENANT_ID,
+      channel: 'WHATSAPP',
+      customerRef: '971500000019',
+      content: 'a finished, earlier booking',
+    });
+    await createDateLocationExtraction(prisma, {
+      tenantId: TEST_TENANT_ID,
+      messageId: firstMessage.id,
+      result: SAMPLE_RESULT,
+    });
+
+    const cutoff = new Date(Date.now() + 50);
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    const appended = await appendMessageToConversation(prisma, {
+      tenantId: TEST_TENANT_ID,
+      conversationId: conversation.id,
+      content: 'a new, unrelated request',
+    });
+    await createDateLocationExtraction(prisma, {
+      tenantId: TEST_TENANT_ID,
+      messageId: appended!.message.id,
+      result: { ...SAMPLE_RESULT, pickupDate: null, returnDate: null },
+    });
+
+    const unscoped = await findDateLocationExtractionsForConversation(
+      prisma,
+      TEST_TENANT_ID,
+      conversation.id,
+    );
+    expect(unscoped).toHaveLength(2);
+
+    const scoped = await findDateLocationExtractionsForConversation(
+      prisma,
+      TEST_TENANT_ID,
+      conversation.id,
+      cutoff,
+    );
+    expect(scoped).toHaveLength(1);
+    expect(scoped[0]?.messageId).toBe(appended!.message.id);
   });
 });

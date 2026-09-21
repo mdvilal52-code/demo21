@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { IntentEngine } from '@ai-concierge/ai';
 import {
+  appendMessageToConversation,
   createConversationWithMessage,
   createIntentRecord,
   findIdempotencyKey,
@@ -26,6 +27,13 @@ export interface SubmitEnquiryInput {
   message: string;
   requestId: string;
   idempotencyKey?: string;
+  /**
+   * Appends to this already-existing conversation instead of creating a new
+   * one — the multi-turn channel-adapter case (WhatsApp conversation
+   * continuity). Omitted (the REST `/v1/enquiries` contract, unchanged):
+   * behaves exactly as before, always creating a fresh conversation.
+   */
+  conversationId?: string;
 }
 
 function hashRequest(input: SubmitEnquiryInput): string {
@@ -56,12 +64,22 @@ export async function submitEnquiry(
   const intent = deps.intentEngine.recognize(input.message);
 
   const response = await deps.prisma.$transaction(async (tx) => {
-    const { conversation, message } = await createConversationWithMessage(tx, {
-      tenantId: input.tenantId,
-      channel: input.channel,
-      customerRef: input.customerRef,
-      content: input.message,
-    });
+    const created = input.conversationId
+      ? await appendMessageToConversation(tx, {
+          tenantId: input.tenantId,
+          conversationId: input.conversationId,
+          content: input.message,
+        })
+      : await createConversationWithMessage(tx, {
+          tenantId: input.tenantId,
+          channel: input.channel,
+          customerRef: input.customerRef,
+          content: input.message,
+        });
+    if (!created) {
+      throw new AppError('NOT_FOUND', 'Conversation not found');
+    }
+    const { conversation, message } = created;
 
     await createIntentRecord(tx, {
       tenantId: input.tenantId,

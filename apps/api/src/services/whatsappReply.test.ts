@@ -18,7 +18,7 @@ const emptyCollected: MissingInfoResult['collected'] = {
 };
 
 describe('buildWhatsAppReplyText', () => {
-  it('returns the clarification prompt verbatim for NEEDS_INFO', () => {
+  it('returns the clarification prompt verbatim for NEEDS_INFO when no vehicle is resolved yet', () => {
     const result: MissingInfoResult = {
       ...base,
       status: 'NEEDS_INFO',
@@ -26,6 +26,33 @@ describe('buildWhatsAppReplyText', () => {
       clarificationPrompt: 'Could you confirm your pickup date?',
     };
     expect(buildWhatsAppReplyText(result)).toBe('Could you confirm your pickup date?');
+  });
+
+  it('acknowledges the resolved vehicle by name before asking for the rest, for NEEDS_INFO', () => {
+    const result: MissingInfoResult = {
+      ...base,
+      status: 'NEEDS_INFO',
+      clarificationPrompt: 'Could you please confirm when you would like to pick up the car?',
+      collected: {
+        ...emptyCollected,
+        vehicle: {
+          id: '00000000-0000-0000-0000-0000000000aa',
+          make: 'Lamborghini',
+          model: 'Urus',
+          category: 'SUV',
+          luxuryTier: 'ULTRA_LUXURY',
+          seats: 5,
+          luggage: 2,
+          transmission: 'AUTOMATIC',
+          availabilityStatus: 'AVAILABLE',
+          pricingProfile: { currency: 'AED', dailyRate: 5000 },
+          active: true,
+        },
+      },
+    };
+    const text = buildWhatsAppReplyText(result);
+    expect(text).toContain('Lamborghini Urus');
+    expect(text).toContain('Could you please confirm when you would like to pick up the car?');
   });
 
   it('summarizes what was collected for COMPLETE', () => {

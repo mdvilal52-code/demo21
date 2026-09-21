@@ -1,0 +1,2 @@
+-- AlterTable
+ALTER TABLE "conversations" ADD COLUMN     "cycleStartedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP;

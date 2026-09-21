@@ -4,6 +4,7 @@ import type { EnquiryServiceDeps } from './enquiryService.js';
 
 const mocks = vi.hoisted(() => ({
   createConversationWithMessage: vi.fn(),
+  appendMessageToConversation: vi.fn(),
   createIntentRecord: vi.fn(),
   findIdempotencyKey: vi.fn(),
   saveIdempotencyKey: vi.fn(),
@@ -12,6 +13,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@ai-concierge/db', () => ({
   createConversationWithMessage: mocks.createConversationWithMessage,
+  appendMessageToConversation: mocks.appendMessageToConversation,
   createIntentRecord: mocks.createIntentRecord,
   findIdempotencyKey: mocks.findIdempotencyKey,
   saveIdempotencyKey: mocks.saveIdempotencyKey,
@@ -129,5 +131,55 @@ describe('submitEnquiry', () => {
     ).rejects.toBeInstanceOf(AppError);
 
     expect(mocks.createConversationWithMessage).toHaveBeenCalled();
+  });
+
+  it('appends to an existing conversation instead of creating a new one when conversationId is given', async () => {
+    const deps = makeDeps();
+    mocks.appendMessageToConversation.mockResolvedValue({
+      conversation: { id: 'conv-existing' },
+      message: { id: 'msg-2' },
+    });
+
+    const result = await submitEnquiry(deps, {
+      tenantId: TENANT_ID,
+      channel: 'WHATSAPP',
+      customerRef: '971501234567',
+      message: 'Yes',
+      requestId: 'req-5',
+      conversationId: 'conv-existing',
+    });
+
+    expect(mocks.createConversationWithMessage).not.toHaveBeenCalled();
+    expect(mocks.appendMessageToConversation).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        tenantId: TENANT_ID,
+        conversationId: 'conv-existing',
+        content: 'Yes',
+      }),
+    );
+    expect(result.conversationId).toBe('conv-existing');
+    expect(result.messageId).toBe('msg-2');
+    expect(mocks.auditRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'enquiry.received', entityId: 'conv-existing' }),
+    );
+  });
+
+  it('throws NOT_FOUND when the given conversationId does not resolve to a conversation', async () => {
+    const deps = makeDeps();
+    mocks.appendMessageToConversation.mockResolvedValue(null);
+
+    await expect(
+      submitEnquiry(deps, {
+        tenantId: TENANT_ID,
+        channel: 'WHATSAPP',
+        customerRef: '971501234567',
+        message: 'Yes',
+        requestId: 'req-6',
+        conversationId: 'conv-missing',
+      }),
+    ).rejects.toMatchObject({ code: 'NOT_FOUND' });
+
+    expect(mocks.createIntentRecord).not.toHaveBeenCalled();
   });
 });
