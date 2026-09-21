@@ -1,12 +1,13 @@
 import { DateLocationExtractionOrchestrator } from '@ai-concierge/ai';
 import {
   createDateLocationExtraction,
-  findLatestMessageForConversation,
+  findMessagesForConversation,
   PrismaAuditWriter,
   type PrismaClient,
 } from '@ai-concierge/db';
 import { AppError, type TenantId } from '@ai-concierge/domain';
 import type { ExtractDatesLocationResponse } from '@ai-concierge/contracts';
+import { buildAccumulatedTranscript } from '../lib/conversationTranscript.js';
 
 export interface DateLocationServiceDeps {
   prisma: PrismaClient;
@@ -21,26 +22,31 @@ export interface ExtractDatesLocationInput {
 
 /**
  * Step 2 — Extract Dates & Location. Input is a Phase 1 conversation's
- * latest message (already validated at ingestion); this never accepts raw
- * customer text directly. AI proposes (the orchestrator's Date/Location
- * extraction services); deterministic domain logic verifies
- * (TemporalValidationService, inside the orchestrator) before anything is
- * persisted or returned.
+ * accumulated transcript (already validated at ingestion, message by
+ * message); this never accepts raw customer text directly. Extracting from
+ * every message so far — not just the latest — means a date range given in
+ * an earlier turn is still picked up when a later turn only adds a
+ * location, or vice versa; for a single-message conversation this is
+ * identical to extracting from that one message. AI proposes (the
+ * orchestrator's Date/Location extraction services); deterministic domain
+ * logic verifies (TemporalValidationService, inside the orchestrator)
+ * before anything is persisted or returned.
  */
 export async function extractDatesAndLocation(
   deps: DateLocationServiceDeps,
   input: ExtractDatesLocationInput,
 ): Promise<ExtractDatesLocationResponse> {
-  const message = await findLatestMessageForConversation(
+  const messages = await findMessagesForConversation(
     deps.prisma,
     input.tenantId,
     input.conversationId,
   );
+  const message = messages[messages.length - 1];
   if (!message) {
     throw new AppError('NOT_FOUND', 'Conversation not found');
   }
 
-  const extraction = await deps.orchestrator.extract(message.content);
+  const extraction = await deps.orchestrator.extract(buildAccumulatedTranscript(messages));
 
   await deps.prisma.$transaction(async (tx) => {
     await createDateLocationExtraction(tx, {

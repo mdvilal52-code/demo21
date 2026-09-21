@@ -56,14 +56,10 @@ Out of scope (deferred, not silently skipped):
   client already drives — `submitEnquiry` → `extractDatesAndLocation` → `determineVehicle` →
   `checkMissingInfo` — in the same sequence, then maps the Step 4 result to reply text. No new
   domain rules were written; every field-resolution/validation decision still comes from Phases 1-4.
-- **Every inbound message starts a fresh conversation** — matching `submitEnquiry`'s own contract
-  exactly (channel `WHATSAPP`, `customerRef` = the sender's WhatsApp id). There is deliberately no
-  "find the customer's open conversation and append to it" logic: Steps 2-3 already only ever read
-  a conversation's *latest* message, so threading messages together wouldn't accumulate context
-  without also building real cross-message field carry-forward — exactly the conversational loop
-  `PHASE-4.md` §13 scoped to the Event/Workflow Engine, not a channel adapter. A customer's reply to
-  a clarification question is processed as its own independent enquiry today; documented below as a
-  known limitation rather than half-built.
+- **A message continues the customer's open conversation, updated 2026-09-21 (see §14).** The
+  original Phase 5 freeze shipped "every inbound message starts a fresh conversation" here, with no
+  cross-message memory — see §14 for why that turned out to be the actual bug behind a live report
+  ("only one generic WhatsApp reply, no real conversation") and what replaced it.
 - **Duplicate delivery protection reuses the existing `IdempotencyKey` table as-is** — Meta's
   message id (`wamid...`) is passed as `submitEnquiry`'s existing `idempotencyKey` parameter, and
   `whatsappService` also checks it directly before doing anything, so a redelivered webhook short-
@@ -138,7 +134,7 @@ Out of scope (deferred, not silently skipped):
 
 ## 5. APIs
 
-| Method | Path                 | Purpose                                                             |
+| Method | Path                 | Purpose                                                              |
 | ------ | -------------------- | -------------------------------------------------------------------- |
 | GET    | `/webhooks/whatsapp` | Meta's webhook subscription challenge/verification                   |
 | POST   | `/webhooks/whatsapp` | Inbound WhatsApp messages; triggers Steps 1-4 and an automatic reply |
@@ -168,7 +164,7 @@ instead of a client-supplied header) are all reused unchanged.
   exactly as inertly as the existing REST path already proved (Phases 1-2's own sanitizer/Prisma
   parameterization — nothing new was added or needed here).
 - **No secrets or stack traces in any error response** — proven the same way `missingInfo.security.
-  test.ts` already proves it for the REST endpoints.
+test.ts` already proves it for the REST endpoints.
 - **NOT_CONFIGURED is explicit** — a `POST` with `WHATSAPP_APP_SECRET` unset returns `501` with that
   code, never a silent 200 or a crash; the same is true for outbound sends via
   `NotConfiguredWhatsAppClient`.
@@ -177,7 +173,7 @@ instead of a client-supplied header) are all reused unchanged.
 **Explicitly deferred (documented, not silently skipped):**
 
 - Database-level Row Level Security — unchanged from Phases 1-4, still Phase 6 scope.
-- The pre-existing idempotency race noted in `enquiryService.ts` (two *genuinely concurrent*
+- The pre-existing idempotency race noted in `enquiryService.ts` (two _genuinely concurrent_
   deliveries of the same message id could both pass the pre-check before either's write commits) —
   inherited from Phase 1's `submitEnquiry`, not introduced here, and no more likely for WhatsApp
   redeliveries (minutes apart, not concurrent) than it already was for REST clients.
@@ -194,16 +190,16 @@ Docker daemon still unavailable here, same as every prior phase) — genuine HTT
 real Fastify app (`app.inject`), real HMAC signatures, real database writes, not mocks standing in
 for the boundary being tested.
 
-| Gate          | Command                 | Result                                                      |
-| ------------- | ------------------------ | ------------------------------------------------------------ |
-| Typecheck     | `pnpm typecheck`        | ✅ 11/11 packages                                            |
-| Lint          | `pnpm lint`             | ✅ 0 errors, 0 warnings                                      |
-| Format        | `pnpm format:check`     | ✅ clean                                                     |
-| Unit          | `pnpm test:unit`        | ✅ 340 tests (31 new: signature 6, payload 9, client 6, reply 5, service 5) |
-| Integration   | `pnpm test:integration` | ✅ 69 tests (5 new — real webhook → real conversation → real reply capture) |
-| Security      | `pnpm test:security`    | ✅ 48 tests (11 new — signature/shape/NOT_CONFIGURED/injection) |
-| E2E           | `pnpm test:e2e`         | ✅ 4 tests, unchanged (no UI touched)                        |
-| Build         | `pnpm build`            | ✅ every package + Next.js production build                  |
+| Gate        | Command                 | Result                                                                      |
+| ----------- | ----------------------- | --------------------------------------------------------------------------- |
+| Typecheck   | `pnpm typecheck`        | ✅ 11/11 packages                                                           |
+| Lint        | `pnpm lint`             | ✅ 0 errors, 0 warnings                                                     |
+| Format      | `pnpm format:check`     | ✅ clean                                                                    |
+| Unit        | `pnpm test:unit`        | ✅ 340 tests (31 new: signature 6, payload 9, client 6, reply 5, service 5) |
+| Integration | `pnpm test:integration` | ✅ 69 tests (5 new — real webhook → real conversation → real reply capture) |
+| Security    | `pnpm test:security`    | ✅ 48 tests (11 new — signature/shape/NOT_CONFIGURED/injection)             |
+| E2E         | `pnpm test:e2e`         | ✅ 4 tests, unchanged (no UI touched)                                       |
+| Build       | `pnpm build`            | ✅ every package + Next.js production build                                 |
 
 Full Phase 1-4 regression re-run and green: every pre-existing test (302 unit baseline +
 `redisHealth`'s 4 from the prior session, 64 integration, 37 security, 4 e2e) still passes
@@ -212,23 +208,25 @@ unchanged, plus this phase's new coverage — nothing existing was broken.
 Key scenarios proven end-to-end in `apps/api/src/whatsapp.integration.test.ts` /
 `whatsapp.security.test.ts`:
 
-| Case                                                             | Result                                          |
-| ----------------------------------------------------------------- | -------------------------------------------------- |
-| GET challenge with the correct verify token                       | raw challenge echoed, `200`                        |
-| GET with wrong token / wrong mode                                 | `403`, no leak of the expected token               |
-| POST with no / wrong / tampered signature                         | `401`, no conversation created                     |
-| POST with `WHATSAPP_APP_SECRET` unset                              | `501 NOT_CONFIGURED`                               |
-| POST with malformed JSON (valid signature over those exact bytes)  | `400`                                              |
-| POST with valid JSON, wrong shape                                  | `400`                                              |
-| A real text message                                                | conversation + message created, Steps 2-4 all run, `missingInfoCheck` persisted, reply captured |
-| The same message id redelivered                                    | processed once — one conversation, one reply       |
-| Prompt injection / SQL injection in the message body               | inert text, `200`, flagged the same as the REST path |
-| Existing `POST /v1/enquiries`                                      | still `201` — unaffected by the new route           |
+| Case                                                              | Result                                                                                          |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| GET challenge with the correct verify token                       | raw challenge echoed, `200`                                                                     |
+| GET with wrong token / wrong mode                                 | `403`, no leak of the expected token                                                            |
+| POST with no / wrong / tampered signature                         | `401`, no conversation created                                                                  |
+| POST with `WHATSAPP_APP_SECRET` unset                             | `501 NOT_CONFIGURED`                                                                            |
+| POST with malformed JSON (valid signature over those exact bytes) | `400`                                                                                           |
+| POST with valid JSON, wrong shape                                 | `400`                                                                                           |
+| A real text message                                               | conversation + message created, Steps 2-4 all run, `missingInfoCheck` persisted, reply captured |
+| The same message id redelivered                                   | processed once — one conversation, one reply                                                    |
+| Prompt injection / SQL injection in the message body              | inert text, `200`, flagged the same as the REST path                                            |
+| Existing `POST /v1/enquiries`                                     | still `201` — unaffected by the new route                                                       |
 
 ## 9. Known limitations
 
-- **No conversational thread memory** — see §3; a customer's follow-up reply is a new, independent
-  enquiry, not merged with what an earlier message in the same phone-number "conversation" resolved.
+- **Conversation continuation has a narrow concurrent-delivery race** — see §14; two genuinely
+  simultaneous messages from the same customer could each start their own conversation instead of
+  merging into one, the same accepted-and-documented class of race as the pre-existing idempotency
+  pre-check (§7), and no more likely in practice.
 - **English-only reply copy** — same class of limitation as Phases 1-4's lexicons and Step 4's
   clarification prompts.
 - **No admin-visible provider status yet** — `whatsappStatus` exists on `AppContext` and is logged
@@ -283,3 +281,83 @@ Two independent, still-open pieces of work, either of which could come next:
   latter two).
 
 Do not start either until asked.
+
+## 14. Amendment (2026-09-21) — conversation continuity
+
+A live WhatsApp number showed exactly one generic reply repeated over and over ("Thanks for
+reaching out — let us know if you'd like to book a car…") no matter what the customer sent next —
+never a real, progressing conversation. Root cause was precisely this phase's own §3/§9 "every
+inbound message starts a fresh conversation" decision, made deliberately at the time but with a
+sharper consequence than documented: a follow-up message that's just dates, or just a location
+(e.g. "25 sept to 29 sept"), carries no booking keyword on its own
+(`packages/ai/src/lexicon.ts`'s `INTENT_KEYWORDS`), so Step 1 classified it `UNKNOWN` in isolation,
+Step 4 returned `NOT_APPLICABLE` (`RequiredFieldsEvaluator` gates entirely on
+`intent.intentType === 'BOOKING_REQUEST'`), and the customer got the generic non-booking fallback —
+every single turn, regardless of what an earlier message in the same conversation had already
+established.
+
+Fixed without touching Steps 1-4's own engines (`RuleBasedIntentEngine`, `DateExtractionService`,
+`LocationExtractionService`, `VehicleIntentService`, `TemporalValidationService`,
+`VehicleValidationService`, `RequiredFieldsEvaluator` — all unchanged, all still frozen/tested as
+shipped) — only what conversation a message belongs to, and what text Steps 1-3 extract from:
+
+- **A message continues the customer's open conversation** instead of always starting a fresh one.
+  `findOpenConversationForCustomer` (`packages/db/src/repositories/conversationRepository.ts`) finds
+  the customer's most recent conversation on this channel unless it already reached a terminal Step 4
+  outcome (`COMPLETE`/`EXPIRED`), derived from the latest message's latest `MissingInfoCheck` — no
+  new column, same append-only-history convention every other cross-step read here already uses.
+- **`continueEnquiry`** (`apps/api/src/services/enquiryService.ts`), a sibling to `submitEnquiry` for
+  a conversation that already exists: appends the message (`appendMessageToConversation`), then runs
+  Step 1 intent recognition against the conversation's accumulated transcript rather than this
+  message alone. No `postEnquiryQueue` job — that background processing already ran for this
+  conversation's first message.
+- **`buildAccumulatedTranscript`** (`apps/api/src/lib/conversationTranscript.ts`) joins a
+  conversation's messages oldest-first (bounded to the most recent 25 messages / 8000 characters, so
+  a customer sending many messages can't grow the extraction input unboundedly). `dateLocationService.ts`
+  and `vehicleService.ts` now extract from this joined transcript instead of only the latest message —
+  for a single-message conversation (every existing REST `/v1/enquiries` caller, today) this is
+  byte-for-byte identical to before, so nothing about the REST contract or Steps 2-3's own tested
+  behavior changed; only WhatsApp's multi-turn case is different.
+- **Accepted, documented limitation**: `findOpenConversationForCustomer` is read outside any
+  transaction, so two genuinely concurrent deliveries from the same customer could each see "nothing
+  open" and start their own conversation — the same class of race §7 already accepts for the
+  idempotency-key pre-check, and no more likely here (real replies from one person are
+  seconds-to-minutes apart, not concurrent).
+- **Not changed**: REST `/v1/enquiries` still always creates a fresh conversation per call (no
+  "continue" REST endpoint exists); this amendment is scoped to the WhatsApp channel adapter, same
+  boundary as the rest of this phase.
+
+Proof (`apps/api/src/whatsapp.integration.test.ts`): a real two-turn conversation through the actual
+webhook (real HMAC signature, real DB) — turn 1 "I want to rent a Lamborghini Urus" alone (no
+dates/location), turn 2 "from 15 Oct to 19 Oct, pickup at Dubai Marina" alone (no booking/vehicle
+keyword) — lands in one conversation with two messages, and turn 2's reply is neither a repeat of
+turn 1's question nor the generic non-booking fallback; a same-customer flood of 30 messages stays
+bounded and healthy (`whatsapp.security.test.ts`); a prompt-injection payload in a later turn is
+still flagged; a conversation that already completed starts a new one for the next message from the
+same customer, and two different customers are never merged into one thread.
+
+Full Phase 1-5 regression re-run and green, cumulative: typecheck, lint, format all clean; **353
+unit** (340 + 13: `conversationTranscript.test.ts` 5, `enquiryService.test.ts` +4, `whatsappService.test.ts`
++2, `dateLocationService.test.ts` +1, `vehicleService.test.ts` +1); **85 integration** (69 + 16:
+`conversationRepository.test.ts` +13, `whatsapp.integration.test.ts` +3); **50 security** (48 + 2:
+`whatsapp.security.test.ts` +2); **4 e2e** unchanged; production build green. No working Phase 1-5
+functionality changed — every pre-existing test still passes unmodified.
+
+Files added: `apps/api/src/lib/conversationTranscript.ts` (+ `.test.ts`).
+Files modified: `packages/db/src/repositories/conversationRepository.ts` (+ `.test.ts`),
+`apps/api/src/services/enquiryService.ts` (+ `.test.ts`), `apps/api/src/services/dateLocationService.ts`
+(+ `.test.ts`), `apps/api/src/services/vehicleService.ts` (+ `.test.ts`),
+`apps/api/src/services/whatsappService.ts` (+ `.test.ts`), `apps/api/src/whatsapp.integration.test.ts`,
+`apps/api/src/whatsapp.security.test.ts`, this file.
+
+Phase 5 remains `FROZEN` — this amendment fixes a real defect in already-shipped behavior rather than
+adding new scope; `PHASE-CONTRACTS.json`'s phase 5 acceptance record is left as the historical
+snapshot of the original freeze (§8 above), not rewritten.
+
+Noticed but out of scope for this fix (pre-existing, not introduced by this amendment, not touched):
+`whatsappReply.ts`'s `formatCollectedSummary` formats the completion-summary date using the server's
+local timezone rather than the pickup location's; the WhatsApp idempotency key is saved before Steps
+2-4 run, so a mid-pipeline failure after a successful Step 1 leaves that turn stuck until a new
+message arrives; an empty/whitespace-only message gets the "too long" reply text instead of an
+"empty" one; the webhook's `NOT_CONFIGURED` gate checks only `WHATSAPP_APP_SECRET`, not all four
+required env vars together.

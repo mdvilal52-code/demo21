@@ -183,6 +183,61 @@ describe('WhatsApp webhook — security', () => {
     expect(flags.promptInjectionDetected).toBe(true);
   });
 
+  it('still flags prompt injection introduced in a later turn of an ongoing conversation', async () => {
+    const from = '971501234599';
+    const turn1 = metaPayload(from, 'wamid.INJECT-TURN-1', 'I want to rent a car');
+    await testApp.app.inject({
+      method: 'POST',
+      url: '/webhooks/whatsapp',
+      headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(turn1) },
+      payload: turn1,
+    });
+
+    const turn2 = metaPayload(
+      from,
+      'wamid.INJECT-TURN-2',
+      MALICIOUS_PAYLOADS.promptInjectionRolePlay,
+    );
+    const response = await testApp.app.inject({
+      method: 'POST',
+      url: '/webhooks/whatsapp',
+      headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(turn2) },
+      payload: turn2,
+    });
+    expect(response.statusCode).toBe(200);
+
+    const conversations = await testApp.ctx.prisma.conversation.findMany({
+      where: { customerRef: from },
+      include: { messages: { orderBy: { createdAt: 'asc' }, include: { intentRecords: true } } },
+    });
+    expect(conversations).toHaveLength(1);
+    const secondMessage = conversations[0]?.messages[1];
+    const flags = secondMessage?.intentRecords[0]?.flags as { promptInjectionDetected: boolean };
+    expect(flags.promptInjectionDetected).toBe(true);
+  });
+
+  it('stays bounded and healthy under a flood of messages from the same customer in one conversation', async () => {
+    const from = '971501234598';
+
+    for (let i = 0; i < 30; i += 1) {
+      const raw = metaPayload(from, `wamid.FLOOD-${i}`, `message number ${i}`);
+      const response = await testApp.app.inject({
+        method: 'POST',
+        url: '/webhooks/whatsapp',
+        headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(raw) },
+        payload: raw,
+      });
+      expect(response.statusCode).toBe(200);
+    }
+
+    const conversations = await testApp.ctx.prisma.conversation.findMany({
+      where: { customerRef: from },
+      include: { messages: true },
+    });
+    expect(conversations).toHaveLength(1);
+    expect(conversations[0]?.messages).toHaveLength(30);
+  });
+
   it('treats a SQL injection payload in the message body as inert text (no crash, no injection)', async () => {
     const raw = metaPayload(
       '971501234567',

@@ -1,8 +1,8 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.5.0",
-  "updatedAt": "2026-09-20",
+  "version": "0.5.1",
+  "updatedAt": "2026-09-21",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
   "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 6-10 below are still the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping. Phase id 5 has now been reconciled too, but NOT to journey Step 5 (Eligibility, per MASTER-PLAN.md §4) — it was explicitly requested and built ahead of Eligibility as just the WhatsApp slice of the original phase-5 grouping (see docs/PHASE-5.md §0). Two pieces of the original plan are therefore still open and unnumbered: journey Step 5 (Eligibility) itself, and the rest of the original phase-5 grouping (documents, payments, CRM, fulfilment, Web-chat/Email channels) — both remain PENDING in spirit, without an id yet, until picked up.",
   "rules": {

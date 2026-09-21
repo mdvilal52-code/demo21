@@ -1,10 +1,14 @@
 import type { IntentEngine, DateLocationExtractionOrchestrator } from '@ai-concierge/ai';
 import type { VehicleDeterminationOrchestrator, MissingInfoOrchestrator } from '@ai-concierge/ai';
-import { findIdempotencyKey, type PrismaClient } from '@ai-concierge/db';
+import {
+  findIdempotencyKey,
+  findOpenConversationForCustomer,
+  type PrismaClient,
+} from '@ai-concierge/db';
 import { messageContentSchema, type TenantId } from '@ai-concierge/domain';
 import type { Queue } from 'bullmq';
 import type { FastifyBaseLogger } from 'fastify';
-import { submitEnquiry } from './enquiryService.js';
+import { submitEnquiry, continueEnquiry } from './enquiryService.js';
 import { extractDatesAndLocation } from './dateLocationService.js';
 import { determineVehicle } from './vehicleService.js';
 import { checkMissingInfo } from './missingInfoService.js';
@@ -43,17 +47,19 @@ async function safeReply(deps: WhatsAppServiceDeps, to: string, body: string): P
 
 /**
  * Runs one inbound WhatsApp text message through the exact same Steps 1-4
- * pipeline a REST client drives via four separate calls (submitEnquiry ->
- * extractDatesAndLocation -> determineVehicle -> checkMissingInfo), then
- * replies with whatever Step 4 decided. No new business logic: this is a
- * channel adapter over already-frozen, already-tested pipeline logic.
+ * pipeline a REST client drives via four separate calls (submitEnquiry/
+ * continueEnquiry -> extractDatesAndLocation -> determineVehicle ->
+ * checkMissingInfo), then replies with whatever Step 4 decided. No new
+ * business logic: this is a channel adapter over already-frozen,
+ * already-tested pipeline logic.
  *
- * Each inbound message starts a fresh conversation (matching submitEnquiry's
- * own contract exactly) — there's no cross-message thread memory yet. A
- * customer's follow-up reply to a clarification question is processed as an
- * independent new enquiry, not merged with what an earlier message resolved.
- * That conversational loop is explicitly later-phase scope (PHASE-4.md §13 /
- * MASTER-PLAN.md's Event/Workflow Engine), not a channel-adapter concern.
+ * A message continues the customer's open conversation on this channel
+ * (see `findOpenConversationForCustomer`) instead of always starting a
+ * fresh one, so a reply to a clarification question — "15 to 19 Oct", say —
+ * is merged with what an earlier message in the same conversation already
+ * resolved (the vehicle, say) rather than evaluated on its own. A new
+ * conversation starts only once the open one reaches a terminal Step 4
+ * outcome (COMPLETE/EXPIRED) or none exists yet.
  */
 export async function handleInboundWhatsAppMessage(
   deps: WhatsAppServiceDeps,
@@ -87,21 +93,40 @@ export async function handleInboundWhatsAppMessage(
   }
 
   try {
-    const enquiry = await submitEnquiry(
-      {
-        prisma: deps.prisma,
-        intentEngine: deps.intentEngine,
-        postEnquiryQueue: deps.postEnquiryQueue,
-      },
-      {
-        tenantId: input.tenantId,
-        channel: 'WHATSAPP',
-        customerRef: message.from,
-        message: textResult.data,
-        requestId: input.requestId,
-        idempotencyKey: message.id,
-      },
+    const openConversation = await findOpenConversationForCustomer(
+      deps.prisma,
+      input.tenantId,
+      'WHATSAPP',
+      message.from,
     );
+
+    const enquiry = openConversation
+      ? await continueEnquiry(
+          { prisma: deps.prisma, intentEngine: deps.intentEngine },
+          {
+            tenantId: input.tenantId,
+            conversationId: openConversation.id,
+            channel: 'WHATSAPP',
+            message: textResult.data,
+            requestId: input.requestId,
+            idempotencyKey: message.id,
+          },
+        )
+      : await submitEnquiry(
+          {
+            prisma: deps.prisma,
+            intentEngine: deps.intentEngine,
+            postEnquiryQueue: deps.postEnquiryQueue,
+          },
+          {
+            tenantId: input.tenantId,
+            channel: 'WHATSAPP',
+            customerRef: message.from,
+            message: textResult.data,
+            requestId: input.requestId,
+            idempotencyKey: message.id,
+          },
+        );
 
     await extractDatesAndLocation(
       { prisma: deps.prisma, orchestrator: deps.dateLocationOrchestrator },

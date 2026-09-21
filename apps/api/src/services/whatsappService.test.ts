@@ -2,15 +2,23 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   findIdempotencyKey: vi.fn(),
+  findOpenConversationForCustomer: vi.fn(),
   submitEnquiry: vi.fn(),
+  continueEnquiry: vi.fn(),
   extractDatesAndLocation: vi.fn(),
   determineVehicle: vi.fn(),
   checkMissingInfo: vi.fn(),
   sendTextMessage: vi.fn(),
 }));
 
-vi.mock('@ai-concierge/db', () => ({ findIdempotencyKey: mocks.findIdempotencyKey }));
-vi.mock('./enquiryService.js', () => ({ submitEnquiry: mocks.submitEnquiry }));
+vi.mock('@ai-concierge/db', () => ({
+  findIdempotencyKey: mocks.findIdempotencyKey,
+  findOpenConversationForCustomer: mocks.findOpenConversationForCustomer,
+}));
+vi.mock('./enquiryService.js', () => ({
+  submitEnquiry: mocks.submitEnquiry,
+  continueEnquiry: mocks.continueEnquiry,
+}));
 vi.mock('./dateLocationService.js', () => ({
   extractDatesAndLocation: mocks.extractDatesAndLocation,
 }));
@@ -53,9 +61,15 @@ const fakeMissingInfo = {
 describe('handleInboundWhatsAppMessage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.findOpenConversationForCustomer.mockResolvedValue(null);
     mocks.submitEnquiry.mockResolvedValue({
       conversationId: 'conv-1',
       messageId: 'msg-1',
+      intent: {},
+    });
+    mocks.continueEnquiry.mockResolvedValue({
+      conversationId: 'conv-1',
+      messageId: 'msg-2',
       intent: {},
     });
     mocks.extractDatesAndLocation.mockResolvedValue({});
@@ -143,6 +157,58 @@ describe('handleInboundWhatsAppMessage', () => {
       '971501234567',
       'When would you like to pick up the car?',
     );
+    expect(mocks.continueEnquiry).not.toHaveBeenCalled();
+  });
+
+  it('continues an existing open conversation instead of starting a new one', async () => {
+    mocks.findIdempotencyKey.mockResolvedValue(null);
+    mocks.findOpenConversationForCustomer.mockResolvedValue({ id: 'conv-1' });
+
+    await handleInboundWhatsAppMessage(makeDeps(), {
+      tenantId: TENANT_ID,
+      requestId: 'req-1',
+      message: { from: '971501234567', id: 'wamid.TURN2', type: 'text', text: '15 to 19 Oct' },
+    });
+
+    expect(mocks.findOpenConversationForCustomer).toHaveBeenCalledWith(
+      expect.anything(),
+      TENANT_ID,
+      'WHATSAPP',
+      '971501234567',
+    );
+    expect(mocks.continueEnquiry).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        tenantId: TENANT_ID,
+        conversationId: 'conv-1',
+        channel: 'WHATSAPP',
+        message: '15 to 19 Oct',
+        idempotencyKey: 'wamid.TURN2',
+      }),
+    );
+    expect(mocks.submitEnquiry).not.toHaveBeenCalled();
+    expect(mocks.extractDatesAndLocation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ conversationId: 'conv-1' }),
+    );
+    expect(mocks.checkMissingInfo).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ conversationId: 'conv-1' }),
+    );
+  });
+
+  it('starts a fresh conversation when no open conversation exists for this customer', async () => {
+    mocks.findIdempotencyKey.mockResolvedValue(null);
+    mocks.findOpenConversationForCustomer.mockResolvedValue(null);
+
+    await handleInboundWhatsAppMessage(makeDeps(), {
+      tenantId: TENANT_ID,
+      requestId: 'req-1',
+      message: { from: '971501234567', id: 'wamid.TURN1', type: 'text', text: 'I want a car' },
+    });
+
+    expect(mocks.submitEnquiry).toHaveBeenCalled();
+    expect(mocks.continueEnquiry).not.toHaveBeenCalled();
   });
 
   it('sends a fallback reply and does not throw when the pipeline fails', async () => {

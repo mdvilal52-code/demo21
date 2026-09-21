@@ -1,12 +1,13 @@
 import type { VehicleDeterminationOrchestrator } from '@ai-concierge/ai';
 import {
   createVehicleDetermination,
-  findLatestMessageForConversation,
+  findMessagesForConversation,
   PrismaAuditWriter,
   type PrismaClient,
 } from '@ai-concierge/db';
 import { AppError, type TenantId } from '@ai-concierge/domain';
 import type { DetermineVehicleResponse } from '@ai-concierge/contracts';
+import { buildAccumulatedTranscript } from '../lib/conversationTranscript.js';
 
 export interface VehicleServiceDeps {
   prisma: PrismaClient;
@@ -20,10 +21,14 @@ export interface DetermineVehicleInput {
 }
 
 /**
- * Step 3 — Determine Vehicle. Input is a Phase 1 conversation's latest
- * message (already validated at ingestion); this never accepts raw
- * customer text directly. AI proposes (`VehicleIntentService`, inside the
- * orchestrator); deterministic domain logic verifies against the real fleet
+ * Step 3 — Determine Vehicle. Input is a Phase 1 conversation's accumulated
+ * transcript (already validated at ingestion, message by message); this
+ * never accepts raw customer text directly. Extracting from every message
+ * so far — not just the latest — means a vehicle named in an earlier turn
+ * is still picked up when a later turn only adds dates or a location; for a
+ * single-message conversation this is identical to extracting from that one
+ * message. AI proposes (`VehicleIntentService`, inside the orchestrator);
+ * deterministic domain logic verifies against the real fleet
  * (`VehicleCatalogService` + `VehicleValidationService`) before anything is
  * persisted or returned.
  */
@@ -31,16 +36,17 @@ export async function determineVehicle(
   deps: VehicleServiceDeps,
   input: DetermineVehicleInput,
 ): Promise<DetermineVehicleResponse> {
-  const message = await findLatestMessageForConversation(
+  const messages = await findMessagesForConversation(
     deps.prisma,
     input.tenantId,
     input.conversationId,
   );
+  const message = messages[messages.length - 1];
   if (!message) {
     throw new AppError('NOT_FOUND', 'Conversation not found');
   }
 
-  const determination = await deps.orchestrator.determine(message.content, {
+  const determination = await deps.orchestrator.determine(buildAccumulatedTranscript(messages), {
     tenantId: input.tenantId,
   });
 
