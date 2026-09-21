@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError, IntentStatus, IntentType } from '@ai-concierge/domain';
-import type { EnquiryServiceDeps } from './enquiryService.js';
+import type { ContinueEnquiryDeps, EnquiryServiceDeps } from './enquiryService.js';
 
 const mocks = vi.hoisted(() => ({
   createConversationWithMessage: vi.fn(),
@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   findIdempotencyKey: vi.fn(),
   saveIdempotencyKey: vi.fn(),
   auditRecord: vi.fn(),
+  appendMessageToConversation: vi.fn(),
+  findMessagesForConversation: vi.fn(),
 }));
 
 vi.mock('@ai-concierge/db', () => ({
@@ -15,12 +17,14 @@ vi.mock('@ai-concierge/db', () => ({
   createIntentRecord: mocks.createIntentRecord,
   findIdempotencyKey: mocks.findIdempotencyKey,
   saveIdempotencyKey: mocks.saveIdempotencyKey,
+  appendMessageToConversation: mocks.appendMessageToConversation,
+  findMessagesForConversation: mocks.findMessagesForConversation,
   PrismaAuditWriter: class {
     record = mocks.auditRecord;
   },
 }));
 
-const { submitEnquiry } = await import('./enquiryService.js');
+const { submitEnquiry, continueEnquiry } = await import('./enquiryService.js');
 
 const fakeIntent = {
   intentType: IntentType.ENQUIRY,
@@ -129,5 +133,106 @@ describe('submitEnquiry', () => {
     ).rejects.toBeInstanceOf(AppError);
 
     expect(mocks.createConversationWithMessage).toHaveBeenCalled();
+  });
+});
+
+function makeContinueDeps() {
+  const prisma = {
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({})),
+  };
+  const intentEngine = { recognize: vi.fn().mockReturnValue(fakeIntent) };
+  return { prisma, intentEngine } as unknown as ContinueEnquiryDeps;
+}
+
+describe('continueEnquiry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findIdempotencyKey.mockResolvedValue(null);
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', conversationId: 'conv-1', content: 'I want a Lamborghini Urus' },
+    ]);
+    mocks.appendMessageToConversation.mockResolvedValue({
+      id: 'msg-2',
+      conversationId: 'conv-1',
+      content: '15 to 19 Oct',
+    });
+  });
+
+  it('appends the message, recognizes intent from the accumulated transcript, and records the intent against the new message', async () => {
+    const deps = makeContinueDeps();
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: '15 to 19 Oct',
+      requestId: 'req-1',
+    });
+
+    expect(mocks.appendMessageToConversation).toHaveBeenCalledWith(
+      {},
+      TENANT_ID,
+      'conv-1',
+      '15 to 19 Oct',
+    );
+    expect(deps.intentEngine.recognize).toHaveBeenCalledWith(
+      'I want a Lamborghini Urus\n15 to 19 Oct',
+    );
+    expect(mocks.createIntentRecord).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ tenantId: TENANT_ID, messageId: 'msg-2' }),
+    );
+    expect(mocks.auditRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'enquiry.continued', entityId: 'conv-1' }),
+    );
+    expect(result).toEqual({ conversationId: 'conv-1', messageId: 'msg-2', intent: fakeIntent });
+  });
+
+  it('throws NOT_FOUND when the conversation does not belong to this tenant', async () => {
+    mocks.appendMessageToConversation.mockResolvedValue(null);
+
+    await expect(
+      continueEnquiry(makeContinueDeps(), {
+        tenantId: TENANT_ID,
+        conversationId: 'conv-missing',
+        channel: 'WHATSAPP',
+        message: 'hello',
+        requestId: 'req-2',
+      }),
+    ).rejects.toBeInstanceOf(AppError);
+  });
+
+  it('replays a stored response when the idempotency key was already used', async () => {
+    mocks.findIdempotencyKey.mockResolvedValue({
+      responseStatus: 201,
+      responseBody: { conversationId: 'conv-1', messageId: 'msg-old', intent: fakeIntent },
+    });
+
+    const result = await continueEnquiry(makeContinueDeps(), {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: '15 to 19 Oct',
+      requestId: 'req-3',
+      idempotencyKey: 'wamid.DUP',
+    });
+
+    expect(result.messageId).toBe('msg-old');
+    expect(mocks.appendMessageToConversation).not.toHaveBeenCalled();
+  });
+
+  it('saves the idempotency key when one is provided on a fresh request', async () => {
+    await continueEnquiry(makeContinueDeps(), {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: '15 to 19 Oct',
+      requestId: 'req-4',
+      idempotencyKey: 'wamid.NEW',
+    });
+
+    expect(mocks.saveIdempotencyKey).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ key: 'wamid.NEW', tenantId: TENANT_ID }),
+    );
   });
 });

@@ -1,8 +1,8 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.5.0",
-  "updatedAt": "2026-09-19",
+  "version": "0.5.1",
+  "updatedAt": "2026-09-21",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
   "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 5-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping.",
   "rules": {
@@ -127,7 +127,7 @@
       "name": "Channels, Documents, Payments, CRM & Fulfilment",
       "status": "IN_PROGRESS",
       "goal": "Every external touchpoint behind a clean interface; full 19-step journey runnable.",
-      "progressNote": "First slice delivered (docs/PHASE-5.md): a real WhatsApp (Meta Cloud API) inbound/outbound adapter with signature verification, plus runFullEnquiryPipeline, a fixed hardcoded sequence that runs Steps 1-4 automatically for one inbound message and replies over WhatsApp with whatever Step 4 determined. This is NOT the real Event/Workflow Engine (no persisted state, no multi-message journey resumption) and does NOT cover the rest of this phase's deliverables below (Web chat/Email adapters, documents, payments, CRM, delivery/return) — those remain PENDING.",
+      "progressNote": "First slice delivered (docs/PHASE-5.md): a real WhatsApp (Meta Cloud API) inbound/outbound adapter with signature verification, plus runFullEnquiryPipeline, a fixed hardcoded sequence that runs Steps 1-4 automatically for one inbound message and replies over WhatsApp with whatever Step 4 determined. This is NOT the real Event/Workflow Engine (no persisted state) and does NOT cover the rest of this phase's deliverables below (Web chat/Email adapters, documents, payments, CRM, delivery/return) — those remain PENDING. 2026-09-21: fixed a live defect where a WhatsApp follow-up message (e.g. dates/location alone, no booking verb) was evaluated independently and got the same generic non-booking reply every turn instead of a real conversation — see docs/PHASE-5.md §3/§9. A message now continues the customer's open conversation on this channel and Steps 1-3 read the conversation's accumulated transcript, not just the latest message; still not persisted multi-journey resumption.",
       "deliverables": [
         "Gateway inbound model; WhatsApp (Meta Cloud API + signature verify) [DONE — docs/PHASE-5.md], Web chat (REST + SSE) [PENDING], Email (inbound webhook + outbound) [PENDING]; templates, rate limits, receipts; NOT_CONFIGURED per adapter",
         "Document pipeline: presigned S3 uploads, MIME/size validation, AV-scan interface, extraction interface, checklist, T2 review queue [PENDING]",

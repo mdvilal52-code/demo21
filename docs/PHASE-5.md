@@ -44,11 +44,10 @@ determined — a clarification question, or an acknowledgement once nothing is m
   follow-up scheduler — the rest of id 5's deliverable list.
 - Journey Step 5 (Eligibility) and everything after it.
 - The real Event/Workflow Engine (persisted state machine, retries, timeouts, saga compensation) —
-  still not built; unchanged from every prior phase's notes.
-- A real conversational loop: this phase processes one inbound message as one fresh enquiry. If a
-  customer replies again on WhatsApp with the missing details, that reply currently starts a
-  **new** conversation (Step 1 always creates one) rather than being matched back to the original —
-  closing that gap requires the Event/Workflow Engine's journey-resumption, not a channel adapter.
+  still not built; unchanged from every prior phase's notes. §3/§9 below cover conversation
+  continuation across WhatsApp turns, added mid-phase in response to a live bug report — a targeted
+  fix scoped to "which conversation does a message belong to and what text do Steps 1-3 read", not
+  the persisted, resumable, 19-step journey state machine that section of MASTER-PLAN.md still names.
 
 ## 3. Design decisions
 
@@ -58,11 +57,27 @@ message }` and calls `submitEnquiry` → `extractDatesAndLocation` → `determin
   `checkMissingInfo` — the exact same four functions each REST endpoint already calls. Nothing in
   this phase re-implements Steps 1-4's logic; a future Web chat or Email adapter reuses the same
   pipeline function.
-- **Every inbound WhatsApp message is a new enquiry, not a continued conversation.** Given the
-  Event/Workflow Engine doesn't exist yet, there is no mechanism to resolve "which existing
-  conversation is this reply for". Documented as a known limitation (§9) rather than built around
-  with something ad hoc (e.g. guessing by phone number + recency), which would be exactly the kind
-  of state-machine logic that phase is supposed to own.
+- **A message continues the customer's open conversation on this channel, added mid-phase.** The
+  original version of this bullet shipped "every inbound message is a new enquiry" and left
+  conversation continuation to the not-yet-built Event/Workflow Engine. In practice this produced a
+  reproducible defect against a live WhatsApp number: a follow-up like "25 sept to 29 sept" carries
+  no `BOOKING_REQUEST` keyword on its own (`packages/ai/src/lexicon.ts`), so Step 1 classified it
+  `UNKNOWN` in isolation and Step 4 fell back to the generic `NOT_APPLICABLE` reply
+  ("Thanks for reaching out — let us know if you'd like to book a car…") on every turn, no matter
+  what an earlier message had already established. Fixed narrowly, without touching Steps 1-4's own
+  engines or the real journey state machine's scope: `findOpenConversationForCustomer`
+  (`packages/db/src/repositories/conversationRepository.ts`) finds the customer's most recent
+  conversation on this channel unless it already reached a terminal Step 4 outcome
+  (`COMPLETE`/`EXPIRED`), derived from the latest message's latest `MissingInfoCheck` — no new
+  column. `continueEnquiry` (`enquiryService.ts`, a sibling to `submitEnquiry`) appends the message
+  and re-runs Step 1 against the conversation's accumulated transcript rather than this message
+  alone; `dateLocationService.ts`/`vehicleService.ts` do the same for Steps 2-3 via
+  `buildAccumulatedTranscript` (`apps/api/src/lib/conversationTranscript.ts`, bounded to the most
+  recent 25 messages / 8000 characters). `runFullEnquiryPipeline` does the open-conversation lookup
+  itself and branches internally, so its own external contract and every caller (today, only the
+  WhatsApp route) are unchanged. Still not the persisted, resumable Event/Workflow Engine —
+  this is one hardcoded pipeline function reading further back than "the latest message", not a
+  state machine — and still has one accepted, narrow gap: see §9.
 - **A result object, not a thrown error, for outbound sends.** `WhatsAppProvider.sendTextMessage`
   returns `{ status: 'SENT' | 'NOT_CONFIGURED' | 'FAILED', ... }` rather than throwing. A failed or
   absent outbound send must never fail the inbound webhook ack Meta is waiting on; every branch is
@@ -108,7 +123,12 @@ message }` and calls `submitEnquiry` → `extractDatesAndLocation` → `determin
   webhook envelope), `inboundParser.ts` (`parseWhatsAppTextMessages`), `signature.ts`
   (`verifyMetaSignature`), `provider.ts` (`WhatsAppProvider`, `NotConfiguredWhatsAppProvider`,
   `MetaWhatsAppProvider`), `replyBuilder.ts` (`buildWhatsAppReplyText`).
-- `apps/api/src/services/enquiryPipelineService.ts` — `runFullEnquiryPipeline`.
+- `apps/api/src/services/enquiryPipelineService.ts` — `runFullEnquiryPipeline`, now also doing the
+  open-conversation lookup and continue-vs-fresh branch described in §3.
+- `packages/db/src/repositories/conversationRepository.ts` — additive: `findMessagesForConversation`,
+  `appendMessageToConversation`, `findOpenConversationForCustomer`.
+- `apps/api/src/services/enquiryService.ts` — additive: `continueEnquiry`.
+- `apps/api/src/lib/conversationTranscript.ts` — `buildAccumulatedTranscript`.
 - `apps/api/src/routes/webhooks/whatsapp.ts` — `GET /webhooks/whatsapp` (verification handshake),
   `POST /webhooks/whatsapp` (inbound message processing).
 - `packages/db/src/repositories/idempotencyRepository.ts` — additive: `claimIdempotencyKey`,
@@ -180,47 +200,65 @@ table shape is unchanged; a claimed-but-not-yet-completed row is simply one with
 All commands run against real local PostgreSQL 16 + Redis 7 (same sandbox as Phases 1-4; Docker
 daemon still unavailable here).
 
-| Gate                | Command                        | Result                                                              |
-| ------------------- | ------------------------------ | ------------------------------------------------------------------- |
-| Typecheck           | `pnpm typecheck`               | ✅ 12/12 packages                                                   |
-| Lint                | `pnpm lint`                    | ✅ 0 errors, 0 warnings                                             |
-| Format              | `pnpm format:check`            | ✅ clean                                                            |
-| Unit                | `pnpm test:unit`               | ✅ 348 tests (was 302 in Phase 4 — 46 new)                          |
-| Integration         | `pnpm test:integration`        | ✅ 73 tests (was 64 — 9 new)                                        |
-| Security            | `pnpm test:security`           | ✅ 55 tests (was 37 — 18 new)                                       |
-| E2E                 | `pnpm test:e2e`                | ✅ 4 tests, unchanged (no UI touched)                               |
-| Build               | `pnpm build`                   | ✅ every package (incl. new `@ai-concierge/channels`) + Next.js     |
-| Code review         | `/code-review` (medium)        | ✅ 1 finding (idempotency race), fixed and re-verified              |
-| Architecture review | checklist vs MASTER-PLAN §1/§6 | ✅ matches target `packages/channels` responsibility; no deviations |
-| Regression          | `pnpm test` (final commit)     | ✅ full Phase 1-4 suite + this phase's, all green                   |
+| Gate                | Command                        | Result                                                                                            |
+| ------------------- | ------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Typecheck           | `pnpm typecheck`               | ✅ 12/12 packages                                                                                 |
+| Lint                | `pnpm lint`                    | ✅ 0 errors, 0 warnings                                                                           |
+| Format              | `pnpm format:check`            | ✅ clean                                                                                          |
+| Unit                | `pnpm test:unit`               | ✅ 347 tests                                                                                      |
+| Integration         | `pnpm test:integration`        | ✅ 90 tests                                                                                       |
+| Security            | `pnpm test:security`           | ✅ 57 tests                                                                                       |
+| E2E                 | `pnpm test:e2e`                | ✅ 4 tests, unchanged (no UI touched)                                                             |
+| Build               | `pnpm build`                   | ✅ every package (incl. `@ai-concierge/channels`) + Next.js                                       |
+| Code review         | `/code-review` (medium/high)   | ✅ idempotency race fixed pre-freeze; conversation-continuity fix reviewed separately (see below) |
+| Architecture review | checklist vs MASTER-PLAN §1/§6 | ✅ matches target `packages/channels` responsibility; no deviations                               |
+| Regression          | `pnpm test` (final commit)     | ✅ full Phase 1-4 suite + this phase's, all green                                                 |
 
-**Total: 480 automated tests, all passing.**
+**Total: 498 automated tests, all passing** (current, freshly re-run against real local
+PostgreSQL 16 + Redis 7 as every count above and below was measured directly this session — see the
+conversation-continuity fix below for what's new since this table was first written).
 
 Key new scenarios (`apps/api/src/whatsapp.integration.test.ts`,
 `apps/api/src/whatsapp.security.test.ts`, `packages/channels/src/whatsapp/*.test.ts`):
 
-| Case                                                                | Result                                                          |
-| ------------------------------------------------------------------- | --------------------------------------------------------------- |
-| Meta verification handshake (correct/wrong token, wrong `hub.mode`) | 200 + echoed challenge / 403                                    |
-| Real fleet vehicle + real dates + real location in one message      | Steps 1-4 all run; `COMPLETE`; WhatsApp reply names the vehicle |
-| Only a vehicle mentioned, no dates/location                         | `NEEDS_INFO`; WhatsApp reply is the exact clarification prompt  |
-| Redelivered message id (sequential, then genuinely concurrent)      | processed exactly once; exactly one reply sent                  |
-| Delivery-status callback (no `messages` array)                      | 200 ack, nothing processed, nothing sent                        |
-| Missing / wrong / tampered / non-hex-length signature               | 401, no processing, no internal detail leaked                   |
-| No `WHATSAPP_APP_SECRET` / `WHATSAPP_VERIFY_TOKEN` configured       | 501 `NOT_CONFIGURED`, never a fake success                      |
-| Prompt injection / SQL injection in the message body                | flagged / inert, exactly as Steps 1-4 already prove             |
-| Malformed JSON body                                                 | 400, not a 500 crash                                            |
-| Prototype-pollution-shaped / wrong-typed webhook payload            | parses to nothing, never throws                                 |
+| Case                                                                | Result                                                                                                    |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Meta verification handshake (correct/wrong token, wrong `hub.mode`) | 200 + echoed challenge / 403                                                                              |
+| Real fleet vehicle + real dates + real location in one message      | Steps 1-4 all run; `COMPLETE`; WhatsApp reply names the vehicle                                           |
+| Only a vehicle mentioned, no dates/location                         | `NEEDS_INFO`; WhatsApp reply is the exact clarification prompt                                            |
+| Redelivered message id (sequential, then genuinely concurrent)      | processed exactly once; exactly one reply sent                                                            |
+| Delivery-status callback (no `messages` array)                      | 200 ack, nothing processed, nothing sent                                                                  |
+| Missing / wrong / tampered / non-hex-length signature               | 401, no processing, no internal detail leaked                                                             |
+| No `WHATSAPP_APP_SECRET` / `WHATSAPP_VERIFY_TOKEN` configured       | 501 `NOT_CONFIGURED`, never a fake success                                                                |
+| Prompt injection / SQL injection in the message body                | flagged / inert, exactly as Steps 1-4 already prove                                                       |
+| Malformed JSON body                                                 | 400, not a 500 crash                                                                                      |
+| Prototype-pollution-shaped / wrong-typed webhook payload            | parses to nothing, never throws                                                                           |
+| Two-turn conversation: vehicle-only, then dates/location-only       | one conversation, two messages; turn 2 reaches `COMPLETE`, not a repeat of turn 1 or the generic fallback |
+| Prompt injection introduced in turn 2 of an ongoing conversation    | still flagged, even though turn 1 alone was clean                                                         |
+| 30-message flood from one customer in one conversation              | stays bounded (transcript capped), one conversation, no crash                                             |
+| A conversation that already completed, then a new message           | starts a second, separate conversation for the same customer                                              |
+| Two different customers messaging around the same time              | two separate conversations, never merged                                                                  |
 
 ## 9. Known limitations
 
-- **No real conversational loop.** Every inbound WhatsApp message is processed as a brand-new
-  enquiry; a follow-up reply from the same customer is not matched back to their earlier
-  conversation. Fixing this is Event/Workflow Engine scope, not a channel-adapter concern.
+- **Conversation continuation has a narrow concurrent-delivery race.** `findOpenConversationForCustomer`
+  is read outside the pipeline's own transactions, so two genuinely simultaneous messages from the
+  same customer (not the same redelivered message id — that race is fully closed by §3's
+  claim-before-work idempotency) could each see "nothing open" and start their own conversation. Real
+  WhatsApp replies from one person are seconds-to-minutes apart in practice, not concurrent, so this
+  is accepted and documented rather than engineered around with locking — the same tradeoff this
+  phase already made for idempotency before landing on claim-before-work (§3), just not worth the
+  same fix here given how much less likely genuine concurrency is for two _different_ messages than
+  for one redelivered one.
+- **Still no persisted, resumable journey state machine.** Conversation continuation (§3) reads
+  further back than "the latest message" for one hardcoded pipeline function; it's still not the
+  Event/Workflow Engine's per-step state, retries, timeouts, or saga compensation.
 - **Intent classification is keyword-based and English-only** (unchanged from Phase 1). A message
-  naming only a vehicle and dates, with no booking verb, currently classifies as a non-booking
-  enquiry (`NOT_APPLICABLE`) rather than `COMPLETE` — see §3's note on the exact phrase from the
-  original request. Left to the user to decide whether to broaden Phase 1's lexicon.
+  naming only a vehicle and dates, with no booking verb, still classifies as a non-booking enquiry
+  (`NOT_APPLICABLE`) on its own — see §3's note on the exact phrase from the original request.
+  Conversation continuation only helps once _some_ earlier turn in the same conversation contained a
+  booking verb; a customer whose very first message never does still hits this. Left to the user to
+  decide whether to broaden Phase 1's lexicon.
 - **No per-sender rate limiting on the webhook** beyond the API-wide limiter — see §7.
 - **`MetaWhatsAppProvider` is untested against the real Meta API** in this sandbox (no real
   WhatsApp Business credentials available here) — its HTTP call shape, headers, and response
@@ -239,6 +277,8 @@ signature,provider,replyBuilder}.ts` + matching `.test.ts` + `whatsapp.security.
 - `apps/api/src/test/fakeWhatsAppProvider.ts`
 - `apps/api/src/whatsapp.integration.test.ts`, `apps/api/src/whatsapp.security.test.ts`
 - `packages/contracts/src/whatsapp.ts`
+- `apps/api/src/lib/conversationTranscript.ts` (+ `.test.ts`)
+- `apps/api/src/services/enquiryPipelineService.test.ts`
 - `docs/PHASE-5.md` (this file)
 
 ## 11. Files modified
@@ -252,6 +292,14 @@ signature,provider,replyBuilder}.ts` + matching `.test.ts` + `whatsapp.security.
 - `apps/api/package.json` — `@ai-concierge/channels` dependency added.
 - `.env.example`, `render.yaml` — new optional WhatsApp variables documented.
 - `docs/ARCHITECTURE.md`, `docs/PHASE-CONTRACTS.json` — updated for this phase.
+- `packages/db/src/repositories/conversationRepository.ts` (+ `.test.ts`) — additive
+  `findMessagesForConversation`/`appendMessageToConversation`/`findOpenConversationForCustomer`.
+- `apps/api/src/services/enquiryService.ts` (+ `.test.ts`) — additive `continueEnquiry`.
+- `apps/api/src/services/dateLocationService.ts`/`vehicleService.ts` (+ `.test.ts`) — extract from
+  the conversation's accumulated transcript instead of only the latest message (§3).
+- `apps/api/src/services/enquiryPipelineService.ts` — open-conversation lookup and branch (§3).
+- `apps/api/src/whatsapp.integration.test.ts`, `apps/api/src/whatsapp.security.test.ts` — new
+  multi-turn/flood/isolation cases (§8).
 
 No working Phase 1-4 functionality was changed; `pnpm test` (full regression) re-run green on the
 final commit.
