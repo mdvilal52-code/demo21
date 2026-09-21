@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { IntentEngine } from '@ai-concierge/ai';
+import { classifyShortReply, ShortReplyIntent, type IntentEngine } from '@ai-concierge/ai';
 import {
   appendMessageToConversation,
   createConversationWithMessage,
@@ -11,7 +11,14 @@ import {
   type Channel,
   type PrismaClient,
 } from '@ai-concierge/db';
-import { AppError, type TenantId } from '@ai-concierge/domain';
+import {
+  AppError,
+  BOOKING_REQUIRED_FIELDS,
+  IntentStatus,
+  IntentType,
+  type IntentResult,
+  type TenantId,
+} from '@ai-concierge/domain';
 import type { CreateEnquiryResponse } from '@ai-concierge/contracts';
 import type { Queue } from 'bullmq';
 import { buildAccumulatedTranscript } from '../lib/conversationTranscript.js';
@@ -155,6 +162,61 @@ function hashContinueRequest(input: ContinueEnquiryInput): string {
 }
 
 /**
+ * A bare "Yes"/"Sure"/... carries no BOOKING_REQUEST keyword on its own, and
+ * joining it into the accumulated transcript doesn't create one either if
+ * nothing earlier in the conversation did — so a customer confirming a
+ * booking question with a plain "Yes" would otherwise classify exactly like
+ * their first, unrecognized message did, and Step 4 would repeat the same
+ * generic non-booking reply forever instead of progressing (the reported
+ * bug: "Hiii" -> generic reply -> "Yes" -> the *same* generic reply again).
+ *
+ * Deliberately scoped to `UNKNOWN` only, not "anything other than
+ * BOOKING_REQUEST": if the transcript already recognized a *different*
+ * meaningful intent (COMPLAINT, SUPPORT_REQUEST, ...), a later "Yes" is
+ * answering whatever question *that* raised, not confirming a booking — the
+ * ambiguity this correction resolves only exists when Step 1 found no
+ * signal at all.
+ */
+function isBookingConfirmationReply(recognized: IntentResult, newMessage: string): boolean {
+  return (
+    recognized.intentType === IntentType.UNKNOWN &&
+    classifyShortReply(newMessage) === ShortReplyIntent.AFFIRMATIVE
+  );
+}
+
+/**
+ * Deterministically corrects a short affirmative reply's intent to
+ * BOOKING_REQUEST — not a new AI guess, just recognizing that "Yes" answers
+ * whatever question this (booking-focused) system just asked. Recomputes
+ * `missingFields`/`status`/`clarificationPrompt` the same way
+ * `RuleBasedIntentEngine` itself would for a BOOKING_REQUEST classification
+ * (see `intent-engine.ts`), so the persisted IntentRecord stays internally
+ * consistent instead of pairing the new intentType with the old UNKNOWN
+ * classification's (always-empty) missingFields. `engine` is tagged
+ * distinctly from `rule-based-v1` so the audit trail never implies the
+ * keyword engine itself matched a booking term it didn't.
+ */
+function confirmBookingIntent(recognized: IntentResult): IntentResult {
+  const missingFields = BOOKING_REQUIRED_FIELDS.filter(
+    (field) => recognized.entities[field] === undefined,
+  );
+  const needsClarification = missingFields.length > 0;
+
+  return {
+    ...recognized,
+    intentType: IntentType.BOOKING_REQUEST,
+    status: needsClarification ? IntentStatus.NEEDS_CLARIFICATION : IntentStatus.RECOGNIZED,
+    missingFields,
+    ...(needsClarification
+      ? {
+          clarificationPrompt: `Could you share the following to proceed: ${missingFields.join(', ')}?`,
+        }
+      : {}),
+    modelMetadata: { ...recognized.modelMetadata, engine: 'short-reply-confirmation-v1' },
+  };
+}
+
+/**
  * Appends a new message to a conversation that's already open (see
  * `findOpenConversationForCustomer`) instead of starting a fresh one, and
  * re-runs Step 1 intent recognition against the conversation's accumulated
@@ -163,13 +225,16 @@ function hashContinueRequest(input: ContinueEnquiryInput): string {
  * location, still resolves against the booking intent an earlier message in
  * the same conversation already established, instead of independently
  * looking like a non-booking message and falling back to a generic reply.
- * Steps 2-3 pick up the same accumulated transcript independently
- * (dateLocationService/vehicleService); this function only owns Step 1 and
- * the message-append, mirroring `submitEnquiry`'s shape for a conversation
- * that already exists. No `postEnquiryQueue` job here — that background
- * processing already ran (and is marked) for this conversation's first
- * message; `markConversationProcessed`'s idempotent no-op would otherwise
- * just log a warning on every follow-up turn for nothing.
+ * A bare affirmative reply ("Yes") is corrected the same way even when nothing
+ * in the transcript ever used a booking keyword — see
+ * `isBookingConfirmationReply`. Steps 2-3 pick up the same accumulated
+ * transcript independently (dateLocationService/vehicleService); this
+ * function only owns Step 1 and the message-append, mirroring
+ * `submitEnquiry`'s shape for a conversation that already exists. No
+ * `postEnquiryQueue` job here — that background processing already ran (and
+ * is marked) for this conversation's first message; `markConversationProcessed`'s
+ * idempotent no-op would otherwise just log a warning on every follow-up
+ * turn for nothing.
  */
 export async function continueEnquiry(
   deps: ContinueEnquiryDeps,
@@ -201,7 +266,10 @@ export async function continueEnquiry(
     }
 
     const transcript = buildAccumulatedTranscript([...priorMessages, message]);
-    const intent = deps.intentEngine.recognize(transcript);
+    const recognized = deps.intentEngine.recognize(transcript);
+    const intent = isBookingConfirmationReply(recognized, input.message)
+      ? confirmBookingIntent(recognized)
+      : recognized;
 
     await createIntentRecord(tx, {
       tenantId: input.tenantId,

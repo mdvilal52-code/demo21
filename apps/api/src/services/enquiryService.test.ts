@@ -187,6 +187,130 @@ describe('continueEnquiry', () => {
     expect(result).toEqual({ conversationId: 'conv-1', messageId: 'msg-2', intent: fakeIntent });
   });
 
+  it('corrects a bare "Yes" to BOOKING_REQUEST when nothing booking-shaped has been recognized yet', async () => {
+    const unrecognizedIntent = {
+      ...fakeIntent,
+      intentType: IntentType.UNKNOWN,
+      status: IntentStatus.RECOGNIZED,
+    };
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', conversationId: 'conv-1', content: 'Hiii' },
+    ]);
+    mocks.appendMessageToConversation.mockResolvedValue({
+      id: 'msg-2',
+      conversationId: 'conv-1',
+      content: 'Yes',
+    });
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(unrecognizedIntent);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: 'Yes',
+      requestId: 'req-yes',
+    });
+
+    expect(result.intent.intentType).toBe(IntentType.BOOKING_REQUEST);
+    // No vehicle/dates/location were ever mentioned, so this stays
+    // NEEDS_CLARIFICATION with all four fields listed — internally
+    // consistent with the corrected intentType, not the stale UNKNOWN
+    // classification's (always-empty) missingFields.
+    expect(result.intent.status).toBe(IntentStatus.NEEDS_CLARIFICATION);
+    expect(result.intent.missingFields).toEqual([
+      'vehicleIntent',
+      'pickupDate',
+      'returnDate',
+      'location',
+    ]);
+    expect(result.intent.clarificationPrompt).toContain('vehicleIntent');
+    // The correction is auditable/distinguishable from a real keyword match.
+    expect(result.intent.modelMetadata.engine).toBe('short-reply-confirmation-v1');
+    expect(mocks.createIntentRecord).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        intentResult: expect.objectContaining({ intentType: IntentType.BOOKING_REQUEST }),
+      }),
+    );
+  });
+
+  it('does not overwrite a different, already-recognized intent (e.g. a complaint) just because the reply is affirmative', async () => {
+    const complaintIntent = { ...fakeIntent, intentType: IntentType.COMPLAINT };
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', conversationId: 'conv-1', content: 'I have a complaint about my rental' },
+    ]);
+    mocks.appendMessageToConversation.mockResolvedValue({
+      id: 'msg-2',
+      conversationId: 'conv-1',
+      content: 'Yes',
+    });
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(complaintIntent);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: 'Yes',
+      requestId: 'req-complaint-yes',
+    });
+
+    // A "Yes" answering a complaint-related question is not a booking
+    // confirmation — only an UNKNOWN classification is ambiguous enough to
+    // correct.
+    expect(result.intent).toEqual(complaintIntent);
+  });
+
+  it('does not correct a bare "Yes" when the transcript already recognized a booking request', async () => {
+    const alreadyBooking = { ...fakeIntent, intentType: IntentType.BOOKING_REQUEST };
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', conversationId: 'conv-1', content: 'I want to rent a car' },
+    ]);
+    mocks.appendMessageToConversation.mockResolvedValue({
+      id: 'msg-2',
+      conversationId: 'conv-1',
+      content: 'Yes',
+    });
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(alreadyBooking);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: 'Yes',
+      requestId: 'req-yes-2',
+    });
+
+    // Unchanged: the engine's own metadata is preserved, nothing overridden.
+    expect(result.intent).toEqual(alreadyBooking);
+  });
+
+  it('does not correct a message that is not a short affirmative reply', async () => {
+    const unrecognizedIntent = { ...fakeIntent, intentType: IntentType.UNKNOWN };
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', conversationId: 'conv-1', content: 'Hiii' },
+    ]);
+    mocks.appendMessageToConversation.mockResolvedValue({
+      id: 'msg-2',
+      conversationId: 'conv-1',
+      content: 'What cars do you have?',
+    });
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(unrecognizedIntent);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: 'What cars do you have?',
+      requestId: 'req-other',
+    });
+
+    expect(result.intent.intentType).toBe(IntentType.UNKNOWN);
+  });
+
   it('throws NOT_FOUND when the conversation does not belong to this tenant', async () => {
     mocks.appendMessageToConversation.mockResolvedValue(null);
 

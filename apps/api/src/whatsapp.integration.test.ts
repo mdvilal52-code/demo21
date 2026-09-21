@@ -348,6 +348,50 @@ describe('WhatsApp webhook — integration', () => {
     expect(afterSecond).toHaveLength(2);
   });
 
+  it('progresses on a bare "Yes" instead of repeating the initial greeting reply (regression)', async () => {
+    const from = '971507000005';
+
+    const greeting = metaTextPayload('wamid.YES-BUG-1', from, 'Hiii');
+    const greetingResponse = await testApp.app.inject({
+      method: 'POST',
+      url: '/webhooks/whatsapp',
+      headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(greeting) },
+      payload: greeting,
+    });
+    expect(greetingResponse.statusCode).toBe(200);
+    expect(fakeProvider.sent).toHaveLength(1);
+    const greetingReply = fakeProvider.sent[0]!.body;
+    expect(greetingReply).toMatch(/let us know if you'd like to book a car/i);
+
+    // This is the exact reported bug: a bare "Yes" has no booking keyword on
+    // its own, and neither does "Hiii\nYes" as an accumulated transcript —
+    // without the fix, Step 1 still classifies this as non-booking and
+    // Step 4 sends the identical generic reply a second time.
+    const confirmation = metaTextPayload('wamid.YES-BUG-2', from, 'Yes');
+    const confirmationResponse = await testApp.app.inject({
+      method: 'POST',
+      url: '/webhooks/whatsapp',
+      headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(confirmation) },
+      payload: confirmation,
+    });
+    expect(confirmationResponse.statusCode).toBe(200);
+    expect(fakeProvider.sent).toHaveLength(2);
+    const confirmationReply = fakeProvider.sent[1]!.body;
+
+    expect(confirmationReply).not.toBe(greetingReply);
+    expect(confirmationReply).not.toMatch(/let us know if you'd like to book a car/i);
+
+    // Still one preserved conversation, and Step 1 now recognized the
+    // booking confirmation for the "Yes" message specifically.
+    const conversations = await testApp.ctx.prisma.conversation.findMany({
+      where: { customerRef: from },
+      include: { messages: { include: { intentRecords: true }, orderBy: { createdAt: 'asc' } } },
+    });
+    expect(conversations).toHaveLength(1);
+    expect(conversations[0]?.messages).toHaveLength(2);
+    expect(conversations[0]?.messages[1]?.intentRecords[0]?.intentType).toBe('BOOKING_REQUEST');
+  });
+
   it('acks 200 and does nothing for a delivery-status callback (no messages array)', async () => {
     const body = JSON.stringify({
       object: 'whatsapp_business_account',

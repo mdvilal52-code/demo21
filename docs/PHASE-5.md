@@ -253,12 +253,14 @@ Key new scenarios (`apps/api/src/whatsapp.integration.test.ts`,
 - **Still no persisted, resumable journey state machine.** Conversation continuation (§3) reads
   further back than "the latest message" for one hardcoded pipeline function; it's still not the
   Event/Workflow Engine's per-step state, retries, timeouts, or saga compensation.
-- **Intent classification is keyword-based and English-only** (unchanged from Phase 1). A message
-  naming only a vehicle and dates, with no booking verb, still classifies as a non-booking enquiry
-  (`NOT_APPLICABLE`) on its own — see §3's note on the exact phrase from the original request.
-  Conversation continuation only helps once _some_ earlier turn in the same conversation contained a
-  booking verb; a customer whose very first message never does still hits this. Left to the user to
-  decide whether to broaden Phase 1's lexicon.
+- **Intent classification is keyword-based and English-only** (unchanged from Phase 1).
+  ~~A message naming only a vehicle and dates, with no booking verb, still classifies as a
+  non-booking enquiry (`NOT_APPLICABLE`) on its own... a customer whose very first message never
+  does still hits this.~~ **Partially fixed 2026-09-21, see §14**: a bare affirmative reply
+  ("Yes") to the generic invitation now progresses instead of repeating it. A message that never
+  contains a booking verb _and_ is never a plain "Yes" (e.g. a vehicle name with no confirmation
+  either way) still falls back to `NOT_APPLICABLE` — broadening the lexicon itself remains a
+  decision left to the user.
 - **No per-sender rate limiting on the webhook** beyond the API-wide limiter — see §7.
 - **`MetaWhatsAppProvider` is untested against the real Meta API** in this sandbox (no real
   WhatsApp Business credentials available here) — its HTTP call shape, headers, and response
@@ -321,3 +323,88 @@ delivery/return) is still `PENDING`. Two open decisions for the user, not made u
    or the real Event/Workflow Engine (needed for the conversational-loop gap in §9).
 
 Do not start either until asked.
+
+## 14. Follow-up fix — 2026-09-21 — a bare "Yes" still repeated the initial greeting
+
+Same "added mid-phase in response to a live bug report" pattern §3 already describes for
+conversation continuation itself — this phase is still `IN_PROGRESS`, and this closes a gap that
+fix left open (flagged explicitly in §9 at the time: "Left to the user to decide"), not a new phase
+or a change of scope.
+
+### Reported bug
+
+```
+Customer: Hiii
+AI:       Thanks for reaching out — let us know if you'd like to book a car and we'll take it from there.
+Customer: Yes
+AI:       [the exact same message, repeated]
+```
+
+### Why §3's conversation-continuation fix didn't cover this
+
+Verified empirically (real webhook, real signature, real DB, `app.inject`) before writing any code:
+`continueEnquiry` re-runs Step 1 against the accumulated transcript (`buildAccumulatedTranscript`),
+so a follow-up like "15 to 19 Oct" resolves correctly _once an earlier turn already contained a
+booking verb_ ("I want to rent a Lamborghini Urus", per §8's own multi-turn test). But "Hiii" and
+"Yes" both carry zero `BOOKING_REQUEST` keywords, and joining them into one transcript ("Hiii\nYes")
+still doesn't create one — `RequiredFieldsEvaluator` (unchanged, `packages/ai`) short-circuits to
+`NOT_APPLICABLE` whenever `intentType !== BOOKING_REQUEST`, so Step 4 sent the identical generic
+reply a second time. This is exactly what §9's "Intent classification is keyword-based" bullet
+already flagged as a known, deliberately-deferred gap.
+
+### Fix
+
+- **`packages/ai/src/replyIntent.ts`** (new): `classifyShortReply` — a small, deterministic
+  AFFIRMATIVE/NEGATIVE/UNCLEAR classifier for a short reply, distinct from `intent-engine.ts`'s
+  keyword lexicon (which classifies what a message is _about_, not whether it answers a yes/no
+  question). Word-boundary matching only; a bare `not` negates whatever affirmative-looking word
+  follows or precedes it ("not correct", "definitely not"), not just a fixed "not now/interested"
+  list. 38 unit tests.
+- **`apps/api/src/services/enquiryService.ts`**: `continueEnquiry` now corrects the transcript-based
+  classification to `BOOKING_REQUEST` when it came back `UNKNOWN` _and_ the new message is a plain
+  affirmative reply (`isBookingConfirmationReply`) — deliberately scoped to `UNKNOWN` only, not
+  "anything other than BOOKING_REQUEST", so a "Yes" answering a different already-recognized intent
+  (COMPLAINT, SUPPORT_REQUEST, ...) is never silently reinterpreted as a booking confirmation.
+  `confirmBookingIntent` recomputes `missingFields`/`status`/`clarificationPrompt` the same way
+  `RuleBasedIntentEngine` itself would, so the persisted `IntentRecord` stays internally consistent,
+  and tags `modelMetadata.engine` distinctly (`short-reply-confirmation-v1`) so the audit trail never
+  implies the keyword engine matched a term it didn't. 4 new unit tests (correction fires on
+  `UNKNOWN`; does not fire once already `BOOKING_REQUEST`; does not fire for a different recognized
+  intent; does not fire for a non-affirmative reply).
+
+No changes to `packages/channels`, the webhook route, `RequiredFieldsEvaluator`, or any Step 2/3
+service — this only corrects what Step 1 hands to the already-existing, already-tested pipeline.
+
+### Test results
+
+Real local PostgreSQL 16 + Redis 7, real `app.inject`, real HMAC signatures — same discipline as §8.
+
+| Gate        | Result                                                        |
+| ----------- | ------------------------------------------------------------- |
+| Typecheck   | ✅ 12/12 packages                                             |
+| Lint        | ✅ 0 errors, 0 warnings                                       |
+| Format      | ✅ clean                                                      |
+| Unit        | ✅ all packages green (+42 tests over §8's 322-test baseline) |
+| Integration | ✅ 91 tests (+1 over §8's 90)                                 |
+| Security    | ✅ 57 tests — unchanged, all still passing                    |
+| E2E         | ✅ 4 tests, unchanged (no UI touched)                         |
+| Build       | ✅ every package + Next.js production build                   |
+
+New permanent regression in `apps/api/src/whatsapp.integration.test.ts`: `'progresses on a bare
+"Yes" instead of repeating the initial greeting reply (regression)'` — sends `Hiii` then `Yes` as two
+separate signed webhook deliveries from the same customer, asserts the second reply differs from the
+first and is not the generic invitation text, and asserts the `Yes` message's own `IntentRecord`
+shows `BOOKING_REQUEST`.
+
+### Confirmation
+
+Re-ran the exact reported scenario against this fix: `Hiii` → generic invitation; `Yes` → a
+different reply asking for vehicle/pickup/return/location, never a repeat. Verified both before
+(bug reproduced) and after (fixed) the code change, not just via the new test.
+
+### Known, accepted limitation (not fixed here)
+
+A message that never contains a booking verb _and_ is never a plain yes/no (e.g. just naming a
+vehicle, with no confirmation either way, as the customer's very first message) still falls back to
+the generic `NOT_APPLICABLE` reply — this fix only closes the yes/no-shaped gap, not §9's broader
+"broaden the lexicon" decision, which stays explicitly left to the user.
