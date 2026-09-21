@@ -35,6 +35,8 @@ export function buildWhatsAppReplyText(missingInfo: MissingInfoResult): string {
       return 'This enquiry has been open for a while — could you resend your request so we can start fresh?';
     case MissingInfoStatus.NOT_APPLICABLE:
       return "Thanks for reaching out — let us know if you'd like to book a car and we'll take it from there.";
+    case MissingInfoStatus.CANCELLED:
+      return "No problem — I've cancelled that booking request. Let us know whenever you'd like to start a new one.";
     default:
       return 'Thank you for your message — our team will get back to you shortly.';
   }

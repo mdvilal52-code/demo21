@@ -72,6 +72,108 @@ describe('RequiredFieldsEvaluator', () => {
     expect(result.missingFields).toEqual([]);
   });
 
+  it('is NOT_APPLICABLE for a non-booking intent when nothing has been collected yet', () => {
+    const result = makeEvaluator().evaluate({
+      intent: { intentType: 'DOCUMENT_REQUEST', promptInjectionDetected: false },
+      dateLocation: null,
+      vehicle: null,
+      conversationCreatedAt: NOW,
+      now: NOW,
+    });
+    expect(result.status).toBe('NOT_APPLICABLE');
+  });
+
+  it('still proceeds (does not discard progress) for a non-booking intent once a vehicle is already resolved', () => {
+    // e.g. "what documents do I need?" mid-booking: Step 1 classifies this
+    // turn as DOCUMENT_REQUEST, but Steps 2-3 already resolved a vehicle for
+    // this conversation on an earlier turn — losing that to NOT_APPLICABLE
+    // would silently reset an in-progress booking.
+    const result = makeEvaluator().evaluate({
+      intent: { intentType: 'DOCUMENT_REQUEST', promptInjectionDetected: false },
+      dateLocation: null,
+      vehicle: RESOLVED_VEHICLE,
+      conversationCreatedAt: NOW,
+      now: NOW,
+    });
+    expect(result.status).toBe('NEEDS_INFO');
+    expect(result.collected.vehicle).toEqual(URUS);
+    expect(result.missingFields).toEqual(
+      expect.arrayContaining([
+        { field: 'PICKUP_DATE', reason: 'NOT_PROVIDED' },
+        { field: 'RETURN_DATE', reason: 'NOT_PROVIDED' },
+        { field: 'PICKUP_LOCATION', reason: 'NOT_PROVIDED' },
+      ]),
+    );
+  });
+
+  it('still proceeds for a non-booking intent once a pickup date is already resolved', () => {
+    const result = makeEvaluator().evaluate({
+      intent: { intentType: 'SUPPORT_REQUEST', promptInjectionDetected: false },
+      dateLocation: { ...COMPLETE_DATE_LOCATION, pickupLocation: null },
+      vehicle: null,
+      conversationCreatedAt: NOW,
+      now: NOW,
+    });
+    expect(result.status).toBe('NEEDS_INFO');
+    expect(result.collected.pickupDate).toBe('2026-10-15T06:00:00.000Z');
+  });
+
+  it('is NOT_APPLICABLE for a non-booking intent when a vehicle was only ambiguously matched, not resolved', () => {
+    // An unresolved attempt is not "collected" data — nothing would be lost
+    // by staying NOT_APPLICABLE, so the gate does not treat it as progress.
+    const result = makeEvaluator().evaluate({
+      intent: { intentType: 'PRICE_REQUEST', promptInjectionDetected: false },
+      dateLocation: null,
+      vehicle: {
+        status: 'NEEDS_CLARIFICATION',
+        resolvedVehicle: null,
+        ambiguities: [
+          { field: 'vehicle', code: 'CATEGORY_ONLY_MULTIPLE_MATCHES', message: 'pick one' },
+        ],
+        validationErrors: [],
+        promptInjectionDetected: false,
+      },
+      conversationCreatedAt: NOW,
+      now: NOW,
+    });
+    expect(result.status).toBe('NOT_APPLICABLE');
+  });
+
+  it('is CANCELLED when the customer cancels a booking that has real progress', () => {
+    const result = makeEvaluator().evaluate({
+      intent: { intentType: 'CANCEL_REQUEST', promptInjectionDetected: false },
+      dateLocation: null,
+      vehicle: RESOLVED_VEHICLE,
+      conversationCreatedAt: NOW,
+      now: NOW,
+    });
+    expect(result.status).toBe('CANCELLED');
+    expect(result.collected.vehicle).toEqual(URUS);
+    expect(result.missingFields).toEqual([]);
+  });
+
+  it('is CANCELLED even once the booking was already COMPLETE — cancellation wins', () => {
+    const result = makeEvaluator().evaluate({
+      intent: { intentType: 'CANCEL_REQUEST', promptInjectionDetected: false },
+      dateLocation: COMPLETE_DATE_LOCATION,
+      vehicle: RESOLVED_VEHICLE,
+      conversationCreatedAt: NOW,
+      now: NOW,
+    });
+    expect(result.status).toBe('CANCELLED');
+  });
+
+  it('is NOT_APPLICABLE for a cancel request when there was never anything to cancel', () => {
+    const result = makeEvaluator().evaluate({
+      intent: { intentType: 'CANCEL_REQUEST', promptInjectionDetected: false },
+      dateLocation: null,
+      vehicle: null,
+      conversationCreatedAt: NOW,
+      now: NOW,
+    });
+    expect(result.status).toBe('NOT_APPLICABLE');
+  });
+
   it('is NOT_APPLICABLE when no intent has been recognized at all', () => {
     const result = makeEvaluator().evaluate({
       intent: null,

@@ -116,12 +116,13 @@ export async function appendMessageToConversation(
 
 /**
  * The customer's most recent conversation on this channel, unless it
- * already reached a terminal Step 4 outcome (COMPLETE/EXPIRED) — in which
- * case there is nothing open to continue and the caller should start a new
- * conversation instead. "Open" is derived from the latest message's latest
- * MissingInfoCheck rather than a new column: same append-only-history
- * convention every other cross-step read in this codebase already uses, so
- * there's no second source of truth to keep in sync.
+ * already reached a terminal Step 4 outcome (COMPLETE/EXPIRED/CANCELLED) —
+ * in which case there is nothing open to continue and the caller should
+ * start a new conversation instead. "Open" is derived from the latest
+ * message's latest MissingInfoCheck rather than a new column: same
+ * append-only-history convention every other cross-step read in this
+ * codebase already uses, so there's no second source of truth to keep in
+ * sync.
  *
  * Read outside any transaction, so two genuinely concurrent deliveries for
  * the same customer could both see "nothing open" and each start their own
@@ -157,7 +158,9 @@ export async function findOpenConversationForCustomer(
   if (!conversation) return null;
 
   const latestStatus = conversation.messages[0]?.missingInfoChecks[0]?.status;
-  if (latestStatus === 'COMPLETE' || latestStatus === 'EXPIRED') return null;
+  if (latestStatus === 'COMPLETE' || latestStatus === 'EXPIRED' || latestStatus === 'CANCELLED') {
+    return null;
+  }
 
   return { id: conversation.id };
 }

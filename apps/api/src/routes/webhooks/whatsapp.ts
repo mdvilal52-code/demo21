@@ -18,7 +18,10 @@ import {
 } from '@ai-concierge/contracts';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { AppContext } from '../../context.js';
-import { runFullEnquiryPipeline } from '../../services/enquiryPipelineService.js';
+import {
+  runFullEnquiryPipeline,
+  type FullEnquiryPipelineResult,
+} from '../../services/enquiryPipelineService.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -27,6 +30,46 @@ declare module 'fastify' {
 }
 
 const WHATSAPP_CHANNEL: Channel = 'WHATSAPP';
+
+/**
+ * One structured line per processed message: session id, intent, stage and
+ * the fields still missing, plus which decision path Step 1 took (the raw
+ * keyword engine, or one of `enquiryService.ts`'s corrections — see
+ * `modelMetadata.engine`) — everything needed to debug *why* a given reply
+ * was sent, without ever logging the message itself. Deliberately narrow
+ * about what it includes: `conversationId`/`messageId` are opaque ids, never
+ * the customer's phone number or message text, and each `missingFields`
+ * entry keeps only `field`/`reason` — never `detail`, which can echo back a
+ * fragment of the customer's own text (e.g. an unmatched vehicle name).
+ * `ctx.logger`'s own redact paths (`packages/observability/src/logger.ts`)
+ * are a second, independent backstop if a field named message/content ever
+ * did end up here.
+ */
+function logPipelineDecision(
+  ctx: AppContext,
+  requestId: string,
+  pipeline: FullEnquiryPipelineResult,
+): void {
+  const intent = pipeline.enquiry.intent;
+  const missingInfo = pipeline.missingInfo.missingInfo;
+  ctx.logger.info(
+    {
+      requestId,
+      conversationId: pipeline.enquiry.conversationId,
+      messageId: pipeline.enquiry.messageId,
+      intentType: intent.intentType,
+      intentStatus: intent.status,
+      decisionEngine: intent.modelMetadata.engine,
+      stage: missingInfo.status,
+      missingFields: missingInfo.missingFields.map((field) => ({
+        field: field.field,
+        reason: field.reason,
+      })),
+      promptInjectionDetected: missingInfo.flags.promptInjectionDetectedAnywhere,
+    },
+    'whatsapp pipeline decision',
+  );
+}
 
 /**
  * Steps 1-4, automatically, for one inbound WhatsApp text message, then
@@ -73,6 +116,8 @@ async function processInboundMessage(
         requestId,
       },
     );
+
+    logPipelineDecision(ctx, requestId, pipeline);
 
     const replyText = buildWhatsAppReplyText(pipeline.missingInfo.missingInfo);
     const sendResult = await ctx.whatsappProvider.sendTextMessage(inbound.from, replyText);

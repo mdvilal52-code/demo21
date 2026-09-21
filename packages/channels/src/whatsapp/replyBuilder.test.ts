@@ -79,6 +79,14 @@ describe('buildWhatsAppReplyText', () => {
     ).toMatch(/book a car/i);
   });
 
+  it('gives a distinct acknowledgement message for CANCELLED', () => {
+    const text = buildWhatsAppReplyText(baseResult({ status: MissingInfoStatus.CANCELLED }));
+    expect(text).toMatch(/cancel/i);
+    // Never confusable with any other status's copy.
+    expect(text).not.toMatch(/book a car and we'll take it from there/i);
+    expect(text).not.toMatch(/quote/i);
+  });
+
   it('falls back to a generic message if NEEDS_INFO somehow has no prompt', () => {
     const text = buildWhatsAppReplyText(
       baseResult({ status: MissingInfoStatus.NEEDS_INFO, clarificationPrompt: null }),

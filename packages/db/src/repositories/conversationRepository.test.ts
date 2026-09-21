@@ -281,7 +281,7 @@ describe('conversationRepository', () => {
       },
     );
 
-    it.each(['COMPLETE', 'EXPIRED'] as const)(
+    it.each(['COMPLETE', 'EXPIRED', 'CANCELLED'] as const)(
       'returns null once Step 4 last returned the terminal status %s',
       async (status) => {
         const { message } = await createConversationWithMessage(prisma, {

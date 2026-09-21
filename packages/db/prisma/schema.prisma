@@ -66,6 +66,7 @@ model Message {
 enum IntentType {
   ENQUIRY
   BOOKING_REQUEST
+  CANCEL_REQUEST
   AVAILABILITY_REQUEST
   PRICE_REQUEST
   DOCUMENT_REQUEST
@@ -282,6 +283,7 @@ enum MissingInfoStatus {
   NEEDS_INFO
   EXPIRED
   NOT_APPLICABLE
+  CANCELLED
 }
 
 /// Step 4 — Ask Missing Information. One row per completeness check against

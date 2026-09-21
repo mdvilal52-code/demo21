@@ -60,6 +60,8 @@ export const MissingInfoStatus = {
   EXPIRED: 'EXPIRED',
   /** The conversation's intent isn't a booking request, so this check doesn't apply. */
   NOT_APPLICABLE: 'NOT_APPLICABLE',
+  /** The customer explicitly cancelled a booking that had real progress collected. */
+  CANCELLED: 'CANCELLED',
 } as const;
 
 export const missingInfoStatusSchema = z.enum([
@@ -67,6 +69,7 @@ export const missingInfoStatusSchema = z.enum([
   MissingInfoStatus.NEEDS_INFO,
   MissingInfoStatus.EXPIRED,
   MissingInfoStatus.NOT_APPLICABLE,
+  MissingInfoStatus.CANCELLED,
 ]);
 export type MissingInfoStatusValue = z.infer<typeof missingInfoStatusSchema>;
 

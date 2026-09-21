@@ -3,6 +3,7 @@ import {
   type VehicleCategoryValue,
   type VehicleMatchTypeValue,
 } from '@ai-concierge/domain';
+import { LOCATION_KEYWORDS } from '../lexicon.js';
 import { CATEGORY_KEYWORDS } from './categoryKeywords.js';
 import { similarityRatio } from './levenshtein.js';
 import type { VehicleLexiconEntry } from './vehicleCatalogProvider.js';
@@ -31,8 +32,14 @@ const FUZZY_SIMILARITY_THRESHOLD = 0.75;
  * 2-3 word Capitalized phrases — two consecutive capitalized words together
  * are a strong proper-noun signal regardless of position (e.g. "Toyota
  * Corolla"), unlike ordinary English sentence-initial capitalization.
+ *
+ * Horizontal whitespace only (never \n): `propose` runs against an
+ * accumulated multi-message transcript joined with "\n" (see
+ * `buildAccumulatedTranscript`), so a plain `\s` here would let the last
+ * capitalized word of one message merge with the first capitalized word of
+ * the next (e.g. "Hi" + "Yes" -> "Hi\nYes") into one bogus phrase.
  */
-const MULTI_WORD_CAPITALIZED_PHRASE_RE = /\b[A-Z][a-zA-Z]*(?:\s+[A-Z][a-zA-Z]*){1,2}\b/g;
+const MULTI_WORD_CAPITALIZED_PHRASE_RE = /\b[A-Z][a-zA-Z]*(?:[ \t]+[A-Z][a-zA-Z]*){1,2}\b/g;
 
 /** A single Capitalized word — only meaningful as a proper-noun signal away from the very start of the sentence (see `extractVehicleShapedPhrases`). */
 const SINGLE_CAPITALIZED_WORD_RE = /\b[A-Z][a-zA-Z]+\b/g;
@@ -53,17 +60,85 @@ function textMentions(text: string, phrase: string): RegExpMatchArray | null {
 }
 
 /**
+ * True when nothing but horizontal whitespace precedes `index` on its line
+ * — i.e. `index` is the first word of the whole text, or the first word of
+ * a line within it. `text` may be an accumulated multi-message transcript
+ * joined by "\n" (see `buildAccumulatedTranscript`), where each line is an
+ * independent message with its own sentence-initial position; checking only
+ * absolute index 0 would treat every message after the first as never
+ * sentence-initial, so a lone reply like "Yes" or "What" or "Pickup" would
+ * be misread as a proper-noun/vehicle-shaped signal purely for landing after
+ * the first message.
+ */
+function isLineInitial(text: string, index: number | undefined): boolean {
+  if (index === undefined) return false;
+  return /(?:^|\n)[ \t]*$/.test(text.slice(0, index));
+}
+
+/** 0-based line number of `index` in `text` — how many "\n"s precede it. */
+function lineNumberAt(text: string, index: number | undefined): number {
+  if (index === undefined) return 0;
+  let line = 0;
+  for (let i = 0; i < index; i += 1) {
+    if (text[i] === '\n') line += 1;
+  }
+  return line;
+}
+
+/**
+ * When every candidate is on the same line, they were named together in one
+ * message — a genuine choice between them, left untouched. When they span
+ * more than one line, only the ones on the *last* line survive: the
+ * customer named an earlier vehicle in an earlier message and a different
+ * one more recently, which reads as changing their mind, not as asking to
+ * pick between both.
+ */
+function preferMostRecentMessageWhenDistinct<T extends { line: number }>(
+  results: T[],
+): Omit<T, 'line'>[] {
+  const survivors =
+    results.length > 1 && new Set(results.map((r) => r.line)).size > 1
+      ? results.filter((r) => r.line === Math.max(...results.map((r) => r.line)))
+      : results;
+  return survivors.map(({ line: _line, ...rest }) => rest);
+}
+
+/**
+ * True when a capitalized phrase reads as a location mention rather than a
+ * vehicle mention — e.g. "Pickup Dubai Airport" or "Dubai Marina" have
+ * exactly the same "2-3 Capitalized Words" shape as "Lamborghini Urus", but
+ * are answering a location question, not naming a car. Reuses
+ * `LOCATION_KEYWORDS` (the same list Step 1 matches locations against —
+ * `lexicon.ts`) rather than a second, potentially-drifting list. Checked
+ * both directions since either side can be the longer string: the phrase
+ * may carry extra words around a known location ("Pickup Dubai Airport"
+ * contains "dubai airport"), or be a fragment of one after the multi-word
+ * regex above and this single-word one split it ("Airport" alone is
+ * contained in "dubai airport").
+ *
+ * Only suppresses the vehicle-shaped *fallback* signal (fuzzy matching and
+ * the final "not a vehicle we currently offer" message) — real fleet
+ * vehicles are always found first via `matchExactModel`/`matchBrandOnly`/
+ * `matchCategoryOnly`, which match directly against the fleet lexicon and
+ * never call this.
+ */
+function isLocationShapedPhrase(phrase: string): boolean {
+  const lower = phrase.toLowerCase();
+  return LOCATION_KEYWORDS.some((keyword) => lower.includes(keyword) || keyword.includes(lower));
+}
+
+/**
  * Multi-word capitalized phrases anywhere, plus single capitalized words
- * that are *not* the very first word of the (trimmed) text — sentence-
- * initial capitalization is grammatically mandatory in English and carries
+ * that are *not* the first word of their message — sentence-initial
+ * capitalization is grammatically mandatory in English and carries
  * no proper-noun signal on its own (e.g. "What time..." / "I want...").
  */
 function extractVehicleShapedPhrases(text: string): string[] {
   const multiWord = [...text.matchAll(MULTI_WORD_CAPITALIZED_PHRASE_RE)].map((match) => match[0]);
   const singleWord = [...text.matchAll(SINGLE_CAPITALIZED_WORD_RE)]
-    .filter((match) => match.index !== 0)
+    .filter((match) => !isLineInitial(text, match.index))
     .map((match) => match[0]);
-  return [...multiWord, ...singleWord];
+  return [...multiWord, ...singleWord].filter((phrase) => !isLocationShapedPhrase(phrase));
 }
 
 /**
@@ -97,8 +172,18 @@ export class VehicleIntentService {
     return { candidates: [], rawMention: this.findGenericVehiclePhrase(text) };
   }
 
+  /**
+   * `text` may be an accumulated multi-message transcript, so a still-open
+   * mention from an earlier turn (e.g. the customer's first vehicle pick)
+   * stays matchable alongside a later one. Two *different* exact models
+   * both matching is ambiguous only when they're named in the *same*
+   * message ("the Urus or the Range Rover?") — across different messages
+   * it's a change of mind ("Urus" in turn 3, "actually the Range Rover
+   * instead" in turn 7), so only the vehicle named in the most recent
+   * message carries forward; see `preferMostRecentMessageWhenDistinct`.
+   */
   private matchExactModel(text: string, lexicon: VehicleLexiconEntry[]): VehicleMentionCandidate[] {
-    const results: VehicleMentionCandidate[] = [];
+    const results: (VehicleMentionCandidate & { line: number })[] = [];
     for (const entry of lexicon) {
       const fullMatch = textMentions(text, `${entry.make} ${entry.model}`);
       const match = fullMatch ?? textMentions(text, entry.model);
@@ -111,10 +196,11 @@ export class VehicleIntentService {
           matchType: VehicleMatchType.EXACT_MODEL,
           matchedText: match[0],
           similarity: 1,
+          line: lineNumberAt(text, match.index),
         });
       }
     }
-    return results;
+    return preferMostRecentMessageWhenDistinct(results);
   }
 
   private matchBrandOnly(text: string, lexicon: VehicleLexiconEntry[]): VehicleMentionCandidate[] {

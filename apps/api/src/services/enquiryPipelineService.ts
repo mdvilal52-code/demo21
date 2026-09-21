@@ -50,7 +50,7 @@ export interface FullEnquiryPipelineResult {
  * earlier message in the same conversation already resolved rather than
  * evaluated on its own — see docs/PHASE-5.md's amendment for why. A new
  * conversation starts once the open one reaches a terminal Step 4 outcome
- * (COMPLETE/EXPIRED) or none exists yet. This lookup happens for every
+ * (COMPLETE/EXPIRED/CANCELLED) or none exists yet. This lookup happens for every
  * channel that calls this function, not just WhatsApp — today that's only
  * WhatsApp in practice, but the behavior is channel-agnostic like the rest
  * of this function.

@@ -65,7 +65,43 @@ describe('WhatsApp webhook — integration', () => {
       transmission: 'AUTOMATIC',
       pricingProfile: { currency: 'AED', dailyRate: 3500 },
     });
+    await createVehicle(testApp.ctx.prisma, {
+      tenantId: TEST_TENANT_ID,
+      make: 'Ferrari',
+      model: '812',
+      category: 'SPORTS',
+      luxuryTier: 'ULTRA_LUXURY',
+      seats: 2,
+      luggage: 1,
+      transmission: 'AUTOMATIC',
+      pricingProfile: { currency: 'AED', dailyRate: 4500 },
+    });
   });
+
+  let turnSeq = 0;
+
+  /** One inbound WhatsApp turn: signs, posts, and returns the latest outbound reply. */
+  async function send(from: string, text: string, id?: string) {
+    turnSeq += 1;
+    const body = metaTextPayload(id ?? `wamid.TURN-${from}-${turnSeq}`, from, text);
+    const response = await testApp.app.inject({
+      method: 'POST',
+      url: '/webhooks/whatsapp',
+      headers: { 'content-type': 'application/json', 'x-hub-signature-256': sign(body) },
+      payload: body,
+    });
+    return {
+      status: response.statusCode,
+      reply: fakeProvider.sent[fakeProvider.sent.length - 1]?.body ?? null,
+    };
+  }
+
+  async function latestMissingInfo(from: string) {
+    return testApp.ctx.prisma.missingInfoCheck.findFirst({
+      orderBy: { createdAt: 'desc' },
+      where: { message: { conversation: { customerRef: from } } },
+    });
+  }
 
   it('verifies the Meta webhook handshake and echoes the challenge', async () => {
     const response = await testApp.app.inject({
@@ -390,6 +426,134 @@ describe('WhatsApp webhook — integration', () => {
     expect(conversations).toHaveLength(1);
     expect(conversations[0]?.messages).toHaveLength(2);
     expect(conversations[0]?.messages[1]?.intentRecords[0]?.intentType).toBe('BOOKING_REQUEST');
+  });
+
+  it('resolves a bare vehicle name with no booking keyword, then re-asks the same question for an unclear follow-up', async () => {
+    const from = '971507000006';
+    await send(from, 'Hi');
+    await send(from, 'Yes');
+
+    // "Lamborghini Urus" alone carries no BOOKING_REQUEST keyword — only
+    // entities (see enquiryService.ts's hasBookingShapedEntities).
+    const vehicleReply = await send(from, 'Lamborghini Urus');
+    expect(vehicleReply.reply).toMatch(/pick up the car/i);
+    expect(vehicleReply.reply).toMatch(/return the car/i);
+    expect(vehicleReply.reply).not.toMatch(/which vehicle/i);
+
+    // "OK" adds no new information, so it must re-ask exactly the same
+    // still-pending question — never advance, never reset, never repeat an
+    // already-answered question (the vehicle).
+    const unclearReply = await send(from, 'OK');
+    expect(unclearReply.reply).toBe(vehicleReply.reply);
+
+    const conversations = await testApp.ctx.prisma.conversation.count({
+      where: { customerRef: from },
+    });
+    expect(conversations).toBe(1);
+  });
+
+  it('reaches COMPLETE from a single fully-structured message with all fields in any format', async () => {
+    const from = '971507000007';
+    const message = [
+      'Vehicle: Lamborghini Urus',
+      'Pickup Date: September 25, 2026',
+      'Pickup Time: 10:00 AM',
+      'Return Date: September 28, 2026',
+      'Return Time: 10:00 AM',
+      'Pickup Location: Dubai International Airport (DXB), Dubai',
+    ].join('\n');
+
+    const { reply } = await send(from, message);
+    expect(reply).toMatch(/Lamborghini Urus/);
+    expect(reply).toMatch(/2026-09-25 to 2026-09-28/);
+    expect(reply).toMatch(/Dubai/);
+    expect(reply).toMatch(/quote/i);
+
+    const check = await latestMissingInfo(from);
+    expect(check?.status).toBe(MissingInfoStatus.COMPLETE);
+  });
+
+  it('collects fields arriving in a different order across turns, including a location-only reply', async () => {
+    const from = '971507000008';
+    await send(from, 'Hi');
+    await send(from, 'Yes');
+
+    // Regression: "Pickup Dubai Airport" has the same "2-3 capitalized
+    // words" shape as a vehicle name ("Lamborghini Urus") but is a location.
+    const locationReply = await send(from, 'Pickup Dubai Airport');
+    expect(locationReply.reply).not.toMatch(/not a vehicle/i);
+    expect(locationReply.reply).toMatch(/which vehicle/i);
+
+    const vehicleReply = await send(from, 'Lamborghini Urus');
+    expect(vehicleReply.reply).not.toMatch(/which vehicle/i);
+
+    const datesReply = await send(from, '25 September to 28 September');
+    expect(datesReply.reply).toMatch(/quote/i);
+
+    const check = await latestMissingInfo(from);
+    expect(check?.status).toBe(MissingInfoStatus.COMPLETE);
+  });
+
+  it('re-asks the same pending question for an unclear reply mid-booking, never the generic fallback', async () => {
+    const from = '971507000009';
+    await send(from, 'Hi');
+    await send(from, 'Yes');
+    // Vehicle resolved, dates + location still pending.
+    const pendingReply = await send(from, 'Lamborghini Urus');
+
+    const unclearReply = await send(from, 'hmm not sure what you mean');
+    expect(unclearReply.reply).toBe(pendingReply.reply);
+    expect(unclearReply.reply).not.toMatch(/let us know if you'd like to book a car/i);
+  });
+
+  it('treats a later, different vehicle mention as a change of mind, not an ambiguity', async () => {
+    const from = '971507000010';
+    await send(from, 'Hi');
+    await send(from, 'Yes');
+    await send(from, 'Lamborghini Urus');
+    const { reply } = await send(from, 'Actually give me the Ferrari 812 instead');
+
+    expect(reply).not.toMatch(/vehicles matched/i);
+    expect(reply).not.toMatch(/which vehicle/i);
+
+    const check = await latestMissingInfo(from);
+    const vehicle = (check?.collected as { vehicle: { make: string; model: string } | null })
+      ?.vehicle;
+    expect(vehicle?.make).toBe('Ferrari');
+    expect(vehicle?.model).toBe('812');
+  });
+
+  it('re-asks the pending question for a side question mid-booking instead of discarding progress', async () => {
+    const from = '971507000011';
+    await send(from, 'Hi');
+    await send(from, 'Yes');
+    const pendingReply = await send(from, 'Lamborghini Urus');
+
+    // DOCUMENT_REQUEST is a real classification this system has no
+    // dedicated answer for; the important behavior is that it does not
+    // discard the in-progress booking and fall back to the generic reply.
+    const sideQuestionReply = await send(from, 'What documents do I need to rent a car?');
+    expect(sideQuestionReply.reply).toBe(pendingReply.reply);
+    expect(sideQuestionReply.reply).not.toMatch(/let us know if you'd like to book a car/i);
+  });
+
+  it('acknowledges an explicit cancellation mid-booking and starts fresh on the next message', async () => {
+    const from = '971507000012';
+    await send(from, 'Hi');
+    await send(from, 'Yes');
+    await send(from, 'Lamborghini Urus');
+
+    const { reply } = await send(from, 'cancel');
+    expect(reply).toMatch(/cancel/i);
+
+    const check = await latestMissingInfo(from);
+    expect(check?.status).toBe(MissingInfoStatus.CANCELLED);
+
+    await send(from, 'Hi again');
+    const conversations = await testApp.ctx.prisma.conversation.count({
+      where: { customerRef: from },
+    });
+    expect(conversations).toBe(2);
   });
 
   it('acks 200 and does nothing for a delivery-status callback (no messages array)', async () => {
