@@ -1,5 +1,6 @@
 import type {
   DateLocationExtractionOrchestrator,
+  EligibilityOrchestrator,
   IntentEngine,
   MissingInfoOrchestrator,
   VehicleDeterminationOrchestrator,
@@ -21,6 +22,7 @@ export interface AppContext {
   dateLocationOrchestrator: DateLocationExtractionOrchestrator;
   vehicleOrchestrator: VehicleDeterminationOrchestrator;
   missingInfoOrchestrator: MissingInfoOrchestrator;
+  eligibilityOrchestrator: EligibilityOrchestrator;
   whatsappProvider: WhatsAppProvider;
   observabilityStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
 }

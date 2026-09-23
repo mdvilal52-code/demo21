@@ -32,3 +32,12 @@ export * from './step3/orchestrator.js';
 export * from './step4/requiredFieldsEvaluator.js';
 export * from './step4/clarificationPromptBuilder.js';
 export * from './step4/orchestrator.js';
+
+// Step 5 — Eligibility
+export * from './step5/types.js';
+export * from './step5/age.js';
+export * from './step5/rules/index.js';
+export * from './step5/policyValidator.js';
+export * from './step5/exceptionResolver.js';
+export * from './step5/reasonBuilder.js';
+export * from './step5/orchestrator.js';

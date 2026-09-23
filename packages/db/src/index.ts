@@ -7,3 +7,6 @@ export * from './repositories/dateLocationExtractionRepository.js';
 export * from './repositories/vehicleRepository.js';
 export * from './repositories/vehicleDeterminationRepository.js';
 export * from './repositories/missingInfoCheckRepository.js';
+export * from './repositories/eligibilityPolicyRepository.js';
+export * from './repositories/eligibilityExceptionRepository.js';
+export * from './repositories/eligibilityDecisionRepository.js';

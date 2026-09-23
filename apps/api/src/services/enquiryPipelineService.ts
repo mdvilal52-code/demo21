@@ -40,7 +40,7 @@ export interface FullEnquiryPipelineResult {
  * Sequentially runs Steps 1-4 for a single inbound message from any channel.
  * This is a fixed, hardcoded sequence for exactly one message — not the real
  * persisted journey state machine (MASTER-PLAN.md's Event/Workflow Engine),
- * which still doesn't exist (see PHASE-4.md §13, docs/PHASE-5.md). Each step
+ * which still doesn't exist (see PHASE-4.md §13, docs/PHASE-5-CHANNELS.md). Each step
  * below is the exact same already-tested service its own REST endpoint
  * calls; nothing here re-implements Steps 1-4's logic.
  *
@@ -48,7 +48,7 @@ export interface FullEnquiryPipelineResult {
  * (`findOpenConversationForCustomer`) instead of always starting a fresh
  * one, so a reply to a clarification question is merged with what an
  * earlier message in the same conversation already resolved rather than
- * evaluated on its own — see docs/PHASE-5.md's amendment for why. A new
+ * evaluated on its own — see docs/PHASE-5-CHANNELS.md's amendment for why. A new
  * conversation starts once the open one reaches a terminal Step 4 outcome
  * (COMPLETE/EXPIRED/CANCELLED) or none exists yet. This lookup happens for every
  * channel that calls this function, not just WhatsApp — today that's only

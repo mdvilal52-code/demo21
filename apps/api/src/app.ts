@@ -15,6 +15,7 @@ import { enquiryRoutes } from './routes/v1/enquiries.js';
 import { temporalRoutes } from './routes/v1/temporal.js';
 import { vehicleRoutes } from './routes/v1/vehicle.js';
 import { missingInfoRoutes } from './routes/v1/missingInfo.js';
+import { eligibilityRoutes } from './routes/v1/eligibility.js';
 import { whatsappWebhookRoutes } from './routes/webhooks/whatsapp.js';
 
 export async function buildApp(
@@ -44,6 +45,7 @@ export async function buildApp(
   await app.register(temporalRoutes);
   await app.register(vehicleRoutes);
   await app.register(missingInfoRoutes);
+  await app.register(eligibilityRoutes);
   await app.register(whatsappWebhookRoutes);
 
   return app;

@@ -160,7 +160,7 @@ The first slice of the original "Channels, Documents, Payments, CRM & Fulfilment
 fixed-sequence pipeline that runs Steps 1-4 automatically for one inbound message instead of
 requiring each REST endpoint to be called by hand. Documents, payments, CRM, delivery/return and a
 real persisted journey state machine (the Event/Workflow Engine) remain **not built** — see
-`docs/PHASE-5.md` for the full scope split.
+`docs/PHASE-5-CHANNELS.md` for the full scope split.
 
 ```
 Meta ── POST /webhooks/whatsapp (X-Hub-Signature-256) ──▶ Fastify API
@@ -226,6 +226,78 @@ both send a reply. `claimIdempotencyKey` (`packages/db`) makes the claim itself 
 gate — a single unique-constraint insert two racing requests can't both win — proven with a
 genuinely concurrent (`Promise.all`) redelivery test, not just a sequential one.
 
+## Eligibility scope (journey Step 5 — `ELIGIBILITY_CHECK`)
+
+`PHASE-CONTRACTS.json` id 11 — the journey-step-numbered continuation of Phases 1-4, not id 5's
+"Channels, Documents, Payments, CRM & Fulfilment" scope (see `docs/PHASE-5-CHANNELS.md`). Unlike
+every earlier step, there is **no AI proposal stage at all**: MASTER-PLAN.md marks this step's owner
+"SYS", and CLAUDE.md is explicit that "AI may explain rules but MUST NOT decide policy
+independently" / "Never allow AI to override policy" — so nothing in this step ever calls an
+`AIProvider`.
+
+```
+POST /v1/enquiries/:conversationId/eligibility
+{ customer: {...}, additionalDrivers: [...] }   (Zod .strict() body — new input this step
+                │                                 introduces; Steps 1-4 never collect it)
+                ▼
+  findConversationById + findLatestMessageForConversation (tenant-scoped)
+                │
+                ▼
+  fetch, in parallel: the message's latest DateLocationExtraction / VehicleDetermination,
+  and the tenant's active EligibilityPolicy (no policy configured → 501 NOT_CONFIGURED,
+  never a fake decision)
+                │
+                ▼
+  findApplicableEligibilityExceptions(tenantId, { customerRef, nationality })
+                │
+                ▼
+  EligibilityOrchestrator.evaluate(context, policy, exceptions)
+                │
+                ├─ validateEligibilityPolicy(policy.rules)
+                │      (structural self-check — e.g. a nationality in both the blocked and
+                │       allowed-only lists — fails safe to NEEDS_HUMAN_REVIEW instead of
+                │       evaluating rules against a policy nobody can be sure is correct)
+                │
+                ├─ 7 EligibilityRule implementations, each pure/deterministic:
+                │      AGE · LICENSE · PASSPORT · NATIONALITY · VEHICLE · LOCATION ·
+                │      DRIVER_REQUIREMENT — every threshold/list they read comes from
+                │      `policy.rules`, never hardcoded
+                │
+                ├─ resolveWithExceptions() per FAILed rule
+                │      (a LOW-risk exception auto-waives it; a HIGH-risk one is recorded as
+                │       matching but never auto-applied — "High-risk exceptions -> human")
+                │
+                └─ reasonBuilder.buildEligibilityReason()
+                       (deterministic, template-based — never AI-generated free text)
+                │
+                ▼
+  ELIGIBLE / INELIGIBLE / NEEDS_HUMAN_REVIEW
+                │
+                ▼
+  one Prisma transaction: create EligibilityDecision + write AuditEvent
+                │
+                ▼
+  201 { conversationId, messageId, decision }
+```
+
+**Policy and exceptions are data, not code.** `EligibilityPolicy` (versioned, append-only —
+`createEligibilityPolicyVersion` inserts a new row and deactivates every previous one rather than
+editing in place) and `EligibilityException` (VIP / nationality override / age override / manual
+grant, each carrying its own `riskLevel`) are ordinary tenant-scoped DB rows, re-validated via Zod on
+every read (`toDomainEligibilityPolicy`/`toDomainEligibilityException`) and validated before every
+write (`eligibilityPolicyRulesSchema.parse`, `createEligibilityExceptionInputSchema.parse`) — the
+same "never trust it just because it's our own DB" posture `toDomainVehicle` established. "Deterministic
+and configurable" means every rule's _parameters_ live here; the rule _logic_ is fixed code in
+`packages/ai/src/step5` that nothing (AI included) can override at decision time. No admin endpoint
+manages these yet (Phase 7 Admin Dashboard scope) — today only `packages/db/src/seed.ts` and direct
+repository calls create them, which is enough to prove the engine is genuinely policy-driven rather
+than hardcoded.
+
+**Every decision is auditable.** `EligibilityDecision` is an append-only row (the same convention as
+`IntentRecord`/`DateLocationExtraction`/`VehicleDetermination`/`MissingInfoCheck`) carrying the exact
+`policyId`/`policyVersion` evaluated, every rule's individual outcome, and which exceptions applied —
+so a past decision can always be explained from its own stored row, never recomputed or guessed.
+
 ## Monorepo layout
 
 ```
@@ -239,7 +311,9 @@ packages/
                   TemporalValidationService, DateLocationExtractionOrchestrator, Dubai/UAE gazetteer;
                   Step 3: VehicleIntentService, VehicleCatalogService, VehicleValidationService,
                   VehicleDeterminationOrchestrator; Step 4: RequiredFieldsEvaluator,
-                  clarificationPromptBuilder, MissingInfoOrchestrator
+                  clarificationPromptBuilder, MissingInfoOrchestrator; Step 5: 7 EligibilityRule
+                  implementations, policyValidator, exceptionResolver, reasonBuilder,
+                  EligibilityOrchestrator — zero AI/LLM calls, deterministic only
   channels/       WhatsApp (Meta Cloud API) adapter: inbound payload parsing, signature
                   verification, WhatsAppProvider (Meta/NotConfigured), deterministic reply builder
   security/       secure headers, CORS allowlist, SSRF-safe fetch, webhook HMAC, CSRF primitive,
@@ -262,43 +336,50 @@ imports, use `tsc --noEmit` for typecheck since they don't need to emit for anyo
 
 `Tenant`, `Conversation`, `Message`, `IntentRecord`, `AuditEvent`, `IdempotencyKey` (Phase 1),
 `DateLocationExtraction` (Phase 2), `Vehicle` and `VehicleDetermination` (Phase 3),
-`MissingInfoCheck` (Phase 4) — see `packages/db/prisma/schema.prisma`. Every business table carries
+`MissingInfoCheck` (Phase 4), `EligibilityPolicy`/`EligibilityException`/`EligibilityDecision`
+(Step 5) — see `packages/db/prisma/schema.prisma`. Every business table carries
 `tenantId`; every repository function takes `tenantId` explicitly and filters by it
 (`findFirst`/`updateMany` with `tenantId` in the WHERE clause). This is the **application-level**
 half of tenant isolation. Database-level Row Level Security is still not implemented — see Known
-Limitations in `docs/phases/PHASE-01.md`, `docs/PHASE-2.md`, `docs/PHASE-3.md` and
-`docs/PHASE-4.md`. `Vehicle` additionally supports soft deletion (`deletedAt`) — every repository
-query excludes soft-deleted rows, and nothing in the codebase issues a hard `DELETE` on that table.
+Limitations in `docs/phases/PHASE-01.md`, `docs/PHASE-2.md`, `docs/PHASE-3.md`,
+`docs/PHASE-4.md` and `docs/PHASE-5.md`. `Vehicle` additionally supports soft deletion (`deletedAt`)
+— every repository query excludes soft-deleted rows, and nothing in the codebase issues a hard
+`DELETE` on that table. `EligibilityPolicy` is similarly append-only-by-convention: a new version is
+inserted and every previous one deactivated, never an in-place update.
 
 ## Security posture (Phase 1)
 
-| Control                                 | Implementation                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Input validation                        | Zod at the HTTP boundary (`@fastify/type-provider-zod`) and again at the Next.js route handler                                                                                                                                                                                                                                                                                                                                        |
-| Request size limits                     | Fastify `bodyLimit` (`API_BODY_LIMIT_BYTES`, default 100 KB)                                                                                                                                                                                                                                                                                                                                                                          |
-| Rate limiting                           | `@fastify/rate-limit`, per-IP, configurable window/max                                                                                                                                                                                                                                                                                                                                                                                |
-| CORS                                    | explicit allowlist (`CORS_ALLOWED_ORIGINS`), no wildcard                                                                                                                                                                                                                                                                                                                                                                              |
-| Secure headers / CSP                    | `@fastify/helmet`, deny-by-default CSP (`packages/security/headers.ts`)                                                                                                                                                                                                                                                                                                                                                               |
-| SSRF protection                         | `ssrfSafeFetch`: allowlist + DNS-rebinding check + no auto-redirects; used by the Next.js route handler calling the API                                                                                                                                                                                                                                                                                                               |
-| SQL injection                           | Prisma parameterized queries only; no raw SQL with interpolated input                                                                                                                                                                                                                                                                                                                                                                 |
-| XSS                                     | React auto-escaping; no `dangerouslySetInnerHTML`; JSON API responses                                                                                                                                                                                                                                                                                                                                                                 |
-| Webhook signatures                      | HMAC-SHA256 sign/verify primitive (`packages/security/webhookSignature.ts`); wired to a real channel as of Phase 5 (WhatsApp — see below)                                                                                                                                                                                                                                                                                             |
-| CSRF                                    | double-submit primitive shipped, not mounted (API is stateless/token-based; no cookie session exists yet — see Known Limitations)                                                                                                                                                                                                                                                                                                     |
-| Secrets                                 | `.env` only, never committed; pino redaction paths strip secrets/PII from logs                                                                                                                                                                                                                                                                                                                                                        |
-| PII                                     | `classifyPII`/`redactPII` in `packages/domain`; log redaction also strips raw message content                                                                                                                                                                                                                                                                                                                                         |
-| Audit                                   | every mutation (`enquiry.received`, `conversation.processed`) writes an `AuditEvent` in the same transaction                                                                                                                                                                                                                                                                                                                          |
-| Tenant isolation                        | application-level (see Data model); DB-level RLS is Phase 2/6                                                                                                                                                                                                                                                                                                                                                                         |
-| Prompt-injection defense                | `sanitizeForProcessing` flags known injection patterns; Phase 1's engine is deterministic so nothing can actually be hijacked, but the signal is captured now for Phase 4                                                                                                                                                                                                                                                             |
-| Outbound allowlist                      | `OUTBOUND_ALLOWED_HOSTS` enforced by `ssrfSafeFetch`                                                                                                                                                                                                                                                                                                                                                                                  |
-| Geocoding provider abstraction          | `LocationProvider` interface (`packages/ai/step2`) — Phase 2's `GazetteerLocationProvider` makes zero network calls; any future network-based provider must go through `ssrfSafeFetch`, never a raw `fetch` on caller-influenced input                                                                                                                                                                                                |
-| Timeouts / circuit breaker / rate limit | `packages/security/resilience.ts` — generic primitives, applied to the location provider seam (`ResilientLocationProvider`) even though the current provider doesn't need them, so the safety net is exercised now                                                                                                                                                                                                                    |
-| Never invent inventory                  | `VehicleCatalogProvider` interface (`packages/ai/step3`) — the matching lexicon and every resolved/alternative vehicle always come from the tenant's real `Vehicle` rows; proven with a prompt-injection payload asking for a vehicle that doesn't exist                                                                                                                                                                              |
-| Vehicle catalog constraints             | `@@unique([tenantId, make, model])`, soft delete (`deletedAt`, never a hard `DELETE`), tenant-scoped repository functions, `AppError('CONFLICT', ...)` on a duplicate identity instead of a raw driver error                                                                                                                                                                                                                          |
-| Never re-derives from raw text          | `RequiredFieldsEvaluator` (`packages/ai/step4`) only ever reads Steps 1-3's already-verified output; it has no code path that could itself hallucinate a date, location, or vehicle                                                                                                                                                                                                                                                   |
-| Injection visibility carried forward    | Step 4 aggregates each earlier step's own `promptInjectionDetected` flag into one `flags.promptInjectionDetectedAnywhere` rather than re-sanitizing (there is no new raw text to sanitize)                                                                                                                                                                                                                                            |
-| WhatsApp webhook authenticity           | `verifyMetaSignature` (`packages/channels`) — HMAC-SHA256 over the _raw_ request body (a dedicated Fastify content-type parser captures it before JSON parsing), constant-time compare, exact-64-hex-char check (rejects a valid signature with trailing bytes appended, which Node's lenient hex decoder would otherwise silently truncate and still match); missing/wrong secret is `NOT_CONFIGURED`/`UNAUTHORIZED`, never a bypass |
-| WhatsApp outbound egress                | `MetaWhatsAppProvider` calls only `graph.facebook.com`, hardcoded independent of `OUTBOUND_ALLOWED_HOSTS`, via `ssrfSafeFetch`; never throws — returns a `SENT`/`FAILED`/`NOT_CONFIGURED` result so a downstream send problem can never fail the inbound webhook ack                                                                                                                                                                  |
-| WhatsApp webhook idempotency            | `claimIdempotencyKey` (atomic insert, not read-then-write) keyed on Meta's own message id, released on failure (`releaseIdempotencyKeyClaim`) so a genuine retry isn't stuck; proven with a concurrent (`Promise.all`) redelivery test                                                                                                                                                                                                |
+| Control                                                | Implementation                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Input validation                                       | Zod at the HTTP boundary (`@fastify/type-provider-zod`) and again at the Next.js route handler                                                                                                                                                                                                                                                                                                                                        |
+| Request size limits                                    | Fastify `bodyLimit` (`API_BODY_LIMIT_BYTES`, default 100 KB)                                                                                                                                                                                                                                                                                                                                                                          |
+| Rate limiting                                          | `@fastify/rate-limit`, per-IP, configurable window/max                                                                                                                                                                                                                                                                                                                                                                                |
+| CORS                                                   | explicit allowlist (`CORS_ALLOWED_ORIGINS`), no wildcard                                                                                                                                                                                                                                                                                                                                                                              |
+| Secure headers / CSP                                   | `@fastify/helmet`, deny-by-default CSP (`packages/security/headers.ts`)                                                                                                                                                                                                                                                                                                                                                               |
+| SSRF protection                                        | `ssrfSafeFetch`: allowlist + DNS-rebinding check + no auto-redirects; used by the Next.js route handler calling the API                                                                                                                                                                                                                                                                                                               |
+| SQL injection                                          | Prisma parameterized queries only; no raw SQL with interpolated input                                                                                                                                                                                                                                                                                                                                                                 |
+| XSS                                                    | React auto-escaping; no `dangerouslySetInnerHTML`; JSON API responses                                                                                                                                                                                                                                                                                                                                                                 |
+| Webhook signatures                                     | HMAC-SHA256 sign/verify primitive (`packages/security/webhookSignature.ts`); wired to a real channel as of Phase 5 (WhatsApp — see below)                                                                                                                                                                                                                                                                                             |
+| CSRF                                                   | double-submit primitive shipped, not mounted (API is stateless/token-based; no cookie session exists yet — see Known Limitations)                                                                                                                                                                                                                                                                                                     |
+| Secrets                                                | `.env` only, never committed; pino redaction paths strip secrets/PII from logs                                                                                                                                                                                                                                                                                                                                                        |
+| PII                                                    | `classifyPII`/`redactPII` in `packages/domain`; log redaction also strips raw message content                                                                                                                                                                                                                                                                                                                                         |
+| Audit                                                  | every mutation (`enquiry.received`, `conversation.processed`) writes an `AuditEvent` in the same transaction                                                                                                                                                                                                                                                                                                                          |
+| Tenant isolation                                       | application-level (see Data model); DB-level RLS is Phase 2/6                                                                                                                                                                                                                                                                                                                                                                         |
+| Prompt-injection defense                               | `sanitizeForProcessing` flags known injection patterns; Phase 1's engine is deterministic so nothing can actually be hijacked, but the signal is captured now for Phase 4                                                                                                                                                                                                                                                             |
+| Outbound allowlist                                     | `OUTBOUND_ALLOWED_HOSTS` enforced by `ssrfSafeFetch`                                                                                                                                                                                                                                                                                                                                                                                  |
+| Geocoding provider abstraction                         | `LocationProvider` interface (`packages/ai/step2`) — Phase 2's `GazetteerLocationProvider` makes zero network calls; any future network-based provider must go through `ssrfSafeFetch`, never a raw `fetch` on caller-influenced input                                                                                                                                                                                                |
+| Timeouts / circuit breaker / rate limit                | `packages/security/resilience.ts` — generic primitives, applied to the location provider seam (`ResilientLocationProvider`) even though the current provider doesn't need them, so the safety net is exercised now                                                                                                                                                                                                                    |
+| Never invent inventory                                 | `VehicleCatalogProvider` interface (`packages/ai/step3`) — the matching lexicon and every resolved/alternative vehicle always come from the tenant's real `Vehicle` rows; proven with a prompt-injection payload asking for a vehicle that doesn't exist                                                                                                                                                                              |
+| Vehicle catalog constraints                            | `@@unique([tenantId, make, model])`, soft delete (`deletedAt`, never a hard `DELETE`), tenant-scoped repository functions, `AppError('CONFLICT', ...)` on a duplicate identity instead of a raw driver error                                                                                                                                                                                                                          |
+| Never re-derives from raw text                         | `RequiredFieldsEvaluator` (`packages/ai/step4`) only ever reads Steps 1-3's already-verified output; it has no code path that could itself hallucinate a date, location, or vehicle                                                                                                                                                                                                                                                   |
+| Injection visibility carried forward                   | Step 4 aggregates each earlier step's own `promptInjectionDetected` flag into one `flags.promptInjectionDetectedAnywhere` rather than re-sanitizing (there is no new raw text to sanitize)                                                                                                                                                                                                                                            |
+| WhatsApp webhook authenticity                          | `verifyMetaSignature` (`packages/channels`) — HMAC-SHA256 over the _raw_ request body (a dedicated Fastify content-type parser captures it before JSON parsing), constant-time compare, exact-64-hex-char check (rejects a valid signature with trailing bytes appended, which Node's lenient hex decoder would otherwise silently truncate and still match); missing/wrong secret is `NOT_CONFIGURED`/`UNAUTHORIZED`, never a bypass |
+| WhatsApp outbound egress                               | `MetaWhatsAppProvider` calls only `graph.facebook.com`, hardcoded independent of `OUTBOUND_ALLOWED_HOSTS`, via `ssrfSafeFetch`; never throws — returns a `SENT`/`FAILED`/`NOT_CONFIGURED` result so a downstream send problem can never fail the inbound webhook ack                                                                                                                                                                  |
+| WhatsApp webhook idempotency                           | `claimIdempotencyKey` (atomic insert, not read-then-write) keyed on Meta's own message id, released on failure (`releaseIdempotencyKeyClaim`) so a genuine retry isn't stuck; proven with a concurrent (`Promise.all`) redelivery test                                                                                                                                                                                                |
+| Eligibility never lets AI decide                       | `EligibilityOrchestrator` (`packages/ai/src/step5`) makes zero `AIProvider` calls; every rule reads only `policy.rules` and the request's own validated input — matches CLAUDE.md's "AI may explain rules but MUST NOT decide policy independently"                                                                                                                                                                                   |
+| Eligibility request body can't dictate its own outcome | `checkEligibilityBodySchema` is `.strict()` — an unrecognized field (`status`, `policyId`, `decision`, `__proto__`, ...) is rejected with 400 before the service layer ever runs; the decision is always server-computed from the tenant's own active policy                                                                                                                                                                          |
+| Eligibility policy conflicts fail safe                 | `validateEligibilityPolicy` checks the tenant's own policy for internal contradictions (e.g. a nationality in both the blocked and allowed-only lists) before any rule runs; a conflict short-circuits straight to `NEEDS_HUMAN_REVIEW`, never a guessed resolution                                                                                                                                                                   |
+| Eligibility exceptions validated before write          | `createEligibilityException` parses `waivedCategories`/`scopeNationality`/etc. against `createEligibilityExceptionInputSchema` before persisting, so a malformed row can never later break every read for that tenant (`toDomainEligibilityException` re-validates on every read too)                                                                                                                                                 |
 
 ## AI Intent Engine
 

@@ -1,5 +1,6 @@
 import {
   DateLocationExtractionOrchestrator,
+  EligibilityOrchestrator,
   MissingInfoOrchestrator,
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
@@ -42,6 +43,7 @@ async function main(): Promise<void> {
     catalogProvider: new PrismaVehicleCatalogProvider(prisma),
   });
   const missingInfoOrchestrator = new MissingInfoOrchestrator();
+  const eligibilityOrchestrator = new EligibilityOrchestrator();
   const whatsappProvider =
     config.WHATSAPP_ACCESS_TOKEN && config.WHATSAPP_PHONE_NUMBER_ID
       ? new MetaWhatsAppProvider({
@@ -61,6 +63,7 @@ async function main(): Promise<void> {
     dateLocationOrchestrator,
     vehicleOrchestrator,
     missingInfoOrchestrator,
+    eligibilityOrchestrator,
     whatsappProvider,
     observabilityStatus: observability.status,
   };

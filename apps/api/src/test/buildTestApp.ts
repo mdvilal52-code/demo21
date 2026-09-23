@@ -1,5 +1,6 @@
 import {
   DateLocationExtractionOrchestrator,
+  EligibilityOrchestrator,
   MissingInfoOrchestrator,
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
@@ -75,6 +76,7 @@ export async function buildTestApp(
       catalogProvider: new PrismaVehicleCatalogProvider(prisma),
     }),
     missingInfoOrchestrator: new MissingInfoOrchestrator(),
+    eligibilityOrchestrator: new EligibilityOrchestrator(),
     whatsappProvider: ctxOverrides.whatsappProvider ?? new NotConfiguredWhatsAppProvider(),
     observabilityStatus: 'NOT_CONFIGURED',
   };
