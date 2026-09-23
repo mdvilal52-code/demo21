@@ -28,6 +28,7 @@ model Tenant {
   vehicleUnits             VehicleUnit[]
   availabilityHolds        AvailabilityHold[]
   availabilityChecks       AvailabilityCheck[]
+  alternativeRecommendations AlternativeRecommendation[]
 
   @@map("tenants")
 }
@@ -66,6 +67,7 @@ model Message {
   missingInfoChecks        MissingInfoCheck[]
   eligibilityDecisions     EligibilityDecision[]
   availabilityChecks       AvailabilityCheck[]
+  alternativeRecommendations AlternativeRecommendation[]
 
   @@index([conversationId])
   @@map("messages")
@@ -255,6 +257,7 @@ model Vehicle {
   units                 VehicleUnit[]
   availabilityHolds     AvailabilityHold[]
   availabilityChecks    AvailabilityCheck[]
+  alternativeRecommendations AlternativeRecommendation[]
 
   @@unique([tenantId, make, model])
   @@index([tenantId])
@@ -538,4 +541,34 @@ model AvailabilityCheck {
   @@index([tenantId])
   @@index([messageId])
   @@map("availability_checks")
+}
+
+enum AlternativeRecommendationStatus {
+  ALTERNATIVES_FOUND
+  NO_ALTERNATIVES
+}
+
+/// Step 7 — Alternatives. One row per recommendation run against a message —
+/// same append-only-history convention as VehicleDetermination/
+/// AvailabilityCheck. `primary`/`secondary` snapshot the exact
+/// AlternativeCandidate (Zod-validated before being written) the customer was
+/// shown — never re-derived later, never a live vehicle re-lookup.
+model AlternativeRecommendation {
+  id                 String                           @id @default(uuid())
+  tenantId           String
+  tenant             Tenant                           @relation(fields: [tenantId], references: [id])
+  messageId          String
+  message            Message                          @relation(fields: [messageId], references: [id])
+  requestedVehicleId String
+  requestedVehicle   Vehicle                          @relation(fields: [requestedVehicleId], references: [id])
+  status             AlternativeRecommendationStatus
+  primary            Json?
+  secondary          Json?
+  consideredCount    Int
+  modelMetadata      Json
+  createdAt          DateTime                         @default(now())
+
+  @@index([tenantId])
+  @@index([messageId])
+  @@map("alternative_recommendations")
 }

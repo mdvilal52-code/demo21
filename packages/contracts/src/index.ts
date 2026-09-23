@@ -7,3 +7,4 @@ export * from './missingInfo.js';
 export * from './eligibility.js';
 export * from './whatsapp.js';
 export * from './availability.js';
+export * from './alternatives.js';

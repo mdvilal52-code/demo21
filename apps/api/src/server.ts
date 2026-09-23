@@ -1,4 +1,5 @@
 import {
+  AlternativeRecommendationOrchestrator,
   DateLocationExtractionOrchestrator,
   EligibilityOrchestrator,
   MissingInfoOrchestrator,
@@ -18,6 +19,7 @@ import { loadApiEnv } from './env.js';
 import { createPostEnquiryQueue } from './lib/queue.js';
 import { createRedisClient } from './lib/redis.js';
 import { createFleetProvider } from './services/createFleetProvider.js';
+import { PrismaAvailabilityProvider } from './services/availabilityProvider.js';
 import { ReservationLockService } from './services/reservationLockService.js';
 import { PrismaVehicleCatalogProvider } from './services/vehicleCatalogProvider.js';
 
@@ -60,6 +62,12 @@ async function main(): Promise<void> {
     ttlSeconds: config.AVAILABILITY_HOLD_TTL_SECONDS,
     bufferMinutes: config.AVAILABILITY_TURNAROUND_BUFFER_MINUTES,
   });
+  const alternativeRecommendationOrchestrator = new AlternativeRecommendationOrchestrator({
+    catalogProvider: new PrismaVehicleCatalogProvider(prisma),
+    availabilityProvider: new PrismaAvailabilityProvider(prisma, fleetProvider, {
+      bufferMinutes: config.AVAILABILITY_TURNAROUND_BUFFER_MINUTES,
+    }),
+  });
 
   const ctx: AppContext = {
     config,
@@ -72,6 +80,7 @@ async function main(): Promise<void> {
     vehicleOrchestrator,
     missingInfoOrchestrator,
     eligibilityOrchestrator,
+    alternativeRecommendationOrchestrator,
     whatsappProvider,
     fleetProvider,
     reservationLockService,

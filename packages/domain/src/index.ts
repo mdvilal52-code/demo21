@@ -9,3 +9,4 @@ export * from './vehicle.js';
 export * from './missingInfo.js';
 export * from './eligibility.js';
 export * from './availability.js';
+export * from './alternatives.js';

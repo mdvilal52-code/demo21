@@ -48,3 +48,9 @@ export * from './step6/resilientFleetProvider.js';
 export * from './step6/availabilityCalculator.js';
 export * from './step6/availabilityProvider.js';
 export * from './step6/orchestrator.js';
+
+// Step 7 — Alternatives
+export * from './step7/types.js';
+export * from './step7/rankingEngine.js';
+export * from './step7/reasonBuilder.js';
+export * from './step7/orchestrator.js';

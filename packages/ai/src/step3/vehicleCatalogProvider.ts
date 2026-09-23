@@ -37,3 +37,37 @@ export interface VehicleCatalogProvider {
   findByIds(tenantId: string, ids: string[]): Promise<Vehicle[]>;
   findAlternatives(tenantId: string, criteria: VehicleAlternativeCriteria): Promise<Vehicle[]>;
 }
+
+export interface FindAlternativesWithFallbackOptions {
+  category?: VehicleCategoryValue;
+  excludeIds: string[];
+  limit: number;
+}
+
+/**
+ * Category-scoped first; widens to the general active fleet only when that
+ * comes up empty (e.g. the only vehicle in that category is the one just
+ * excluded) — never leaves the caller with nothing when a same-category set
+ * could plausibly not exist. Shared by Step 3's own resolution fallback
+ * (`VehicleCatalogService`) and Step 7's candidate generation
+ * (`AlternativeRecommendationOrchestrator`) — both need exactly this policy,
+ * so it lives once here rather than twice.
+ */
+export async function findAlternativesWithFallback(
+  provider: VehicleCatalogProvider,
+  tenantId: string,
+  options: FindAlternativesWithFallbackOptions,
+): Promise<Vehicle[]> {
+  const scoped = await provider.findAlternatives(tenantId, {
+    category: options.category,
+    excludeIds: options.excludeIds,
+    limit: options.limit,
+  });
+  if (scoped.length === 0 && options.category !== undefined) {
+    return provider.findAlternatives(tenantId, {
+      excludeIds: options.excludeIds,
+      limit: options.limit,
+    });
+  }
+  return scoped;
+}

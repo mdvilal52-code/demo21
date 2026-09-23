@@ -1,4 +1,5 @@
 import {
+  AlternativeRecommendationOrchestrator,
   DateLocationExtractionOrchestrator,
   EligibilityOrchestrator,
   MissingInfoOrchestrator,
@@ -19,6 +20,7 @@ import { buildApp } from '../app.js';
 import type { AppContext } from '../context.js';
 import type { ApiEnv } from '../env.js';
 import { DatabaseFleetProvider } from '../services/fleetProvider.js';
+import { PrismaAvailabilityProvider } from '../services/availabilityProvider.js';
 import { ReservationLockService } from '../services/reservationLockService.js';
 import { PrismaVehicleCatalogProvider } from '../services/vehicleCatalogProvider.js';
 
@@ -89,6 +91,12 @@ export async function buildTestApp(
     }),
     missingInfoOrchestrator: new MissingInfoOrchestrator(),
     eligibilityOrchestrator: new EligibilityOrchestrator(),
+    alternativeRecommendationOrchestrator: new AlternativeRecommendationOrchestrator({
+      catalogProvider: new PrismaVehicleCatalogProvider(prisma),
+      availabilityProvider: new PrismaAvailabilityProvider(prisma, fleetProvider, {
+        bufferMinutes: config.AVAILABILITY_TURNAROUND_BUFFER_MINUTES,
+      }),
+    }),
     whatsappProvider: ctxOverrides.whatsappProvider ?? new NotConfiguredWhatsAppProvider(),
     fleetProvider,
     reservationLockService: new ReservationLockService(prisma, fleetProvider, {

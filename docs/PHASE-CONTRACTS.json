@@ -1,10 +1,10 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "updatedAt": "2026-09-23",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
-  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 5-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping. 2026-09-23: two such reconciliations happened, both appended at the next free integer id rather than renumbering ids 5-10 (and their dependsOn chains) to make room — id number is not phase order here, the goal field states the real journey step: id 11 is journey Step 5 (Eligibility, dependsOn:[4]), built while id 5's original 'Channels, Documents, Payments, CRM & Fulfilment' scope (still IN_PROGRESS, renamed to docs/PHASE-5-CHANNELS.md) stayed unmerged with it; id 12 is journey Step 6 (Availability, dependsOn:[4] — built directly on Steps 1-4, not on id 11, since Availability does not functionally depend on Eligibility despite coming after it in journey order), explicitly requested and built without journey Step 5 having existed yet at the time it was started — see docs/PHASE-6.md §1 for the full reasoning.",
+  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 5-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping. 2026-09-23: two such reconciliations happened, both appended at the next free integer id rather than renumbering ids 5-10 (and their dependsOn chains) to make room — id number is not phase order here, the goal field states the real journey step: id 11 is journey Step 5 (Eligibility, dependsOn:[4]), built while id 5's original 'Channels, Documents, Payments, CRM & Fulfilment' scope (still IN_PROGRESS, renamed to docs/PHASE-5-CHANNELS.md) stayed unmerged with it; id 12 is journey Step 6 (Availability, dependsOn:[4] — built directly on Steps 1-4, not on id 11, since Availability does not functionally depend on Eligibility despite coming after it in journey order), explicitly requested and built without journey Step 5 having existed yet at the time it was started — see docs/PHASE-6.md §1 for the full reasoning. A third reconciliation followed the same day: id 13 is journey Step 7 (Alternatives, dependsOn:[12] — needs Step 6's real availability seam specifically, not id 11 Eligibility, which Alternatives has no functional need for), appended at the next free integer after id 12 by the same rule — see docs/PHASE-7.md §1.",
   "rules": {
     "protocol": "docs/PHASE-EXECUTION-PROTOCOL.md",
     "masterPlan": "docs/MASTER-PLAN.md",
@@ -285,6 +285,29 @@
       ],
       "dependsOn": [4],
       "phaseDoc": "docs/PHASE-6.md"
+    },
+    {
+      "id": 13,
+      "name": "Alternatives (journey Step 7 — OFFERING_ALTERNATIVES)",
+      "status": "FROZEN",
+      "goal": "Given a conversation's already-resolved Step 3 vehicle and Step 2 dates, deterministically rank real, currently-available alternative vehicles — MASTER-PLAN.md journey Step 7 (`OFFERING_ALTERNATIVES`, \"AI→SYS\" owner: AI may explain, never decide), the journey-step-numbered continuation of Phases 1-4/id-11/id-12, not the original 10-phase id-7 'Admin Dashboard (Web)' grouping. Given id 13 (the next free integer after id 12's Availability) rather than a renumbered id, matching id 11/id 12's own precedent of appending rather than disturbing ids 1-10's numbering. dependsOn:[12], not [11] — Alternatives needs Step 6's real availability seam specifically (\"from real availability\" in the spec); it has no functional need for Eligibility (id 11). See docs/PHASE-7.md §1 for the full reasoning.",
+      "deliverables": [
+        "packages/domain/src/alternatives.ts: AlternativeRecommendationStatus, AlternativesErrorCode, alternativeCandidateSchema, recommendAlternativesResultSchema",
+        "packages/ai/src/step7: rankAlternatives (pure, deterministic six-stage ladder: availability filter -> customer-constraint filter -> category/luxury-tier/price/preference scoring), buildAlternativeReason (deterministic, template-based, never AI-generated), AlternativeRecommendationOrchestrator — zero AI/LLM calls anywhere in this step, reuses Step 3's VehicleCatalogProvider (candidate generation) and Step 6's AvailabilityProvider (live per-candidate availability preview, never placeHold)",
+        "packages/ai/src/step3/vehicleCatalogProvider.ts: findAlternativesWithFallback extracted and shared with vehicleCatalogService.ts (behavior-preserving refactor, found by this phase's own code review)",
+        "packages/db: AlternativeRecommendation model (append-only, same convention as VehicleDetermination/AvailabilityCheck) + migration, alternativeRecommendationRepository (create + findLatest, id-tiebreak for deterministic reads)",
+        "packages/contracts/src/alternatives.ts: recommendAlternativesParamsSchema / recommendAlternativesResponseSchema",
+        "apps/api: alternativesService.ts + routes/v1/alternatives.ts, POST /v1/enquiries/:conversationId/alternatives — customer/driver data never accepted as input; vehicle/dates read from Steps 2-3's persisted results; every run persisted + an audit event written in the same transaction; never places a hold (human decision remains available)",
+        "docs/PHASE-7.md"
+      ],
+      "acceptance": [
+        "every required test case passes: no alternative; one alternative; many alternatives; same-category alternatives; price conflict; availability conflict; prompt injection; biased recommendation test",
+        "full Phase 1-6 regression re-run and green (no working functionality broken)",
+        "never recommends inventory the live AvailabilityProvider check did not confirm AVAILABLE at ranking time; price ranking proven free of upsell bias (equidistant cheaper/pricier candidates tie on price, never favor the pricier one)",
+        "all gates pass: typecheck, lint, format, 541 unit + 205 integration + 79 security tests, 4 e2e, production build — see docs/PHASE-7.md §8"
+      ],
+      "dependsOn": [12],
+      "phaseDoc": "docs/PHASE-7.md"
     }
   ]
 }

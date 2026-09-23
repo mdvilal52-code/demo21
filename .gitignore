@@ -34,3 +34,6 @@ Thumbs.db
 
 # turbo
 .turbo/
+
+# local Redis background-save snapshot
+dump.rdb
