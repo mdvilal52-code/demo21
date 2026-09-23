@@ -1,9 +1,18 @@
-// Idempotent production seed: the default tenant and the starter fleet
-// (Phase 3 spec — Lamborghini Urus + Range Rover). Migrations only create
-// the schema; a brand-new database has no rows, and DEFAULT_TENANT_ID has
-// no Tenant to reference until this runs once. Safe to re-run on every
-// deploy — every write here is an upsert.
-import { createPrismaClient, normalizeVehicleName } from './index.js';
+// Idempotent production seed: the default tenant, the starter fleet
+// (Phase 3 spec — Lamborghini Urus + Range Rover), and a default Step 5
+// eligibility policy. Migrations only create the schema; a brand-new
+// database has no rows, and DEFAULT_TENANT_ID has no Tenant to reference
+// until this runs once. Safe to re-run on every deploy — every write here
+// is an upsert (the eligibility policy is versioned/append-only by design,
+// so re-running this only creates version 1 once, never a new version on
+// every deploy — see the `existingPolicy` guard below).
+import type { EligibilityPolicyRules } from '@ai-concierge/domain';
+import {
+  createEligibilityPolicyVersion,
+  createPrismaClient,
+  findActiveEligibilityPolicy,
+  normalizeVehicleName,
+} from './index.js';
 
 interface SeedVehicle {
   make: string;
@@ -42,6 +51,30 @@ const STARTER_FLEET: SeedVehicle[] = [
     unitCount: 3,
   },
 ];
+
+/**
+ * Sensible Dubai-luxury-rental defaults — every threshold/list here is
+ * exactly what a tenant would later reconfigure via the (not-yet-built,
+ * Phase 7) admin Settings page; nothing about these numbers is hardcoded
+ * into the rule logic itself (packages/ai/src/step5).
+ */
+const DEFAULT_ELIGIBILITY_POLICY: EligibilityPolicyRules = {
+  minAge: 21,
+  minAgeByLuxuryTier: { ULTRA_LUXURY: 25 },
+  requiredLicenseTypes: ['UAE', 'GCC', 'IDP'],
+  passportRequired: true,
+  nationalityRules: {
+    blockedNationalities: [],
+    allowedNationalitiesOnly: [],
+  },
+  vehicleRestrictions: {},
+  restrictedCities: [],
+  driverRequirements: {
+    maxAdditionalDrivers: 2,
+    additionalDriverMinAge: 21,
+    additionalDriversRequireValidLicense: true,
+  },
+};
 
 async function main(): Promise<void> {
   const databaseUrl = process.env.DATABASE_URL;
@@ -89,7 +122,16 @@ async function main(): Promise<void> {
       });
     }
 
-    console.error(`Seed complete: tenant ${tenantId}, ${STARTER_FLEET.length} vehicle(s) ensured.`);
+    const existingPolicy = await findActiveEligibilityPolicy(prisma, tenantId);
+    if (!existingPolicy) {
+      await createEligibilityPolicyVersion(prisma, { tenantId, rules: DEFAULT_ELIGIBILITY_POLICY });
+    }
+
+    console.error(
+      `Seed complete: tenant ${tenantId}, ${STARTER_FLEET.length} vehicle(s) ensured, eligibility policy ${
+        existingPolicy ? 'already present' : 'created'
+      }.`,
+    );
   } finally {
     await prisma.$disconnect();
   }

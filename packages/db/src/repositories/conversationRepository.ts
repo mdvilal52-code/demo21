@@ -126,7 +126,7 @@ export async function appendMessageToConversation(
  *
  * Read outside any transaction, so two genuinely concurrent deliveries for
  * the same customer could both see "nothing open" and each start their own
- * conversation — the same class of race PHASE-5.md §7 already documents and
+ * conversation — the same class of race PHASE-5-CHANNELS.md §7 already documents and
  * accepts for the idempotency-key pre-check (inherited from Phase 1's
  * submitEnquiry), and no more likely here: real WhatsApp replies from one
  * person are seconds-to-minutes apart, not concurrent.

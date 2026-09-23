@@ -22,6 +22,9 @@ model Tenant {
   vehicles                 Vehicle[]
   vehicleDeterminations    VehicleDetermination[]
   missingInfoChecks        MissingInfoCheck[]
+  eligibilityPolicies      EligibilityPolicy[]
+  eligibilityExceptions    EligibilityException[]
+  eligibilityDecisions     EligibilityDecision[]
   vehicleUnits             VehicleUnit[]
   availabilityHolds        AvailabilityHold[]
   availabilityChecks       AvailabilityCheck[]
@@ -61,6 +64,7 @@ model Message {
   dateLocationExtractions  DateLocationExtraction[]
   vehicleDeterminations    VehicleDetermination[]
   missingInfoChecks        MissingInfoCheck[]
+  eligibilityDecisions     EligibilityDecision[]
   availabilityChecks       AvailabilityCheck[]
 
   @@index([conversationId])
@@ -315,6 +319,104 @@ model MissingInfoCheck {
   @@index([tenantId])
   @@index([messageId])
   @@map("missing_info_checks")
+}
+
+enum EligibilityDecisionStatus {
+  ELIGIBLE
+  INELIGIBLE
+  NEEDS_HUMAN_REVIEW
+}
+
+enum EligibilityExceptionType {
+  VIP
+  NATIONALITY_OVERRIDE
+  AGE_OVERRIDE
+  MANUAL_GRANT
+}
+
+enum EligibilityRiskLevel {
+  LOW
+  HIGH
+}
+
+/// Step 5 — Eligibility. Tenant-configurable, versioned, append-only:
+/// updating a policy never edits a row in place — it inserts a new version
+/// and deactivates the previous one (see eligibilityPolicyRepository), so a
+/// past EligibilityDecision's policyId/policyVersion always resolves to
+/// exactly the rules that were actually applied at decision time.
+model EligibilityPolicy {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  version   Int
+  active    Boolean  @default(true)
+  /// Zod-validated EligibilityPolicyRules (age/license/passport/nationality/
+  /// vehicle/location/driver-requirement parameters) — the actual
+  /// configurable surface; rule *logic* is fixed code in
+  /// packages/ai/src/step5, never edited by this JSON.
+  rules     Json
+  createdAt DateTime @default(now())
+
+  decisions EligibilityDecision[]
+
+  @@unique([tenantId, version])
+  @@index([tenantId, active])
+  @@map("eligibility_policies")
+}
+
+/// A tenant-configured, pre-approved carve-out from specific rule
+/// categories (VIP / nationality / age overrides / a one-off manual grant).
+/// Matched and applied deterministically by the engine, exactly like a
+/// policy rule — never an ad hoc, in-the-moment AI decision.
+model EligibilityException {
+  id               String                   @id @default(uuid())
+  tenantId         String
+  tenant           Tenant                   @relation(fields: [tenantId], references: [id])
+  type             EligibilityExceptionType
+  /// Scopes a VIP/AGE_OVERRIDE/MANUAL_GRANT exception to one customer; null for a nationality-scoped exception.
+  scopeCustomerRef String?
+  /// Scopes a NATIONALITY_OVERRIDE exception; null for a customer-scoped exception.
+  scopeNationality String?
+  waivedCategories String[]
+  riskLevel        EligibilityRiskLevel
+  reason           String
+  active           Boolean                  @default(true)
+  expiresAt        DateTime?
+  createdAt        DateTime                 @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, scopeCustomerRef])
+  @@index([tenantId, scopeNationality])
+  @@map("eligibility_exceptions")
+}
+
+/// Step 5 — Eligibility. One row per eligibility-check run against a
+/// message — same append-only-history convention as IntentRecord/
+/// DateLocationExtraction/VehicleDetermination/MissingInfoCheck. Customer/
+/// driver data is validated request-boundary input (never collected by an
+/// earlier step); vehicle/dates/location are read from what Steps 2-3
+/// already resolved — never re-derived here.
+model EligibilityDecision {
+  id                String                    @id @default(uuid())
+  tenantId          String
+  tenant            Tenant                    @relation(fields: [tenantId], references: [id])
+  messageId         String
+  message           Message                   @relation(fields: [messageId], references: [id])
+  status            EligibilityDecisionStatus
+  ruleResults       Json
+  exceptionsApplied Json
+  policyConflicts   Json
+  reason            String
+  policyId          String
+  policy            EligibilityPolicy         @relation(fields: [policyId], references: [id])
+  policyVersion     Int
+  flags             Json
+  modelMetadata     Json
+  createdAt         DateTime                  @default(now())
+
+  @@index([tenantId])
+  @@index([messageId])
+  @@map("eligibility_decisions")
 }
 
 enum UnitStatus {

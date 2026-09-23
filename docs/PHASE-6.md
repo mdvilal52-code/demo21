@@ -6,7 +6,10 @@ Status: **FROZEN**
 
 - Read `docs/PHASE-EXECUTION-PROTOCOL.md`, `docs/PHASE-CONTRACTS.json`, `docs/MASTER-PLAN.md`,
   `docs/DESIGN-SYSTEM.md` (this phase touches no UI, so read for context only).
-- Read `docs/PHASE-4.md` and `docs/PHASE-5.md` (previous phase docs).
+- Read `docs/PHASE-4.md` and `docs/PHASE-5.md` (previous phase docs; at read time the latter was
+  the WhatsApp/Channels doc — it was renamed to `docs/PHASE-5-CHANNELS.md` afterward, when a
+  separate concurrent session repurposed the `docs/PHASE-5.md` filename for Eligibility; see §1's
+  reconciliation note below).
 - Inspected the repository; local PostgreSQL 16 + Redis 7 started and confirmed reachable; ran the
   existing suite before changing anything — baseline 329 unit + 104 integration + 44 security
   tests, all green.
@@ -34,12 +37,25 @@ without needing to ask:
 
 Given all three agree and the literal id-6 content shares nothing with the request, this is a
 journey-Step-6 delivery, continuing exactly the pattern phases 1-4 set — not `PHASE-CONTRACTS.json`
-id 6's old placeholder. `PHASE-CONTRACTS.json` has been updated to match: the new phase now sits at
-`id: 6` (continuing the journey-step sequence), and the old id-6..10 placeholders (Security Engine,
-Admin Dashboard, Mobile PWA, Observability, Infra) shifted to ids 7-11 with their content
-**unchanged** — the same "absorb the old grouping into the real sequence" move already made for
-ids 1-4's own predecessor content. Journey Step 5 (Eligibility) remains explicitly skipped and
-`PENDING`, same as Phase 5 left it.
+id 6's old placeholder. This phase was built starting from a branch state where journey Step 5
+(Eligibility) had not been built yet, so the plan below (drafted before merging) still describes it
+as skipped/`PENDING` where that context matters (§2, §9, §13) — those statements describe _this
+phase's own starting point_, not the final merged state.
+
+**What actually landed in `PHASE-CONTRACTS.json` (reconciled at merge time, not as first drafted).**
+A separate, concurrently-run session pushed journey Step 5 (Eligibility) to this same branch while
+this phase was in progress, appended as a _new_ entry at `id: 11` — explicitly choosing **not** to
+renumber ids 1-10 at all (its own `phaseNumbering` note: "id number is not phase order here"). That
+approach is more conservative than this doc's original plan (which had proposed shifting ids 6-10 to
+7-11 to free up `id: 6`), so on merging the two, this phase adopted the already-established
+precedent instead of forcing its own: ids 1-10 stayed exactly as originally defined (id 6 is still
+"Security Engine & Zero Trust", untouched, still `PENDING`), id 11 is Eligibility, and this phase's
+own entry was appended as `id: 12` (`dependsOn: [4]`, not `[11]` — Availability was built directly on
+Steps 1-4 and never needed Eligibility's output; the two journey steps are independent). See
+`PHASE-CONTRACTS.json`'s top-level `phaseNumbering` note for the authoritative, up-to-date statement
+of this. Every other reference to "id 6" in this document's history refers to that initial,
+superseded plan, not the final numbering — the phase's actual identity is journey Step 6, wherever
+its integer id ends up landing after reconciliation.
 
 ## 2. Scope
 
@@ -68,27 +84,33 @@ a customer unless the lock-protected claim itself confirms it.
 - Wiring this into `runFullEnquiryPipeline`/the WhatsApp auto-pipeline (Phase 5) — this phase adds
   the Step 6 endpoint standalone, matching how Steps 2-4 each shipped as their own endpoint before
   any pipeline chaining existed.
-- Journey Step 5 (Eligibility) — still not built; this phase explicitly jumped ahead of it (§1).
+- Journey Step 5 (Eligibility) — not built by this phase (which explicitly jumped ahead of it, §1);
+  landed separately on this branch by the time of merging (§1, §9) — integration between the two
+  steps (e.g. checking availability only after eligibility clears) is still untouched.
 - Journey Step 7 (Alternatives) — `AvailabilityProvider`/`AvailabilityCheckOrchestrator` are built
   and tested as the seam it will need (a non-committal multi-vehicle preview), but nothing calls
   them yet; see §3's "dead code" note.
 - The real Booking entity (journey Step 14) — a `CONFIRMED` `AvailabilityHold` stands in as the
   permanent calendar block for now; `ReservationLockService.confirmHold` exists but nothing calls it
   yet (no booking-confirmation flow exists to call it from).
-- `PHASE-CONTRACTS.json` id-7 "Security Engine & Zero Trust" (RLS, AuthN/AuthZ, WAF) — unrelated,
+- `PHASE-CONTRACTS.json` id-6 "Security Engine & Zero Trust" (RLS, AuthN/AuthZ, WAF) — unrelated,
   unchanged, still fully `PENDING`.
+- Journey Step 5 (Eligibility) was `PENDING` when this phase started (§1) but landed on this branch
+  (as `PHASE-CONTRACTS.json` id 11, `FROZEN`) via a separate, concurrently-run session before this
+  phase's own work was pushed — merged in without incident (see §1); Availability was never built
+  against it and does not need it.
 
 ## 3. Design decisions
 
 - **Capacity-based, not unit-assigned inventory.** `VehicleUnit` rows give a real, countable
   physical-fleet size per (tenant, vehicle); a hold blocks one unit of that count for a date range,
   never a specific physical car — the same model hotel room-type inventory uses. Simpler than
-  per-unit assignment and equally real: a customer never cares *which* Urus they get, only that one
+  per-unit assignment and equally real: a customer never cares _which_ Urus they get, only that one
   exists.
 - **Two provider layers doing the same computation, on purpose.** `AvailabilityProvider` (a
   non-committal read) and `ReservationLockService.placeHold` (the authoritative, lock-protected
   claim) both call the same `evaluateInventoryStatus` (`apps/api/src/services/
-  inventoryStatusEvaluator.ts`) — vehicle lookup → `FleetProvider` snapshot → buffered/lazily-
+inventoryStatusEvaluator.ts`) — vehicle lookup → `FleetProvider` snapshot → buffered/lazily-
   expiring overlap count → the pure `computeInventoryStatus`. They can never silently compute
   "available" differently; the only difference is whether a lock was held and a row written. "Never
   tell a customer a vehicle is available unless the authoritative source confirms it" is enforced by
@@ -96,20 +118,20 @@ a customer unless the lock-protected claim itself confirms it.
   alone.
 - **Pessimistic locking for the scarce resource; optimistic locking for a single row.**
   `placeHold` acquires `pg_advisory_xact_lock(tenantId, vehicleId)` before recomputing capacity —
-  every concurrent request for the *same vehicle* serializes, so overselling is structurally
+  every concurrent request for the _same vehicle_ serializes, so overselling is structurally
   impossible, not just unlikely (proven by this phase's own concurrent-booking/race-condition
   tests, up to 10-way concurrency on a single unit). `releaseHold`/`confirmHold` instead use
-  `AvailabilityHold.version` (optimistic): once a hold exists, nothing else contends for *that
-  specific row* in the common case, so a cheap compare-and-swap is enough — a racing loser sees 0
+  `AvailabilityHold.version` (optimistic): once a hold exists, nothing else contends for _that
+  specific row_ in the common case, so a cheap compare-and-swap is enough — a racing loser sees 0
   rows affected and a `CONFLICT`, never a silent no-op. "Where appropriate" means matching the lock
   strategy to which of those two shapes — shared scarce resource vs. a single row — actually applies.
 - **Idempotency needs an in-lock re-check, not just a pre-lock one — found by this phase's own
   tests, not assumed correct.** The obvious design (check-by-idempotency-key before the transaction,
-  as a fast path) has a real race: two concurrent requests with the *same* key can both miss that
+  as a fast path) has a real race: two concurrent requests with the _same_ key can both miss that
   check and both reach the transaction. Whichever acquires the advisory lock second must recognize
   the first one's now-committed row as its own request replaying — otherwise, once capacity is
-  tight, it gets counted as a *competing* reservation and the genuine retry is wrongly rejected as
-  UNAVAILABLE. Fixed by re-checking `findHoldByIdempotencyKey` again *inside* the lock, before the
+  tight, it gets counted as a _competing_ reservation and the genuine retry is wrongly rejected as
+  UNAVAILABLE. Fixed by re-checking `findHoldByIdempotencyKey` again _inside_ the lock, before the
   capacity computation runs; a second, narrower safety net (catching the unique-constraint
   violation on insert) covers the one remaining sliver. Caught by this phase's own
   concurrent-duplicate-request test before it shipped, not found later.
@@ -135,7 +157,7 @@ a customer unless the lock-protected claim itself confirms it.
   even skip a beat entirely (correctness never depends on it, only on the lazy-expiration check
   above). A plain `setInterval` in `apps/worker` achieves the same outcome with less machinery than
   wiring a repeatable BullMQ job for a task that doesn't need the queue's guarantees.
-- **Redis assists, database remains source of truth.** `CachedFleetProvider` caches an *external*
+- **Redis assists, database remains source of truth.** `CachedFleetProvider` caches an _external_
   `FleetProvider`'s unit-count facts for a short TTL (never applied to the default `DatabaseFleetProvider`
   — a fast local read, caching it would only add staleness risk for no benefit) — and never caches
   hold/booking state, which always lives in and is read fresh from Postgres inside `placeHold`'s
@@ -153,10 +175,9 @@ a customer unless the lock-protected claim itself confirms it.
 - **`ctx.fleetProvider` stays on `AppContext`** even though no route reads it directly today —
   mirrors `ctx.whatsappProvider`'s existing role (constructed for real use, also exposed for a
   future admin-Settings "provider status" screen, Phase 8/`PHASE-CONTRACTS.json` id 8).
-- **`VehicleAvailabilityStatus === MAINTENANCE` is re-checked at Step 6 time, not assumed from Step
-  3.** Step 3 already refuses to resolve a vehicle already under maintenance at determination time
+- **`VehicleAvailabilityStatus === MAINTENANCE` is re-checked at Step 6 time, not assumed from Step 3.** Step 3 already refuses to resolve a vehicle already under maintenance at determination time
   (`VEHICLE_UNAVAILABLE`); the realistic way Step 6 ever sees `MAINTENANCE` is a status change
-  *after* Step 3 ran (an admin action) — exactly the "never trust an earlier step's read is still
+  _after_ Step 3 ran (an admin action) — exactly the "never trust an earlier step's read is still
   true now" discipline Step 6's own staleness check (previous bullet) already applies to dates.
   Proven with a test that resolves the vehicle first, then flips it to maintenance, then checks.
 
@@ -206,8 +227,8 @@ No changes to Steps 1-4's own logic, the WhatsApp channel, or the auto-pipeline.
 
 ## 5. APIs
 
-| Method | Path                                              | Purpose                                                                          |
-| ------ | -------------------------------------------------- | --------------------------------------------------------------------------------- |
+| Method | Path                                               | Purpose                                                                                |
+| ------ | -------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | POST   | `/v1/enquiries/:conversationId/availability-check` | Authoritatively checks + holds inventory for the conversation's resolved vehicle/dates |
 
 Input is the conversation id only (no request body) — matching Steps 2-4's convention of reading
@@ -281,37 +302,45 @@ assurance without the added risk.
 ## 8. Test results
 
 All commands run against real local PostgreSQL 16 + Redis 7 (no Docker daemon in this sandbox, same
-as every prior phase).
+as every prior phase). Counts below are the actual final repository state, measured _after_ merging
+journey Step 5 (Eligibility, `PHASE-CONTRACTS.json` id 11), which landed on this branch from a
+separate concurrent session while this phase was in progress — see §1. This phase's own contribution, measured against the 329 unit/104 integration/44 security baseline
+recorded in §1 before this phase started, is 144 unit + 61 integration + 19 security tests
+(`packages/ai/step6` + the `apps/api` availability services/routes/tests + `packages/db`'s three new
+repositories); the totals below are the whole suite, i.e. what `pnpm test` on the final, merged
+commit actually reports.
 
-| Gate                | Command                        | Result                                                                                       |
-| ------------------- | ------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Typecheck           | `pnpm typecheck`                | ✅ every package + app                                                                          |
-| Lint                | `pnpm lint`                     | ✅ 0 errors, 0 warnings                                                                         |
-| Format              | `pnpm format:check`             | ✅ clean                                                                                        |
-| Unit                | `pnpm test:unit`                | ✅ 473 tests                                                                                    |
-| Integration         | `pnpm test:integration`         | ✅ 165 tests                                                                                    |
-| Security            | `pnpm test:security`            | ✅ 63 tests                                                                                     |
-| E2E                 | `pnpm test:e2e`                 | ✅ 4 tests, unchanged (no UI touched)                                                           |
-| Build               | `pnpm build`                    | ✅ every package + Next.js production build                                                    |
-| Code review         | `/code-review` (high)           | ✅ 5 findings — 2 real bugs fixed (§3) + regression tests, 1 duplication eliminated (shared `evaluateInventoryStatus`), 1 dead DI wiring removed, 1 phase-numbering process note (already addressed in §1) |
-| Architecture review | checklist vs MASTER-PLAN §1/§6  | ✅ matches target layering; self-caught the missing audit events on confirm/release (§7), fixed before freeze |
-| Regression          | `pnpm test` (final commit)      | ✅ full Phase 1-5 suite + this phase's, all green                                               |
+| Gate                | Command                                                | Result                                                                                                                                                                                                     |
+| ------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Typecheck           | `pnpm typecheck`                                       | ✅ every package + app                                                                                                                                                                                     |
+| Lint                | `pnpm lint`                                            | ✅ 0 errors, 0 warnings                                                                                                                                                                                    |
+| Format              | `pnpm format:check`                                    | ✅ clean                                                                                                                                                                                                   |
+| Unit                | `pnpm test:unit`                                       | ✅ 521 tests                                                                                                                                                                                               |
+| Integration         | `pnpm test:integration`                                | ✅ 189 tests                                                                                                                                                                                               |
+| Security            | `pnpm test:security`                                   | ✅ 72 tests                                                                                                                                                                                                |
+| E2E                 | `pnpm test:e2e`                                        | ✅ 4 tests, unchanged (no UI touched)                                                                                                                                                                      |
+| Build               | `pnpm build`                                           | ✅ every package + Next.js production build                                                                                                                                                                |
+| Code review         | `/code-review` (high)                                  | ✅ 5 findings — 2 real bugs fixed (§3) + regression tests, 1 duplication eliminated (shared `evaluateInventoryStatus`), 1 dead DI wiring removed, 1 phase-numbering process note (already addressed in §1) |
+| Architecture review | checklist vs MASTER-PLAN §1/§6                         | ✅ matches target layering; self-caught the missing audit events on confirm/release (§7), fixed before freeze                                                                                              |
+| Regression          | `pnpm test` (final commit, merged with journey Step 5) | ✅ full Phase 1-5 + Eligibility (Step 5) + Availability (this phase), all green                                                                                                                            |
 
-**Total: 705 automated tests, all passing** (473 unit + 165 integration + 63 security + 4 e2e).
+**Total: 786 automated tests, all passing** (521 unit + 189 integration + 72 security + 4 e2e) —
+the whole repository's final state, not just this phase's own additions (see the note above the
+table).
 
 Key new scenarios, mapped to every explicitly required test case
 (`apps/api/src/services/reservationLockService.integration.test.ts` unless noted):
 
-| Case                         | How it's proven                                                                                          |
-| ---------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| Concurrent booking           | N-unit vehicle, N+1 truly concurrent (`Promise.all`) requests — exactly N `HELD`, 1 `UNAVAILABLE`             |
-| Double booking               | Sequential second request for a fully-held vehicle — `UNAVAILABLE`, exactly one `ACTIVE` row in the DB        |
-| Expired hold                 | A hold created already-lapsed (`ttlSeconds: -1`) no longer blocks a new request; `expireDueHolds` sweep proven separately in `packages/db`; `confirmHold`-on-lapsed-hold regression (§3) |
-| API timeout                  | A `FleetProvider` that never resolves — result races a local timeout and never wins; `ResilientFleetProvider` unit tests prove the production timeout wrapper directly |
-| Provider failure             | A `FleetProvider` that throws — `UNKNOWN` + `retryable`, zero rows written; a subsequent call with a recovered provider succeeds normally |
-| Duplicate request            | Same idempotency key called twice, sequentially and concurrently — one row, second call is `ALREADY_HELD` with the same hold id |
-| Race condition               | Capacity 1, 10 truly concurrent requests — exactly 1 `HELD`, 9 `UNAVAILABLE`                                  |
-| Tenant isolation             | Two tenants filling their own identically-shaped fleets independently; cross-tenant vehicle id → `UNAVAILABLE`; cross-tenant `releaseHold`/`confirmHold` → `NOT_FOUND` (also proven at the HTTP layer in `availability.security.test.ts` and the repository layer in `packages/db`) |
+| Case               | How it's proven                                                                                                                                                                                                                                                                     |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Concurrent booking | N-unit vehicle, N+1 truly concurrent (`Promise.all`) requests — exactly N `HELD`, 1 `UNAVAILABLE`                                                                                                                                                                                   |
+| Double booking     | Sequential second request for a fully-held vehicle — `UNAVAILABLE`, exactly one `ACTIVE` row in the DB                                                                                                                                                                              |
+| Expired hold       | A hold created already-lapsed (`ttlSeconds: -1`) no longer blocks a new request; `expireDueHolds` sweep proven separately in `packages/db`; `confirmHold`-on-lapsed-hold regression (§3)                                                                                            |
+| API timeout        | A `FleetProvider` that never resolves — result races a local timeout and never wins; `ResilientFleetProvider` unit tests prove the production timeout wrapper directly                                                                                                              |
+| Provider failure   | A `FleetProvider` that throws — `UNKNOWN` + `retryable`, zero rows written; a subsequent call with a recovered provider succeeds normally                                                                                                                                           |
+| Duplicate request  | Same idempotency key called twice, sequentially and concurrently — one row, second call is `ALREADY_HELD` with the same hold id                                                                                                                                                     |
+| Race condition     | Capacity 1, 10 truly concurrent requests — exactly 1 `HELD`, 9 `UNAVAILABLE`                                                                                                                                                                                                        |
+| Tenant isolation   | Two tenants filling their own identically-shaped fleets independently; cross-tenant vehicle id → `UNAVAILABLE`; cross-tenant `releaseHold`/`confirmHold` → `NOT_FOUND` (also proven at the HTTP layer in `availability.security.test.ts` and the repository layer in `packages/db`) |
 
 Plus: 16 pure unit tests for `computeInventoryStatus`/`rangesOverlapWithBuffer` (every state
 transition, buffer edge cases, offset-vs-UTC instant equivalence), 6 for `ResilientFleetProvider`
@@ -344,7 +373,7 @@ isolation, error-leakage, and injection-inertness at the HTTP layer.
   connection for as long as it waits; the integration test suite explicitly raises its own test
   client's `connection_limit` to 25 to drive realistic concurrency rather than silently reducing the
   concurrency level to fit the default pool size. A production deployment expecting many
-  simultaneous requests against the *same* hot vehicle should size its connection pool accordingly
+  simultaneous requests against the _same_ hot vehicle should size its connection pool accordingly
   — a deployment/runbook note, not a code change.
 - **No Docker daemon in this dev sandbox** (same as every prior phase) — `docker-compose.yml`
   unaffected.
@@ -391,17 +420,19 @@ ones).
 ## 13. Next steps (proposed, not started)
 
 Per `docs/PHASE-4.md`/`docs/PHASE-5.md`'s own forward notes and `MASTER-PLAN.md` §4, several
-threads remain open, none started here:
+threads remain open, none started here. Journey Step 5 (Eligibility) is no longer one of them — it
+landed on this branch (id 11, `FROZEN`) via a separate session while this phase was in progress (§1)
+— but nothing here integrates the two (Steps 5 and 6 each read Steps 2-3's output independently;
+neither calls the other):
 
-1. Journey Step 5 (Eligibility) — still the "logically next" journey step per the original
-   sequence, still skipped twice now (once by Phase 5, again by this phase).
-2. Journey Step 7 (Alternatives) — would be the first real caller of `AvailabilityProvider`/
+1. Journey Step 7 (Alternatives) — would be the first real caller of `AvailabilityProvider`/
    `AvailabilityCheckOrchestrator`.
-3. Wiring Step 6 into the WhatsApp auto-pipeline (`runFullEnquiryPipeline`), so a real conversation
-   gets an availability answer automatically after Step 3 resolves a vehicle.
-4. The rest of `PHASE-CONTRACTS.json` id-5's original scope (Web chat/Email adapters, documents,
+2. Wiring Step 6 (and now Step 5) into the WhatsApp auto-pipeline (`runFullEnquiryPipeline`), so a
+   real conversation gets an eligibility/availability answer automatically after Step 3 resolves a
+   vehicle.
+3. The rest of `PHASE-CONTRACTS.json` id-5's original scope (Web chat/Email adapters, documents,
    payments, CRM, delivery/return) — still `PENDING`, untouched.
-5. `PHASE-CONTRACTS.json` id-7 "Security Engine & Zero Trust" — unrelated, unchanged, still fully
+4. `PHASE-CONTRACTS.json` id-6 "Security Engine & Zero Trust" — unrelated, unchanged, still fully
    `PENDING`.
 
 Do not start any of these until asked.

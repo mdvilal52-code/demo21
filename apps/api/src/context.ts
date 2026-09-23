@@ -1,5 +1,6 @@
 import type {
   DateLocationExtractionOrchestrator,
+  EligibilityOrchestrator,
   FleetProvider,
   IntentEngine,
   MissingInfoOrchestrator,
@@ -23,6 +24,7 @@ export interface AppContext {
   dateLocationOrchestrator: DateLocationExtractionOrchestrator;
   vehicleOrchestrator: VehicleDeterminationOrchestrator;
   missingInfoOrchestrator: MissingInfoOrchestrator;
+  eligibilityOrchestrator: EligibilityOrchestrator;
   whatsappProvider: WhatsAppProvider;
   /** Exposed for future admin-Settings visibility (matches `whatsappProvider`'s role) — consumed directly by `reservationLockService`, not read elsewhere yet. */
   fleetProvider: FleetProvider;

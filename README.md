@@ -5,10 +5,12 @@ an AI orchestrator drives a 19-step rental journey (enquiry → quote → docume
 delivery → return → invoice → follow-up) with human escalation, zero-trust security, an admin
 dashboard and a customer mobile app.
 
-> **Status: in progress.** Journey Steps 1-4 (Enquiry/Intent, Extract Dates & Location, Determine
-> Vehicle, Ask Missing Information) are `FROZEN`; a WhatsApp channel + automated Step 1-4 pipeline
-> is `IN_PROGRESS` (see `docs/PHASE-5.md`). See `docs/PHASE-CONTRACTS.json` for authoritative
-> per-phase status. Implementation happens **one phase at a time**, on request, following
+> **Status: in progress.** Journey Steps 1-6 (Enquiry/Intent, Extract Dates & Location, Determine
+> Vehicle, Ask Missing Information, Eligibility, Availability) are `FROZEN`; a WhatsApp channel +
+> automated Step 1-4 pipeline is `IN_PROGRESS` (see `docs/PHASE-5-CHANNELS.md`). Journey Step 5
+> (Eligibility) and Step 6 (Availability) are documented separately, in `docs/PHASE-5.md` and
+> `docs/PHASE-6.md`. See `docs/PHASE-CONTRACTS.json` for authoritative per-phase status.
+> Implementation happens **one phase at a time**, on request, following
 > `docs/PHASE-EXECUTION-PROTOCOL.md`.
 
 ## Read first

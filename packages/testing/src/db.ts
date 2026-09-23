@@ -16,6 +16,9 @@ export function createTestPrismaClient(): PrismaClient {
 
 const TABLES = [
   'audit_events',
+  'eligibility_decisions',
+  'eligibility_exceptions',
+  'eligibility_policies',
   'availability_checks',
   'availability_holds',
   'vehicle_units',
