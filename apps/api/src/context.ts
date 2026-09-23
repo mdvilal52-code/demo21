@@ -1,5 +1,6 @@
 import type {
   DateLocationExtractionOrchestrator,
+  FleetProvider,
   IntentEngine,
   MissingInfoOrchestrator,
   VehicleDeterminationOrchestrator,
@@ -10,6 +11,7 @@ import type { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 import type { ApiEnv } from './env.js';
+import type { ReservationLockService } from './services/reservationLockService.js';
 
 export interface AppContext {
   config: ApiEnv;
@@ -22,6 +24,9 @@ export interface AppContext {
   vehicleOrchestrator: VehicleDeterminationOrchestrator;
   missingInfoOrchestrator: MissingInfoOrchestrator;
   whatsappProvider: WhatsAppProvider;
+  /** Exposed for future admin-Settings visibility (matches `whatsappProvider`'s role) — consumed directly by `reservationLockService`, not read elsewhere yet. */
+  fleetProvider: FleetProvider;
+  reservationLockService: ReservationLockService;
   observabilityStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
 }
 

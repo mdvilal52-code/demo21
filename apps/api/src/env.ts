@@ -39,6 +39,21 @@ export const apiEnvSchema = baseEnvSchema.extend({
   // itself) from Meta's WhatsApp > API Setup page.
   WHATSAPP_PHONE_NUMBER_ID: z.string().trim().min(1).optional(),
   WHATSAPP_API_VERSION: z.string().trim().min(1).default('v21.0'),
+
+  // Phase 6 — Availability. FLEET_PROVIDER selects the FleetProvider
+  // implementation; 'database' (default) is real, DB-backed inventory
+  // (VehicleUnit rows) and always works with zero configuration. 'external'
+  // opts into a third-party fleet-management API and requires
+  // FLEET_API_BASE_URL/FLEET_API_KEY — left unset, it reports NOT_CONFIGURED
+  // rather than faking a working integration (same convention as WhatsApp).
+  FLEET_PROVIDER: z.enum(['database', 'external']).default('database'),
+  FLEET_API_BASE_URL: z.string().trim().url().optional(),
+  FLEET_API_KEY: z.string().trim().min(1).optional(),
+  FLEET_API_TIMEOUT_MS: z.coerce.number().int().positive().default(3000),
+  // How long a temporary hold survives before it lapses back to available capacity.
+  AVAILABILITY_HOLD_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  // Turnaround buffer applied to both ends of an overlap check (cleaning/inspection window).
+  AVAILABILITY_TURNAROUND_BUFFER_MINUTES: z.coerce.number().int().nonnegative().default(120),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

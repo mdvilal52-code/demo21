@@ -226,6 +226,82 @@ both send a reply. `claimIdempotencyKey` (`packages/db`) makes the claim itself 
 gate — a single unique-constraint insert two racing requests can't both win — proven with a
 genuinely concurrent (`Promise.all`) redelivery test, not just a sequential one.
 
+## Phase 6 scope: Availability (journey Step 6)
+
+Real inventory availability — MASTER-PLAN.md journey Step 6 (`AVAILABILITY_CHECK`), the schema's
+own forward reference from Phase 3 ("Real per-date availability/holds are journey Step 6, a
+distinct later phase"). Not part of `PHASE-CONTRACTS.json`'s stale id-6 placeholder ("Security
+Engine & Zero Trust", an unrelated pre-journey-numbering entry) — see `docs/PHASE-6.md` §1 for the
+numbering reconciliation. Input is a conversation's already-resolved Step 3 vehicle + Step 2 dates,
+same convention as Steps 2-4.
+
+```
+POST /v1/enquiries/:conversationId/availability-check
+                │
+                ▼
+  read the conversation's latest resolved VehicleDetermination + DateLocationExtraction
+  (400 VEHICLE_NOT_RESOLVED / DATES_NOT_RESOLVED if either hasn't run yet)
+                │
+                ▼
+  validateAvailabilityRequest(pickupAt, returnAt, now)
+  (re-checks past-date/return-before-pickup against *now* — Step 2 validated this when the
+   message first arrived, but time can pass before Step 6 runs)
+                │
+                ▼
+  idempotencyKey = availability-check:<messageId>:<vehicleId>:<pickupAt>:<returnAt>
+                │
+                ▼
+  ReservationLockService.placeHold()  ── apps/api/src/services
+                │
+                ├─ fast idempotent-replay check (pre-lock)
+                │
+                ├─ prisma.$transaction:
+                │     pg_advisory_xact_lock(tenantId, vehicleId)  — pessimistic, serializes
+                │     every concurrent placeHold for this one vehicle
+                │        │
+                │        ├─ re-check idempotency *inside* the lock (closes a race the
+                │        │    pre-lock check alone can't: two concurrent identical requests)
+                │        │
+                │        └─ evaluateInventoryStatus()  ── shared with AvailabilityProvider
+                │              vehicle catalog status (Phase 3) → FleetProvider.getInventorySnapshot()
+                │              → countOverlappingHolds() (buffer + lazy expiration) →
+                │              computeInventoryStatus() [pure] → AVAILABLE/UNAVAILABLE/MAINTENANCE/UNKNOWN
+                │                                                          │
+                │              AVAILABLE ──▶ insertHold() (ACTIVE, TTL'd) │ else ──▶ no row written
+                ▼
+  AvailabilityCheck row (append-only history) + AuditEvent("availability.checked")
+                │
+                ▼
+  201 { conversationId, messageId, availability: { status, hold, source, reason, retryable } }
+```
+
+**Never tell a customer a vehicle is available unless the authoritative source confirms it.**
+`AvailabilityProvider.checkAvailability` (a non-locked, non-committal read sharing the same
+`evaluateInventoryStatus` computation) exists as the seam a future multi-vehicle preview will use
+(Step 7, Alternatives) — but the one HTTP endpoint in this phase always calls
+`ReservationLockService.placeHold`, the only operation that may answer a customer, since only it
+re-derives status *inside* the per-vehicle lock.
+
+**Capacity-based, not unit-assigned** — like hotel room-type inventory. `VehicleUnit` rows (real,
+countable physical inventory per tenant+vehicle) give `DatabaseFleetProvider` a real count; a hold
+blocks one unit of that count for a date range, never a specific physical car.
+
+**Pessimistic locking guards the scarce resource; optimistic locking guards a single row.**
+`placeHold` serializes concurrent attempts at the *same vehicle* via a Postgres advisory lock —
+correctness under real concurrency (proven by this phase's concurrent-booking/race-condition
+tests), not merely "usually fine". `releaseHold`/`confirmHold` instead use `AvailabilityHold.version`
+(optimistic): a losing racer against an already-transitioned hold sees 0 rows affected and a
+`CONFLICT`, never a silent no-op — including a hold whose TTL has already lapsed but hasn't yet
+been swept (`confirmHold` checks `expiresAt` explicitly, not just `status`, closing the same
+lazy-expiration gap `countOverlappingHolds` already closes for capacity counting).
+
+**`FleetProvider`** is a real seam, not a fake one: `DatabaseFleetProvider` (default, real,
+DB-backed — "database remains source of truth") needs zero configuration; `ExternalFleetApiProvider`
+(a real HTTP adapter, wrapped in `ResilientFleetProvider` for timeout/circuit-breaker/rate-limit and
+`CachedFleetProvider` for a short Redis TTL) is available for a tenant with a real third-party fleet
+system, reporting `NOT_CONFIGURED` rather than a fake integration when selected without credentials
+— no such system exists to integrate with here, same posture as the WhatsApp/Payment providers.
+
 ## Monorepo layout
 
 ```
@@ -239,7 +315,9 @@ packages/
                   TemporalValidationService, DateLocationExtractionOrchestrator, Dubai/UAE gazetteer;
                   Step 3: VehicleIntentService, VehicleCatalogService, VehicleValidationService,
                   VehicleDeterminationOrchestrator; Step 4: RequiredFieldsEvaluator,
-                  clarificationPromptBuilder, MissingInfoOrchestrator
+                  clarificationPromptBuilder, MissingInfoOrchestrator; Step 6: FleetProvider,
+                  ResilientFleetProvider, AvailabilityProvider, computeInventoryStatus,
+                  AvailabilityCheckOrchestrator
   channels/       WhatsApp (Meta Cloud API) adapter: inbound payload parsing, signature
                   verification, WhatsAppProvider (Meta/NotConfigured), deterministic reply builder
   security/       secure headers, CORS allowlist, SSRF-safe fetch, webhook HMAC, CSRF primitive,
@@ -262,13 +340,14 @@ imports, use `tsc --noEmit` for typecheck since they don't need to emit for anyo
 
 `Tenant`, `Conversation`, `Message`, `IntentRecord`, `AuditEvent`, `IdempotencyKey` (Phase 1),
 `DateLocationExtraction` (Phase 2), `Vehicle` and `VehicleDetermination` (Phase 3),
-`MissingInfoCheck` (Phase 4) — see `packages/db/prisma/schema.prisma`. Every business table carries
-`tenantId`; every repository function takes `tenantId` explicitly and filters by it
-(`findFirst`/`updateMany` with `tenantId` in the WHERE clause). This is the **application-level**
-half of tenant isolation. Database-level Row Level Security is still not implemented — see Known
-Limitations in `docs/phases/PHASE-01.md`, `docs/PHASE-2.md`, `docs/PHASE-3.md` and
-`docs/PHASE-4.md`. `Vehicle` additionally supports soft deletion (`deletedAt`) — every repository
-query excludes soft-deleted rows, and nothing in the codebase issues a hard `DELETE` on that table.
+`MissingInfoCheck` (Phase 4), `VehicleUnit`, `AvailabilityHold` and `AvailabilityCheck` (Phase 6) —
+see `packages/db/prisma/schema.prisma`. Every business table carries `tenantId`; every repository
+function takes `tenantId` explicitly and filters by it (`findFirst`/`updateMany` with `tenantId` in
+the WHERE clause). This is the **application-level** half of tenant isolation. Database-level Row
+Level Security is still not implemented — see Known Limitations in `docs/phases/PHASE-01.md`,
+`docs/PHASE-2.md`, `docs/PHASE-3.md`, `docs/PHASE-4.md` and `docs/PHASE-6.md`. `Vehicle` additionally
+supports soft deletion (`deletedAt`) — every repository query excludes soft-deleted rows, and
+nothing in the codebase issues a hard `DELETE` on that table.
 
 ## Security posture (Phase 1)
 
@@ -383,6 +462,41 @@ implements an adapter rather than inventing the boundary under deadline pressure
   three snapshots are fetched by the API service layer and handed in already resolved), computes
   `expiresAt` (`conversationCreatedAt` + `MISSING_INFO_TIMEOUT_HOURS`), and is the only place a
   `MissingInfoResult` is constructed and Zod-validated.
+
+## Step 6 — Availability
+
+- **`computeInventoryStatus`** — pure, zero-I/O (`packages/ai/src/step6/availabilityCalculator.ts`).
+  Takes catalog status/active flag, fleet unit counts, and an already-computed overlapping-holds
+  count; returns `AVAILABLE`/`UNAVAILABLE`/`MAINTENANCE` deterministically. Never returns
+  `HELD`/`BOOKED`/`UNKNOWN` — those describe a hold's own lifecycle or a provider failure, decided by
+  its callers, not by this function.
+- **`rangesOverlapWithBuffer`** — pure instant-arithmetic overlap check with a symmetric buffer on
+  both ends (MASTER-PLAN's "calendar check with buffer" — a turnaround window between a return and
+  the next pickup). Correct regardless of which offset the inputs were originally expressed in,
+  since it only ever compares `Date#getTime()` values.
+- **`FleetProvider`** — the seam between pure Step 6 logic and real physical inventory. Concrete
+  implementations live in `apps/api`: `DatabaseFleetProvider` (default — counts real `VehicleUnit`
+  rows), `ExternalFleetApiProvider` (a real HTTP adapter for a third-party fleet system, via
+  `ssrfSafeFetch`), `NotConfiguredFleetProvider`, `ResilientFleetProvider` (timeout/circuit-breaker/
+  rate-limit wrapper, same shape as Step 2's `ResilientLocationProvider`), `CachedFleetProvider` (a
+  short Redis TTL in front of the external path only).
+- **`AvailabilityProvider`** — a non-committal read (`checkAvailability`), sharing
+  `evaluateInventoryStatus` (`apps/api/src/services/inventoryStatusEvaluator.ts`) with
+  `ReservationLockService.placeHold` so a preview and the authoritative claim can never silently
+  compute "available" differently. Not wired into any route in this phase (see `docs/PHASE-6.md`) —
+  exists as the seam a future multi-vehicle preview (Step 7, Alternatives) will use.
+- **`ReservationLockService`** (`apps/api`) — the one class that actually claims capacity.
+  `placeHold`: validates the request itself (never trusts a caller to have already done so),
+  replays an existing hold by idempotency key (checked both before and, again, *inside* the
+  advisory lock — closing a race the pre-lock check alone can't catch between two concurrent
+  identical requests), then serializes per-`(tenantId, vehicleId)` via `pg_advisory_xact_lock` before
+  re-evaluating status and inserting. `releaseHold`/`confirmHold` use `AvailabilityHold.version`
+  (optimistic) instead, each in its own transaction with an `AuditEvent`; `confirmHold` also rejects
+  a hold whose `expiresAt` has lapsed even if its `status` column still reads `ACTIVE` (lazy
+  expiration applied consistently, not just when counting capacity).
+- **Housekeeping sweep, never a correctness dependency.** `expireDueHolds` (`packages/db`) flips
+  lapsed `ACTIVE` holds to `EXPIRED` on a plain interval in `apps/worker` (not a BullMQ job — this
+  task needs no retry/persistence guarantees, just a periodic idempotent bulk `UPDATE`).
 
 ## Observability
 

@@ -5,3 +5,4 @@ export * from './temporal.js';
 export * from './vehicle.js';
 export * from './missingInfo.js';
 export * from './whatsapp.js';
+export * from './availability.js';

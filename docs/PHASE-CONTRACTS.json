@@ -1,10 +1,10 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.5.1",
-  "updatedAt": "2026-09-21",
+  "version": "0.6.0",
+  "updatedAt": "2026-09-23",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
-  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 5-10 below are the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping.",
+  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 7-11 below are the remainder of that original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be further reconciled with the real journey-step sequence (Steps 7-19) as work reaches them. 2026-09-23: id 6 is the first such reconciliation since phases 1-4 — 'Availability' (journey Step 6, MASTER-PLAN.md §4), explicitly requested and built ahead of journey Step 5 (Eligibility, still PENDING/not yet started). This reused the numeral '6' for the *journey-step* sequence, which is why the original infra-grouping phase that used to sit at id 6 ('Security Engine & Zero Trust') and everything after it were shifted to ids 7-11 (content unchanged) rather than deleted — see docs/PHASE-6.md §1 for the full reasoning, matching how ids 1-4's original infra-grouping content (old 'Core Domain & Data Model', 'Event/Workflow Engine', 'AI Orchestrator') was likewise absorbed into the journey-step phases rather than tracked separately.",
   "rules": {
     "protocol": "docs/PHASE-EXECUTION-PROTOCOL.md",
     "masterPlan": "docs/MASTER-PLAN.md",
@@ -144,6 +144,27 @@
     },
     {
       "id": 6,
+      "name": "Availability (journey Step 6)",
+      "status": "FROZEN",
+      "goal": "Real, database-backed inventory availability: given a conversation's already-resolved Step 3 vehicle and Step 2 dates, authoritatively decide AVAILABLE/HELD/BOOKED/UNAVAILABLE/MAINTENANCE/UNKNOWN and place a TTL'd reservation lock — never a guess, never told to a customer unless the lock-protected claim itself confirms it. Explicitly requested and built ahead of journey Step 5 (Eligibility, still PENDING) — see docs/PHASE-6.md §1 for why, and for how this reconciles with this file's id numbering (§ phaseNumbering above).",
+      "deliverables": [
+        "packages/domain: InventoryStatus, HoldStatus, AvailabilityErrorCode, holdSchema, availabilityCheckResultSchema",
+        "packages/ai/step6: FleetProvider + FleetProviderError seam, ResilientFleetProvider (timeout/circuit-breaker/rate-limit), computeInventoryStatus + rangesOverlapWithBuffer (pure), AvailabilityProvider seam, AvailabilityCheckOrchestrator + validateAvailabilityRequest",
+        "packages/db: VehicleUnit model (real countable inventory) + AvailabilityHold model (capacity-based TTL'd/confirmed reservation lock, unique idempotencyKey, optimistic version) + AvailabilityCheck model (append-only history) + migration; vehicleUnitRepository, availabilityHoldRepository (pg_advisory_xact_lock via acquireVehicleLock, buffered+lazily-expiring countOverlappingHolds, optimistic updateHoldStatus, expireDueHolds sweep), availabilityCheckRepository",
+        "apps/api: DatabaseFleetProvider (default, real) / ExternalFleetApiProvider / NotConfiguredFleetProvider / CachedFleetProvider (Redis, external path only), PrismaAvailabilityProvider, ReservationLockService (placeHold pessimistic-locked + idempotent + self-validating; releaseHold/confirmHold optimistic + audited), shared evaluateInventoryStatus, POST /v1/enquiries/:conversationId/availability-check",
+        "apps/worker: startHoldExpirationSweep (plain interval, housekeeping only — correctness never depends on it)",
+        "docs/PHASE-6.md"
+      ],
+      "acceptance": [
+        "every required test case passes: concurrent booking (N units, N+1 concurrent requests); double booking; expired hold (lazy expiration, including a confirmHold-on-lapsed-hold regression); API timeout; provider failure; duplicate request (idempotency, incl. a concurrent-duplicate race); race condition (10-way, single unit); tenant isolation",
+        "full Phase 1-5 regression re-run and green (no working functionality broken)",
+        "all gates pass: typecheck, lint, format, 473 unit + 165 integration + 63 security tests, 4 e2e, production build — see docs/PHASE-6.md §5"
+      ],
+      "dependsOn": [4],
+      "phaseDoc": "docs/PHASE-6.md"
+    },
+    {
+      "id": 7,
       "name": "Security Engine & Zero Trust",
       "status": "PENDING",
       "goal": "Zero-trust layering verified by tests (WAF -> AuthN -> AuthZ -> Tenant -> Sandbox -> Egress -> DB policy -> Encrypted data).",
@@ -163,11 +184,11 @@
         "authz matrix tests",
         "all scanners green with zero critical"
       ],
-      "dependsOn": [5],
-      "phaseDoc": "docs/phases/PHASE-06.md"
+      "dependsOn": [6],
+      "phaseDoc": "docs/phases/PHASE-07.md"
     },
     {
-      "id": 7,
+      "id": 8,
       "name": "Admin Dashboard (Web)",
       "status": "PENDING",
       "goal": "Dashboard wireframe, pixel-faithful to the design system.",
@@ -182,11 +203,11 @@
         "visual regression green against docs/design/reference",
         "role-aware nav enforced"
       ],
-      "dependsOn": [6],
-      "phaseDoc": "docs/phases/PHASE-07.md"
+      "dependsOn": [7],
+      "phaseDoc": "docs/phases/PHASE-08.md"
     },
     {
-      "id": 8,
+      "id": 9,
       "name": "Customer Mobile App (PWA)",
       "status": "PENDING",
       "goal": "Mobile wireframe + reference image, pixel-faithful.",
@@ -201,11 +222,11 @@
         "installable PWA + offline shell",
         "visual regression green"
       ],
-      "dependsOn": [7],
-      "phaseDoc": "docs/phases/PHASE-08.md"
+      "dependsOn": [8],
+      "phaseDoc": "docs/phases/PHASE-09.md"
     },
     {
-      "id": 9,
+      "id": 10,
       "name": "Observability, AI Evaluation & Automatic QA",
       "status": "PENDING",
       "goal": "Measurable, self-checking system; Automatic QA PASS/FAIL gate.",
@@ -221,11 +242,11 @@
         "Automatic QA gate blocks release on FAIL",
         "eval + security regression thresholds enforced in CI"
       ],
-      "dependsOn": [8],
-      "phaseDoc": "docs/phases/PHASE-09.md"
+      "dependsOn": [9],
+      "phaseDoc": "docs/phases/PHASE-10.md"
     },
     {
-      "id": 10,
+      "id": 11,
       "name": "Infrastructure, CI/CD & Release",
       "status": "PENDING",
       "goal": "Production-ready delivery.",
@@ -240,8 +261,8 @@
         "prod deploy gated by all checks + manual approval",
         "DR drill documented and rehearsed"
       ],
-      "dependsOn": [9],
-      "phaseDoc": "docs/phases/PHASE-10.md"
+      "dependsOn": [10],
+      "phaseDoc": "docs/phases/PHASE-11.md"
     }
   ]
 }

@@ -14,6 +14,8 @@ interface SeedVehicle {
   luggage: number;
   transmission: 'AUTOMATIC' | 'MANUAL';
   pricingProfile: { currency: string; dailyRate: number };
+  /** Phase 6 — how many physical units of this class the starter fleet owns. */
+  unitCount: number;
 }
 
 const STARTER_FLEET: SeedVehicle[] = [
@@ -26,6 +28,7 @@ const STARTER_FLEET: SeedVehicle[] = [
     luggage: 4,
     transmission: 'AUTOMATIC',
     pricingProfile: { currency: 'AED', dailyRate: 3500 },
+    unitCount: 2,
   },
   {
     make: 'Land Rover',
@@ -36,6 +39,7 @@ const STARTER_FLEET: SeedVehicle[] = [
     luggage: 5,
     transmission: 'AUTOMATIC',
     pricingProfile: { currency: 'AED', dailyRate: 1800 },
+    unitCount: 3,
   },
 ];
 
@@ -57,7 +61,7 @@ async function main(): Promise<void> {
     for (const vehicle of STARTER_FLEET) {
       const make = normalizeVehicleName(vehicle.make);
       const model = normalizeVehicleName(vehicle.model);
-      await prisma.vehicle.upsert({
+      const row = await prisma.vehicle.upsert({
         where: { tenantId_make_model: { tenantId, make, model } },
         update: {},
         create: {
@@ -71,6 +75,17 @@ async function main(): Promise<void> {
           transmission: vehicle.transmission,
           pricingProfile: vehicle.pricingProfile,
         },
+      });
+
+      // Phase 6 — real, countable physical inventory for this catalog entry.
+      await prisma.vehicleUnit.createMany({
+        data: Array.from({ length: vehicle.unitCount }, (_, index) => ({
+          tenantId,
+          vehicleId: row.id,
+          unitRef: `${make}-${model}-${String(index + 1).padStart(2, '0')}`.replace(/\s+/g, '-'),
+          status: 'ACTIVE' as const,
+        })),
+        skipDuplicates: true,
       });
     }
 

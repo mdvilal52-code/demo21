@@ -22,6 +22,9 @@ model Tenant {
   vehicles                 Vehicle[]
   vehicleDeterminations    VehicleDetermination[]
   missingInfoChecks        MissingInfoCheck[]
+  vehicleUnits             VehicleUnit[]
+  availabilityHolds        AvailabilityHold[]
+  availabilityChecks       AvailabilityCheck[]
 
   @@map("tenants")
 }
@@ -58,6 +61,7 @@ model Message {
   dateLocationExtractions  DateLocationExtraction[]
   vehicleDeterminations    VehicleDetermination[]
   missingInfoChecks        MissingInfoCheck[]
+  availabilityChecks       AvailabilityCheck[]
 
   @@index([conversationId])
   @@map("messages")
@@ -244,6 +248,9 @@ model Vehicle {
   updatedAt          DateTime                  @updatedAt
 
   vehicleDeterminations VehicleDetermination[]
+  units                 VehicleUnit[]
+  availabilityHolds     AvailabilityHold[]
+  availabilityChecks    AvailabilityCheck[]
 
   @@unique([tenantId, make, model])
   @@index([tenantId])
@@ -308,4 +315,125 @@ model MissingInfoCheck {
   @@index([tenantId])
   @@index([messageId])
   @@map("missing_info_checks")
+}
+
+enum UnitStatus {
+  ACTIVE
+  MAINTENANCE
+  RETIRED
+}
+
+/// Phase 6 (journey Step 6 — Availability). Physical, countable fleet
+/// inventory behind a Vehicle catalog entry (Vehicle is a make/model class,
+/// e.g. "Lamborghini Urus" — not an individual car; see vehicle.ts). The
+/// default `DatabaseFleetProvider` counts these rows — "real
+/// database-backed inventory", never fabricated. Availability is
+/// capacity-based (like hotel room-type inventory): a hold blocks one unit
+/// of a vehicleId's count for a date range, never a specific VehicleUnit
+/// row, so no FK from AvailabilityHold to this table.
+model VehicleUnit {
+  id        String     @id @default(uuid())
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id])
+  vehicleId String
+  vehicle   Vehicle    @relation(fields: [vehicleId], references: [id])
+  /// Internal fleet code / plate reference — tenant-scoped, not globally unique.
+  unitRef   String
+  status    UnitStatus @default(ACTIVE)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([tenantId, vehicleId, unitRef])
+  @@index([tenantId, vehicleId])
+  @@map("vehicle_units")
+}
+
+/// The outcome of a Step 6 availability check or hold attempt. AVAILABLE/
+/// UNAVAILABLE/MAINTENANCE/UNKNOWN are read-only outcomes; HELD/BOOKED are
+/// the public projection of an AvailabilityHold's own lifecycle (ACTIVE ->
+/// HELD, CONFIRMED -> BOOKED) once a hold actually exists for this request.
+enum InventoryStatus {
+  AVAILABLE
+  HELD
+  BOOKED
+  UNAVAILABLE
+  MAINTENANCE
+  UNKNOWN
+}
+
+/// ACTIVE = temporary, TTL pending. CONFIRMED = converted to a real booking
+/// (journey Step 14, out of this phase's scope) — permanent calendar block,
+/// no TTL. RELEASED = compensated/cancelled. EXPIRED = TTL lapsed without
+/// confirmation. See ReservationLockService for the state machine.
+enum HoldStatus {
+  ACTIVE
+  CONFIRMED
+  RELEASED
+  EXPIRED
+}
+
+/// Phase 6 — a temporary (TTL'd) or confirmed reservation lock against a
+/// vehicle's calendar. Capacity-based: blocks one unit of `vehicleId`'s
+/// countable inventory (VehicleUnit rows) for [pickupAt, returnAt), not a
+/// specific physical unit. ACTIVE rows past `expiresAt` are treated as
+/// already expired by every read (lazy expiration — see
+/// availabilityHoldRepository.countOverlappingHolds); a background worker
+/// sweep (expireDueHolds) flips them to EXPIRED for housekeeping/reporting
+/// only, never relied on for correctness. `version` backs optimistic
+/// locking on release/confirm transitions; placement itself is
+/// pessimistically serialized per (tenantId, vehicleId) via a Postgres
+/// advisory lock (see ReservationLockService.placeHold) so concurrent
+/// requests for the same vehicle can never oversell capacity.
+model AvailabilityHold {
+  id             String     @id @default(uuid())
+  tenantId       String
+  tenant         Tenant     @relation(fields: [tenantId], references: [id])
+  vehicleId      String
+  vehicle        Vehicle    @relation(fields: [vehicleId], references: [id])
+  pickupAt       DateTime
+  returnAt       DateTime
+  status         HoldStatus @default(ACTIVE)
+  expiresAt      DateTime
+  /// Unique per tenant — a retried/duplicate request with the same key
+  /// replays the existing hold instead of consuming capacity twice.
+  idempotencyKey String
+  requestedBy    String
+  version        Int        @default(0)
+  releaseReason  String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, vehicleId, status])
+  @@map("availability_holds")
+}
+
+/// Phase 6 — one row per availability-check run against a message, the same
+/// append-only-history convention as IntentRecord/DateLocationExtraction/
+/// VehicleDetermination/MissingInfoCheck. `holdId` is set only when the
+/// check actually placed a hold (status AVAILABLE -> a hold is always
+/// created; see ReservationLockService). No `flags`/prompt-injection field
+/// here unlike Steps 1-4 — this step takes no raw customer text as input,
+/// only already-validated Step 2/3 output.
+model AvailabilityCheck {
+  id            String           @id @default(uuid())
+  tenantId      String
+  tenant        Tenant           @relation(fields: [tenantId], references: [id])
+  messageId     String
+  message       Message          @relation(fields: [messageId], references: [id])
+  vehicleId     String
+  vehicle       Vehicle          @relation(fields: [vehicleId], references: [id])
+  pickupAt      DateTime
+  returnAt      DateTime
+  status        InventoryStatus
+  holdId        String?
+  source        String
+  reason        String?
+  retryable     Boolean          @default(false)
+  modelMetadata Json
+  createdAt     DateTime         @default(now())
+
+  @@index([tenantId])
+  @@index([messageId])
+  @@map("availability_checks")
 }

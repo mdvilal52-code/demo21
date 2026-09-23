@@ -32,3 +32,10 @@ export * from './step3/orchestrator.js';
 export * from './step4/requiredFieldsEvaluator.js';
 export * from './step4/clarificationPromptBuilder.js';
 export * from './step4/orchestrator.js';
+
+// Step 6 — Availability
+export * from './step6/fleetProvider.js';
+export * from './step6/resilientFleetProvider.js';
+export * from './step6/availabilityCalculator.js';
+export * from './step6/availabilityProvider.js';
+export * from './step6/orchestrator.js';

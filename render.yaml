@@ -87,6 +87,23 @@ services:
         sync: false
       - key: WHATSAPP_API_VERSION
         value: v21.0
+      # Phase 6 — Availability. Defaults work with zero configuration
+      # (database-backed inventory, always real). Only set FLEET_API_BASE_URL/
+      # FLEET_API_KEY if this tenant has a real third-party fleet-management
+      # API to integrate with; left unset, FLEET_PROVIDER=external reports
+      # NOT_CONFIGURED rather than a fake integration (see .env.example).
+      - key: FLEET_PROVIDER
+        value: database
+      - key: FLEET_API_BASE_URL
+        sync: false
+      - key: FLEET_API_KEY
+        sync: false
+      - key: FLEET_API_TIMEOUT_MS
+        value: '3000'
+      - key: AVAILABILITY_HOLD_TTL_SECONDS
+        value: '900'
+      - key: AVAILABILITY_TURNAROUND_BUFFER_MINUTES
+        value: '120'
       # Cosmetic only (the "try it out" base URL shown in /docs) — set to
       # this service's own real Render URL once you know it.
       - key: API_PUBLIC_URL
