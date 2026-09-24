@@ -15,6 +15,7 @@
     "test:security": "echo \"no security tests in @ai-concierge/testing\""
   },
   "dependencies": {
+    "@ai-concierge/security": "workspace:*",
     "@prisma/client": "^6.19.0",
     "ioredis": "^5.4.1"
   },

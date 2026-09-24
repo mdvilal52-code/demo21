@@ -1,4 +1,5 @@
 export * from './client.js';
+export * from './tenantContext.js';
 export * from './repositories/conversationRepository.js';
 export * from './repositories/intentRepository.js';
 export * from './repositories/auditRepository.js';
@@ -7,3 +8,6 @@ export * from './repositories/dateLocationExtractionRepository.js';
 export * from './repositories/vehicleRepository.js';
 export * from './repositories/vehicleDeterminationRepository.js';
 export * from './repositories/missingInfoCheckRepository.js';
+export * from './repositories/userRepository.js';
+export * from './repositories/refreshTokenRepository.js';
+export * from './repositories/securityEventRepository.js';

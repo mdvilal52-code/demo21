@@ -46,6 +46,11 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
     // override this with their own low value on a dedicated app instance.
     RATE_LIMIT_MAX: 1000,
     RATE_LIMIT_WINDOW_MS: 60_000,
+    JWT_SIGNING_SECRET: 'test-jwt-signing-secret-at-least-32-bytes-long',
+    MFA_ENCRYPTION_KEY: 'hEPpdv0I3rPvipYa674EeHgK51Zb+BwciFTcTSAch60=',
+    AUTH_TOKEN_ISSUER: 'AI Concierge Test',
+    AUTH_RATE_LIMIT_MAX: 1000,
+    AUTH_RATE_LIMIT_WINDOW_MS: 60_000,
     ...overrides,
   };
 

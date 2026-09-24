@@ -15,6 +15,10 @@ import { temporalRoutes } from './routes/v1/temporal.js';
 import { vehicleRoutes } from './routes/v1/vehicle.js';
 import { missingInfoRoutes } from './routes/v1/missingInfo.js';
 import { whatsappWebhookRoutes } from './routes/webhooks/whatsapp.js';
+import { authRoutes } from './routes/v1/auth.js';
+import { auditRoutes } from './routes/v1/audit.js';
+import { securityEventRoutes } from './routes/v1/securityEvents.js';
+import { userRoutes } from './routes/v1/users.js';
 
 export async function buildApp(
   ctx: AppContext,
@@ -32,7 +36,7 @@ export async function buildApp(
 
   app.decorate('ctx', ctx);
 
-  await registerSecurityPlugins(app, ctx.config);
+  await registerSecurityPlugins(app, ctx.config, ctx.redis);
   await app.register(observabilityPlugin);
   await registerSwagger(app, ctx.config);
   registerErrorHandler(app);
@@ -43,6 +47,10 @@ export async function buildApp(
   await app.register(vehicleRoutes);
   await app.register(missingInfoRoutes);
   await app.register(whatsappWebhookRoutes);
+  await app.register(authRoutes);
+  await app.register(auditRoutes);
+  await app.register(securityEventRoutes);
+  await app.register(userRoutes);
 
   return app;
 }

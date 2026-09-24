@@ -7,9 +7,13 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Root of tenant isolation. RLS-enforced isolation is a Phase 2/6 addition;
-/// Phase 1 enforces it at the application layer — every repository function
-/// takes a tenantId and filters by it explicitly (see @ai-concierge/db repositories).
+/// Root of tenant isolation. Phase 1-5 enforced it at the application layer only
+/// (every repository function takes a tenantId and filters by it explicitly).
+/// Phase 6 adds the enforced backstop: Postgres Row Level Security policies
+/// (see migration `..._add_security_engine`) keyed on the `app.tenant_id`
+/// session setting that `withTenantContext()` (@ai-concierge/security) sets
+/// per-transaction — so a bug that forgets a `WHERE tenantId` clause fails
+/// closed at the database, not just in application code.
 model Tenant {
   id        String   @id @default(uuid())
   name      String
@@ -22,8 +26,125 @@ model Tenant {
   vehicles                 Vehicle[]
   vehicleDeterminations    VehicleDetermination[]
   missingInfoChecks        MissingInfoCheck[]
+  users                    User[]
+  refreshTokens            RefreshToken[]
+  securityEvents           SecurityEvent[]
 
   @@map("tenants")
+}
+
+/// Human staff accounts (admin dashboard / internal tooling), distinct from
+/// `Customer` (not yet modeled — journey Steps still identify customers by
+/// `customerRef` on `Conversation`). Roles map to MASTER-PLAN.md §4's
+/// escalation tiers: ADMIN is a superset, MANAGER=T3, OPS_AGENT=T2,
+/// SECURITY=T4. T1 is the AI itself, never a human role.
+enum UserRole {
+  ADMIN
+  MANAGER
+  OPS_AGENT
+  SECURITY
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+/// `passwordHash` is an argon2id hash, never reversible. `mfaSecretCiphertext`
+/// is an AES-256-GCM ciphertext (packages/security/src/crypto.ts) of the TOTP
+/// seed, never the raw secret — field-level encryption for the one real
+/// per-user secret this phase introduces (passport/licence-number encryption
+/// applies once the document pipeline of the original phase-5 grouping is
+/// built; see docs/PHASE-6.md §3).
+model User {
+  id                  String     @id @default(uuid())
+  tenantId            String
+  tenant              Tenant     @relation(fields: [tenantId], references: [id])
+  email               String
+  passwordHash        String
+  role                UserRole
+  status              UserStatus @default(ACTIVE)
+  mfaEnabled          Boolean    @default(false)
+  mfaSecretCiphertext String?
+  failedLoginCount    Int        @default(0)
+  lockedUntil         DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  refreshTokens  RefreshToken[]
+  securityEvents SecurityEvent[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+/// Rotating refresh tokens: only `tokenHash` (SHA-256 of the opaque token) is
+/// stored, never the raw token. `familyId` groups one rotation chain — reuse
+/// of an already-rotated (revoked) member is a stolen-token signal and
+/// revokes the whole family (see packages/security/src/authn/refreshTokens.ts).
+model RefreshToken {
+  id                String    @id @default(uuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id])
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  tokenHash         String    @unique
+  familyId          String
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  replacedByTokenId String?
+  ip                String?
+  userAgent         String?
+  createdAt         DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  MFA_ENROLLED
+  MFA_FAILURE
+  TOKEN_REUSE_DETECTED
+  ACCOUNT_LOCKED
+  PERMISSION_DENIED
+  CROSS_TENANT_ATTEMPT
+  SESSION_REVOKED
+  ANOMALY_LOGIN_VELOCITY
+  ANOMALY_MASS_EXPORT
+}
+
+enum SecuritySeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+/// Append-only security event stream — the detection & response layer's
+/// record, and the current T4 (Security/Compliance) escalation surface via
+/// `GET /v1/security-events` until a full EscalationCase model exists
+/// (that is the Event/Workflow Engine's concern, still unbuilt).
+model SecurityEvent {
+  id        String            @id @default(uuid())
+  tenantId  String
+  tenant    Tenant            @relation(fields: [tenantId], references: [id])
+  userId    String?
+  user      User?             @relation(fields: [userId], references: [id])
+  type      SecurityEventType
+  severity  SecuritySeverity
+  ip        String?
+  userAgent String?
+  metadata  Json
+  createdAt DateTime          @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, severity])
+  @@index([userId])
+  @@map("security_events")
 }
 
 enum Channel {

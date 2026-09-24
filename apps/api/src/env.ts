@@ -26,6 +26,21 @@ export const apiEnvSchema = baseEnvSchema.extend({
   WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
   WHATSAPP_VERIFY_TOKEN: z.string().min(1).optional(),
   WHATSAPP_APP_SECRET: z.string().min(1).optional(),
+
+  // Phase 6 — AuthN/AuthZ. Required (unlike the provider seams above): every
+  // environment that boots the API issues/verifies its own staff sessions,
+  // there is no NOT_CONFIGURED state for "nobody can log in".
+  JWT_SIGNING_SECRET: z.string().min(32),
+  MFA_ENCRYPTION_KEY: z
+    .string()
+    .refine((value) => Buffer.from(value, 'base64').length === 32, {
+      message: 'MFA_ENCRYPTION_KEY must be base64 for exactly 32 bytes (AES-256) — see generateEncryptionKey()',
+    }),
+  AUTH_TOKEN_ISSUER: z.string().default('AI Concierge'),
+  // Stricter than RATE_LIMIT_MAX/_WINDOW_MS above — brute-force protection
+  // scoped to /v1/auth/login specifically (see plugins/security.ts).
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(10),
+  AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
