@@ -75,3 +75,92 @@ export async function markConversationProcessed(
     data: { processedAt: new Date() },
   });
 }
+
+/**
+ * Every message for a conversation, oldest first — the accumulated
+ * transcript Steps 1-3 extract against for a multi-turn conversation (see
+ * `appendMessageToConversation`), as opposed to `findLatestMessageForConversation`'s
+ * single latest row.
+ */
+export async function findMessagesForConversation(
+  db: Executor,
+  tenantId: TenantId,
+  conversationId: string,
+) {
+  return db.message.findMany({
+    where: { conversationId, conversation: { tenantId } },
+    orderBy: { createdAt: 'asc' },
+  });
+}
+
+/**
+ * Appends a new message to an existing, tenant-owned conversation — the
+ * "continue" counterpart to `createConversationWithMessage`'s "start fresh".
+ * Returns null (never throws) when the conversation doesn't exist for this
+ * tenant, so the caller decides how to surface that (same convention as
+ * `findConversationById`/`findLatestMessageForConversation`).
+ */
+export async function appendMessageToConversation(
+  db: Executor,
+  tenantId: TenantId,
+  conversationId: string,
+  content: string,
+) {
+  const conversation = await db.conversation.findFirst({
+    where: { id: conversationId, tenantId },
+    select: { id: true },
+  });
+  if (!conversation) return null;
+  return db.message.create({ data: { conversationId, content } });
+}
+
+/**
+ * The customer's most recent conversation on this channel, unless it
+ * already reached a terminal Step 4 outcome (COMPLETE/EXPIRED/CANCELLED) —
+ * in which case there is nothing open to continue and the caller should
+ * start a new conversation instead. "Open" is derived from the latest
+ * message's latest MissingInfoCheck rather than a new column: same
+ * append-only-history convention every other cross-step read in this
+ * codebase already uses, so there's no second source of truth to keep in
+ * sync.
+ *
+ * Read outside any transaction, so two genuinely concurrent deliveries for
+ * the same customer could both see "nothing open" and each start their own
+ * conversation — the same class of race PHASE-5-CHANNELS.md §7 already documents and
+ * accepts for the idempotency-key pre-check (inherited from Phase 1's
+ * submitEnquiry), and no more likely here: real WhatsApp replies from one
+ * person are seconds-to-minutes apart, not concurrent.
+ */
+export async function findOpenConversationForCustomer(
+  db: Executor,
+  tenantId: TenantId,
+  channel: Channel,
+  customerRef: string,
+): Promise<{ id: string } | null> {
+  const conversation = await db.conversation.findFirst({
+    where: { tenantId, channel, customerRef },
+    orderBy: { createdAt: 'desc' },
+    select: {
+      id: true,
+      messages: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: {
+          missingInfoChecks: {
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            select: { status: true },
+          },
+        },
+      },
+    },
+  });
+  if (!conversation) return null;
+
+  const latestStatus = conversation.messages[0]?.missingInfoChecks[0]?.status;
+  if (latestStatus === 'COMPLETE' || latestStatus === 'EXPIRED' || latestStatus === 'CANCELLED') {
+    return null;
+  }
+
+  return { id: conversation.id };
+}

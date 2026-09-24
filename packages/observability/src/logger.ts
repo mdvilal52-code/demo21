@@ -1,21 +1,33 @@
 import { pino, type Logger, type LoggerOptions } from 'pino';
 
 /**
- * Paths pino redacts to `[REDACTED]` before a log line is ever serialized.
- * Covers common places secrets and PII end up in structured logs: request
- * headers/bodies, env dumps, and free-text customer message fields.
+ * Field names redacted to `[REDACTED]` before a log line is ever
+ * serialized, both as a top-level key (`logger.info({ message: rawText })`
+ * — the overwhelmingly common call shape in this codebase) and nested one
+ * level under another key (`logger.info({ req: { headers: {
+ * authorization } } })`). fast-redact (which pino uses) resolves `*.foo` as
+ * "any key's `.foo` property" — it does *not* also match a bare top-level
+ * `foo`, so listing only the `*.`-prefixed form would silently pass a
+ * flat `{ message: '...' }` call straight through unredacted. Both forms
+ * are listed for every field for that reason; see `logger.test.ts`'s
+ * top-level cases.
  */
+const SENSITIVE_FIELD_NAMES = [
+  'password',
+  'token',
+  'secret',
+  'apiKey',
+  'webhookSigningSecret',
+  'message',
+  'content',
+  'rawBody',
+];
+
 export const REDACTED_PATHS = [
   'req.headers.authorization',
   'req.headers.cookie',
-  '*.password',
-  '*.token',
-  '*.secret',
-  '*.apiKey',
-  '*.webhookSigningSecret',
-  '*.message',
-  '*.content',
-  '*.rawBody',
+  ...SENSITIVE_FIELD_NAMES,
+  ...SENSITIVE_FIELD_NAMES.map((field) => `*.${field}`),
 ];
 
 export interface CreateLoggerOptions {

@@ -41,6 +41,16 @@ describe('AI Concierge API — integration', () => {
     });
   });
 
+  describe('privacy policy', () => {
+    it('GET /privacy serves an HTML privacy policy', async () => {
+      const response = await testApp.app.inject({ method: 'GET', url: '/privacy' });
+      expect(response.statusCode).toBe(200);
+      expect(response.headers['content-type']).toContain('text/html');
+      expect(response.body).toContain('Privacy Policy');
+      expect(response.body).toContain('WhatsApp');
+    });
+  });
+
   describe('POST /v1/enquiries', () => {
     it('creates a conversation and returns the recognized intent', async () => {
       const response = await testApp.app.inject({

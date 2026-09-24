@@ -8,3 +8,8 @@ export * from './temporal.js';
 export * from './vehicle.js';
 export * from './missingInfo.js';
 export * from './auth.js';
+export * from './eligibility.js';
+export * from './availability.js';
+export * from './alternatives.js';
+export * from './money.js';
+export * from './quote.js';

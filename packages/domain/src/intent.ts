@@ -4,6 +4,7 @@ import { z } from 'zod';
 export const IntentType = {
   ENQUIRY: 'ENQUIRY',
   BOOKING_REQUEST: 'BOOKING_REQUEST',
+  CANCEL_REQUEST: 'CANCEL_REQUEST',
   AVAILABILITY_REQUEST: 'AVAILABILITY_REQUEST',
   PRICE_REQUEST: 'PRICE_REQUEST',
   DOCUMENT_REQUEST: 'DOCUMENT_REQUEST',
@@ -17,6 +18,7 @@ export const IntentType = {
 export const intentTypeSchema = z.enum([
   IntentType.ENQUIRY,
   IntentType.BOOKING_REQUEST,
+  IntentType.CANCEL_REQUEST,
   IntentType.AVAILABILITY_REQUEST,
   IntentType.PRICE_REQUEST,
   IntentType.DOCUMENT_REQUEST,

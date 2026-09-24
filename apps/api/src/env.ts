@@ -18,14 +18,42 @@ export const apiEnvSchema = baseEnvSchema.extend({
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 
-  // Meta WhatsApp Cloud API — all four optional so the API boots with the
-  // adapter NOT_CONFIGURED until every one of them is set (see
-  // lib/whatsappClient.ts). Never all required: a partial set is still
-  // NOT_CONFIGURED, not a startup failure.
-  WHATSAPP_ACCESS_TOKEN: z.string().min(1).optional(),
-  WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
-  WHATSAPP_VERIFY_TOKEN: z.string().min(1).optional(),
-  WHATSAPP_APP_SECRET: z.string().min(1).optional(),
+  // WhatsApp (Meta Cloud API) — all optional. Any left unset means the
+  // channel reports NOT_CONFIGURED rather than faking a working integration.
+  // .trim() on every secret/token/id below: a stray newline or space picked
+  // up when copying a value out of the Meta App Dashboard or pasting into a
+  // platform's env var text box still reads as "set", but changes every
+  // HMAC computed from it — a webhook signature check that fails on every
+  // single request (never intermittently, always the same bytes wrong) is
+  // this exact class of bug, not a code defect in the verifier itself.
+  // WHATSAPP_VERIFY_TOKEN: a value you invent yourself and paste into Meta's
+  // "Verify token" field when you register this webhook URL.
+  WHATSAPP_VERIFY_TOKEN: z.string().trim().min(1).optional(),
+  // WHATSAPP_APP_SECRET: from your Meta App's Basic Settings — used to
+  // verify the X-Hub-Signature-256 header on every inbound webhook.
+  WHATSAPP_APP_SECRET: z.string().trim().min(16).optional(),
+  // WHATSAPP_ACCESS_TOKEN: a permanent token for the WhatsApp Business
+  // Account (System User token recommended over the 24h test token).
+  WHATSAPP_ACCESS_TOKEN: z.string().trim().min(1).optional(),
+  // WHATSAPP_PHONE_NUMBER_ID: the "Phone number ID" (not the phone number
+  // itself) from Meta's WhatsApp > API Setup page.
+  WHATSAPP_PHONE_NUMBER_ID: z.string().trim().min(1).optional(),
+  WHATSAPP_API_VERSION: z.string().trim().min(1).default('v21.0'),
+
+  // Phase 6 — Availability. FLEET_PROVIDER selects the FleetProvider
+  // implementation; 'database' (default) is real, DB-backed inventory
+  // (VehicleUnit rows) and always works with zero configuration. 'external'
+  // opts into a third-party fleet-management API and requires
+  // FLEET_API_BASE_URL/FLEET_API_KEY — left unset, it reports NOT_CONFIGURED
+  // rather than faking a working integration (same convention as WhatsApp).
+  FLEET_PROVIDER: z.enum(['database', 'external']).default('database'),
+  FLEET_API_BASE_URL: z.string().trim().url().optional(),
+  FLEET_API_KEY: z.string().trim().min(1).optional(),
+  FLEET_API_TIMEOUT_MS: z.coerce.number().int().positive().default(3000),
+  // How long a temporary hold survives before it lapses back to available capacity.
+  AVAILABILITY_HOLD_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+  // Turnaround buffer applied to both ends of an overlap check (cleaning/inspection window).
+  AVAILABILITY_TURNAROUND_BUFFER_MINUTES: z.coerce.number().int().nonnegative().default(120),
 
   // Phase 6 — AuthN/AuthZ. Required (unlike the provider seams above): every
   // environment that boots the API issues/verifies its own staff sessions,

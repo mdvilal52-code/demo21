@@ -38,4 +38,18 @@ describe('loadApiEnv', () => {
   it('rejects a JWT_SIGNING_SECRET shorter than 32 characters', () => {
     expect(() => loadApiEnv({ ...validSource, JWT_SIGNING_SECRET: 'short' })).toThrow();
   });
+
+  it('trims a trailing newline off WHATSAPP_APP_SECRET, so a copy-pasted value still HMAC-verifies Meta webhook signatures', () => {
+    const env = loadApiEnv({
+      ...validSource,
+      WHATSAPP_APP_SECRET: 'meta-app-secret-value\n',
+      WHATSAPP_ACCESS_TOKEN: ' meta-access-token ',
+      WHATSAPP_PHONE_NUMBER_ID: 'phone-id\n',
+      WHATSAPP_VERIFY_TOKEN: '\tverify-token',
+    });
+    expect(env.WHATSAPP_APP_SECRET).toBe('meta-app-secret-value');
+    expect(env.WHATSAPP_ACCESS_TOKEN).toBe('meta-access-token');
+    expect(env.WHATSAPP_PHONE_NUMBER_ID).toBe('phone-id');
+    expect(env.WHATSAPP_VERIFY_TOKEN).toBe('verify-token');
+  });
 });

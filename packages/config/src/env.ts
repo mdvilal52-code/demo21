@@ -23,7 +23,11 @@ export const baseEnvSchema = z.object({
         .filter(Boolean),
     ),
 
-  WEBHOOK_SIGNING_SECRET: z.string().min(16),
+  // .trim(): a trailing newline/space from a dashboard paste or a .env file
+  // is invisible in most UIs but changes every HMAC computed from this
+  // value, so it silently breaks all signature verification while the
+  // "is it set" check still passes.
+  WEBHOOK_SIGNING_SECRET: z.string().trim().min(16),
 
   OTEL_EXPORTER_OTLP_ENDPOINT: z.string().url().optional().or(z.literal('')),
   OTEL_SERVICE_NAME: z.string().default('ai-concierge'),

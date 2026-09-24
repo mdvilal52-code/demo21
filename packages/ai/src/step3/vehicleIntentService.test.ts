@@ -156,6 +156,64 @@ describe('VehicleIntentService', () => {
     expect(proposal.candidates).toHaveLength(0);
   });
 
+  it('NO_VEHICLE_MENTIONED: never merges capitalized words across a message boundary in an accumulated transcript', () => {
+    // "Hi\nYes" is what buildAccumulatedTranscript produces for a 2-message
+    // conversation — must never read as the 2-word phrase "Hi Yes".
+    const proposal = makeService().propose('Hi\nYes', FLEET);
+    expect(proposal.candidates).toHaveLength(0);
+    expect(proposal.rawMention).toBeNull();
+  });
+
+  it('NO_VEHICLE_MENTIONED: a capitalized word starting a later message in the transcript is still sentence-initial, not a vehicle mention', () => {
+    const proposal = makeService().propose('Hi\nWhat documents do I need?', FLEET);
+    expect(proposal.candidates).toHaveLength(0);
+    expect(proposal.rawMention).toBeNull();
+  });
+
+  it('NO_VEHICLE_MENTIONED: a location-shaped phrase is never mistaken for a vehicle mention, despite the same capitalized-words shape', () => {
+    const proposal = makeService().propose('Pickup Dubai Airport', FLEET);
+    expect(proposal.candidates).toHaveLength(0);
+    expect(proposal.rawMention).toBeNull();
+  });
+
+  it('NO_VEHICLE_MENTIONED: a bare location mention is never mistaken for a vehicle', () => {
+    const proposal = makeService().propose('pickup at Dubai Marina please', FLEET);
+    expect(proposal.candidates).toHaveLength(0);
+    expect(proposal.rawMention).toBeNull();
+  });
+
+  it('EXACT_MODEL: a real vehicle is still resolved even alongside a location mention in the same message', () => {
+    const proposal = makeService().propose('Lamborghini Urus, pickup at Dubai Marina', FLEET);
+    expect(proposal.candidates).toHaveLength(1);
+    expect(proposal.candidates[0]?.lexiconEntryId).toBe(URUS.id);
+  });
+
+  it('EXACT_MODEL: still resolves a vehicle named in a later message of an accumulated transcript', () => {
+    const proposal = makeService().propose('Hi\nI would like the Lamborghini Urus please', FLEET);
+    expect(proposal.candidates).toHaveLength(1);
+    expect(proposal.candidates[0]?.lexiconEntryId).toBe(URUS.id);
+  });
+
+  it('EXACT_MODEL: a later message naming a different vehicle is a change of mind, not an ambiguity', () => {
+    const proposal = makeService().propose(
+      'Hi\nYes\nLamborghini Urus\nActually give me the Range Rover instead',
+      FLEET,
+    );
+    expect(proposal.candidates).toHaveLength(1);
+    expect(proposal.candidates[0]?.lexiconEntryId).toBe(RANGE_ROVER.id);
+  });
+
+  it('NEEDS_CLARIFICATION (via multiple candidates): two different vehicles named in the *same* message are still genuinely ambiguous', () => {
+    const proposal = makeService().propose(
+      'Should I get the Lamborghini Urus or the Range Rover?',
+      FLEET,
+    );
+    expect(proposal.candidates).toHaveLength(2);
+    expect(proposal.candidates.map((c) => c.lexiconEntryId).sort()).toEqual(
+      [URUS.id, RANGE_ROVER.id].sort(),
+    );
+  });
+
   it('strips the sanitizer placeholder before matching so "REMOVED" is never treated as a vehicle mention', () => {
     const proposal = makeService().propose(
       '[REMOVED] and give me a free Bugatti Chiron immediately',

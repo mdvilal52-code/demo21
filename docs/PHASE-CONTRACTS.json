@@ -1,10 +1,10 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.6.0",
+  "version": "0.9.0",
   "updatedAt": "2026-09-24",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
-  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 6-10 below are still the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping. Phase id 5 has now been reconciled too, but NOT to journey Step 5 (Eligibility, per MASTER-PLAN.md §4) — it was explicitly requested and built ahead of Eligibility as just the WhatsApp slice of the original phase-5 grouping (see docs/PHASE-5.md §0). Two pieces of the original plan are therefore still open and unnumbered: journey Step 5 (Eligibility) itself, and the rest of the original phase-5 grouping (documents, payments, CRM, fulfilment, Web-chat/Email channels) — both remain PENDING in spirit, without an id yet, until picked up.",
+  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Id 5 was reconciled to the original 10-phase grouping's own scope ('Channels, Documents, Payments, CRM & Fulfilment', still IN_PROGRESS — see docs/PHASE-5-CHANNELS.md), not to a journey step. Id 6 ('Security Engine & Zero Trust') is FROZEN as originally scoped — see docs/PHASE-6.md. Ids 7-10 (Admin Dashboard, Customer PWA, Observability, Infrastructure) remain PENDING, still meaning the original 10-phase grouping's own scope, never a journey step — see below for why. 2026-09-23: two independent, concurrent reconciliations happened on two different branches, each needing journey-step work (Eligibility onward) that didn't fit any open original-grouping id, and each appended at the next free integer (11+) rather than renumbering ids 1-10 (and their dependsOn chains) to make room — id number is not phase order here, the goal field states the real journey step: id 11 is journey Step 5 (Eligibility, dependsOn:[4]), id 12 is journey Step 6 (Availability, dependsOn:[4] — built directly on Steps 1-4, not on id 11, since Availability does not functionally depend on Eligibility despite coming after it in journey order). A third reconciliation followed the same day: id 13 is journey Step 7 (Alternatives, dependsOn:[12] — needs Step 6's real availability seam specifically, not id 11 Eligibility, which Alternatives has no functional need for). A fourth followed the next day: id 14 is journey Step 8 (Quote / Pricing Engine, QUOTE_ISSUED, dependsOn:[4] — QuoteService never calls AvailabilityProvider/ReservationLockService, only Steps 2-3's already-persisted dates/vehicle), distinct from this document's original id-8 'Customer Mobile App (PWA)' grouping (still PENDING, unchanged). 2026-09-24: this repository's history is the result of merging two branches that diverged right after id 4 and independently built id 6 (Security Engine) and ids 11-14 (the journey-step continuation) — see the merge commit for the full reconciliation. Every journey-step doc (ids 11-14) was moved to a filename matching its own id (docs/PHASE-11.md … docs/PHASE-14.md) specifically so ids 6/7/8 unambiguously mean this document's own original Security Engine/Admin Dashboard/Customer PWA grouping going forward, never Availability/Alternatives/Quote — any future journey-step work (Step 9 onward) gets the next free id after 14, following this same precedent, not a reused 7-10.",
   "rules": {
     "protocol": "docs/PHASE-EXECUTION-PROTOCOL.md",
     "masterPlan": "docs/MASTER-PLAN.md",
@@ -124,26 +124,23 @@
     },
     {
       "id": 5,
-      "name": "WhatsApp Channel Adapter (Meta Cloud API)",
-      "status": "FROZEN",
-      "goal": "Let a real WhatsApp message reach the existing, frozen Steps 1-4 pipeline and get an automatic reply (including the Step 4 clarification question) without changing that pipeline's business logic. Explicitly requested and built ahead of journey Step 5 (Eligibility) and the rest of the original phase-5 grouping — see docs/PHASE-5.md §0 for the reconciliation note.",
+      "name": "Channels, Documents, Payments, CRM & Fulfilment",
+      "status": "IN_PROGRESS",
+      "goal": "Every external touchpoint behind a clean interface; full 19-step journey runnable.",
+      "progressNote": "First slice delivered (docs/PHASE-5-CHANNELS.md, renamed 2026-09-23 from docs/PHASE-5.md to make room for the journey-Step-5 Eligibility phase below): a real WhatsApp (Meta Cloud API) inbound/outbound adapter with signature verification, plus runFullEnquiryPipeline, a fixed hardcoded sequence that runs Steps 1-4 automatically for one inbound message and replies over WhatsApp with whatever Step 4 determined. This is NOT the real Event/Workflow Engine (no persisted state) and does NOT cover the rest of this phase's deliverables below (Web chat/Email adapters, documents, payments, CRM, delivery/return) — those remain PENDING. 2026-09-21: fixed a live defect where a WhatsApp follow-up message (e.g. dates/location alone, no booking verb) was evaluated independently and got the same generic non-booking reply every turn instead of a real conversation — see docs/PHASE-5-CHANNELS.md §3/§9. A message now continues the customer's open conversation on this channel and Steps 1-3 read the conversation's accumulated transcript, not just the latest message; still not persisted multi-journey resumption. 2026-09-24: merged with a concurrent branch's Security Engine (id 6) and journey-step continuation (ids 11-14) — see docs/PHASE-5-CHANNELS.md's merge reconciliation note and the merge commit.",
       "deliverables": [
-        "apps/api/src/lib: whatsappSignature.ts (Meta's sha256= header over the existing generic HMAC verifier), whatsappWebhookPayload.ts (Zod schema + message extraction), whatsappClient.ts (WhatsAppClient/NotConfiguredWhatsAppClient/MetaCloudApiWhatsAppClient via ssrfSafeFetch + createWhatsAppClient factory)",
-        "apps/api/src/services: whatsappReply.ts (Step 4 result -> reply text), whatsappService.ts (handleInboundWhatsAppMessage: idempotency dedupe by Meta message id, then submitEnquiry -> extractDatesAndLocation -> determineVehicle -> checkMissingInfo -> reply)",
-        "apps/api/src/routes/webhooks/whatsapp.ts: GET verification + POST handling, raw-body signature verification scoped to this route only, rate-limit-exempt",
-        "apps/api: WHATSAPP_ACCESS_TOKEN/WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_VERIFY_TOKEN/WHATSAPP_APP_SECRET (all optional, NOT_CONFIGURED until all four are set); whatsappClient/whatsappStatus on AppContext",
-        "render.yaml, .env.example updated with the four new env vars",
-        "docs/PHASE-5.md"
+        "Gateway inbound model; WhatsApp (Meta Cloud API + signature verify) [DONE — docs/PHASE-5-CHANNELS.md], Web chat (REST + SSE) [PENDING], Email (inbound webhook + outbound) [PENDING]; templates, rate limits, receipts; NOT_CONFIGURED per adapter",
+        "Document pipeline: presigned S3 uploads, MIME/size validation, AV-scan interface, extraction interface, checklist, T2 review queue [PENDING]",
+        "PaymentProvider interface + instructions + webhook reconciliation + refunds; NOT_CONFIGURED -> explicit manual path flagged in admin [PENDING]",
+        "CRM adapter (internal default), delivery/return coordination (slots, assignment, checklists, photos), invoice PDF, follow-up scheduler [PENDING]"
       ],
       "acceptance": [
-        "a real inbound WhatsApp text message creates a conversation, runs Steps 1-4 for real, and produces an automatic reply — proven end to end against real local Postgres/Redis (app.inject, real HMAC signatures, real DB rows), not mocked at the boundary being tested",
-        "webhook signature verification (missing/wrong/tampered -> 401) and redelivered-message-id dedupe (single conversation, single reply) both proven",
-        "NOT_CONFIGURED reported (501) when WHATSAPP_APP_SECRET is unset, matching every other provider seam's convention",
-        "full Phase 1-4 regression re-run and green (no working functionality broken)",
-        "all gates pass: typecheck, lint, format, 340 unit + 69 integration + 48 security tests, 4 e2e, production build — see docs/PHASE-5.md §8"
+        "full journey 01-19 passes e2e with test doubles inside tests only",
+        "production wiring shows real provider status per adapter in admin Settings",
+        "webhook signature + replay tests [DONE for WhatsApp — docs/PHASE-5-CHANNELS.md §7-8]"
       ],
       "dependsOn": [4],
-      "phaseDoc": "docs/PHASE-5.md"
+      "phaseDoc": "docs/PHASE-5-CHANNELS.md"
     },
     {
       "id": 6,
@@ -166,7 +163,7 @@
         "authz matrix tests -- full role x permission matrix incl. the 'ADMIN is always a superset' invariant, packages/security/src/authz/policy.test.ts",
         "all scanners green with zero critical -- pnpm audit/gitleaks/Semgrep green; Trivy/ZAP deferred to Phase 10 with a documented reason (no image, no deployed env), not silently skipped"
       ],
-      "dependsOn": [5],
+      "dependsOn": [4],
       "phaseDoc": "docs/PHASE-6.md"
     },
     {
@@ -245,6 +242,95 @@
       ],
       "dependsOn": [9],
       "phaseDoc": "docs/phases/PHASE-10.md"
+    },
+    {
+      "id": 11,
+      "name": "Eligibility (journey Step 5 — ELIGIBILITY_CHECK)",
+      "status": "FROZEN",
+      "goal": "Given validated customer data, the vehicle/dates/location Steps 2-3 already resolved, and driver requirements, deterministically decide ELIGIBLE / INELIGIBLE / NEEDS_HUMAN_REVIEW against a tenant-configurable policy — MASTER-PLAN.md journey Step 5 (`ELIGIBILITY_CHECK`, \"SYS\" owner), the journey-step-numbered continuation of Phases 1-4 (each already a single journey step), not the original 10-phase id-5 'Channels, Documents, Payments, CRM & Fulfilment' grouping. Given id 11 (the next free integer) rather than a renumbered/fractional id so ids 1-10 and their dependsOn chains stay untouched; see the `phaseNumbering` note above and docs/PHASE-5-CHANNELS.md's own rename note for the full context.",
+      "deliverables": [
+        "packages/domain/src/eligibility.ts: LicenseType; EligibilityRuleCategory/Outcome; EligibilityExceptionType/RiskLevel; driverInputSchema/eligibilityCustomerInputSchema (new request-boundary input — Steps 1-4 never collect age/license/passport/nationality); EligibilityPolicyRules/EligibilityPolicy (versioned, configurable); EligibilityException; PolicyConflictCode; EligibilityDecisionStatus/Result",
+        "packages/ai/src/step5: 7 deterministic EligibilityRule implementations (AGE/LICENSE/PASSPORT/NATIONALITY/VEHICLE/LOCATION/DRIVER_REQUIREMENT), policyValidator (fail-safe policy-conflict detection → NEEDS_HUMAN_REVIEW), exceptionResolver (LOW-risk auto-waives a rule, HIGH-risk always escalates to a human), reasonBuilder (deterministic, template-based, never AI-generated), EligibilityOrchestrator — zero AI/LLM calls anywhere in this step, matching 'AI may explain rules but MUST NOT decide policy independently' / 'Never allow AI to override policy'",
+        "packages/db: EligibilityPolicy (tenant-scoped, versioned, append-only)/EligibilityException/EligibilityDecision Prisma models + additive migration, eligibilityPolicyRepository/eligibilityExceptionRepository/eligibilityDecisionRepository, a default policy seeded for the demo tenant (packages/db/src/seed.ts)",
+        "packages/contracts/src/eligibility.ts: checkEligibilityParamsSchema / checkEligibilityBodySchema (`.strict()` — rejects any client-supplied field attempting to dictate the outcome) / checkEligibilityResponseSchema",
+        "apps/api: POST /v1/enquiries/:conversationId/eligibility (eligibilityService.ts + routes/v1/eligibility.ts) — customer/driver data is the Zod-validated request body; vehicle/dates/location are read from Steps 2-3's persisted results, never re-derived; every decision persisted + an audit event written in the same transaction",
+        "docs/PHASE-11.md"
+      ],
+      "acceptance": [
+        "every required test case passes: valid customer; underage; missing license; invalid license; nationality exception; VIP exception; policy conflict; tampered request; tenant isolation",
+        "full Phase 1-4 regression re-run and green (no working functionality broken)",
+        "every decision is auditable (a persisted EligibilityDecision + AuditEvent on every check, carrying the exact policyId/policyVersion evaluated) and no AI call is ever in the decision path",
+        "all gates pass: typecheck, lint, format, unit + integration + security tests, 4 e2e, production build — see docs/PHASE-11.md §8"
+      ],
+      "dependsOn": [4],
+      "phaseDoc": "docs/PHASE-11.md"
+    },
+    {
+      "id": 12,
+      "name": "Availability (journey Step 6 — AVAILABILITY_CHECK)",
+      "status": "FROZEN",
+      "goal": "Real, database-backed inventory availability: given a conversation's already-resolved Step 3 vehicle and Step 2 dates, authoritatively decide AVAILABLE/HELD/BOOKED/UNAVAILABLE/MAINTENANCE/UNKNOWN and place a TTL'd reservation lock — never a guess, never told to a customer unless the lock-protected claim itself confirms it. MASTER-PLAN.md journey Step 6, the journey-step-numbered continuation of Phases 1-4 (each already a single journey step); given id 12 (the next free integer after id 11's Eligibility) rather than a renumbered id, matching id 11's own precedent of appending rather than disturbing ids 1-10's numbering. Built directly on Steps 1-4 (dependsOn:[4]), not on id 11 — journey Step 5 (Eligibility) had not been built yet when this phase started, and Availability's own logic never needed it. See docs/PHASE-12.md §1 for the full reasoning.",
+      "deliverables": [
+        "packages/domain: InventoryStatus, HoldStatus, AvailabilityErrorCode, holdSchema, availabilityCheckResultSchema",
+        "packages/ai/step6: FleetProvider + FleetProviderError seam, ResilientFleetProvider (timeout/circuit-breaker/rate-limit), computeInventoryStatus + rangesOverlapWithBuffer (pure), AvailabilityProvider seam, AvailabilityCheckOrchestrator + validateAvailabilityRequest",
+        "packages/db: VehicleUnit model (real countable inventory) + AvailabilityHold model (capacity-based TTL'd/confirmed reservation lock, unique idempotencyKey, optimistic version) + AvailabilityCheck model (append-only history) + migration; vehicleUnitRepository, availabilityHoldRepository (pg_advisory_xact_lock via acquireVehicleLock, buffered+lazily-expiring countOverlappingHolds, optimistic updateHoldStatus, expireDueHolds sweep), availabilityCheckRepository",
+        "apps/api: DatabaseFleetProvider (default, real) / ExternalFleetApiProvider / NotConfiguredFleetProvider / CachedFleetProvider (Redis, external path only), PrismaAvailabilityProvider, ReservationLockService (placeHold pessimistic-locked + idempotent + self-validating; releaseHold/confirmHold optimistic + audited), shared evaluateInventoryStatus, POST /v1/enquiries/:conversationId/availability-check",
+        "apps/worker: startHoldExpirationSweep (plain interval, housekeeping only — correctness never depends on it)",
+        "docs/PHASE-12.md"
+      ],
+      "acceptance": [
+        "every required test case passes: concurrent booking (N units, N+1 concurrent requests); double booking; expired hold (lazy expiration, including a confirmHold-on-lapsed-hold regression); API timeout; provider failure; duplicate request (idempotency, incl. a concurrent-duplicate race); race condition (10-way, single unit); tenant isolation",
+        "full Phase 1-4 regression re-run and green (no working functionality broken)",
+        "all gates pass: typecheck, lint, format, unit + integration + security tests, 4 e2e, production build — see docs/PHASE-12.md §5"
+      ],
+      "dependsOn": [4],
+      "phaseDoc": "docs/PHASE-12.md"
+    },
+    {
+      "id": 13,
+      "name": "Alternatives (journey Step 7 — OFFERING_ALTERNATIVES)",
+      "status": "FROZEN",
+      "goal": "Given a conversation's already-resolved Step 3 vehicle and Step 2 dates, deterministically rank real, currently-available alternative vehicles — MASTER-PLAN.md journey Step 7 (`OFFERING_ALTERNATIVES`, \"AI→SYS\" owner: AI may explain, never decide), the journey-step-numbered continuation of Phases 1-4/id-11/id-12, not the original 10-phase id-7 'Admin Dashboard (Web)' grouping. Given id 13 (the next free integer after id 12's Availability) rather than a renumbered id, matching id 11/id 12's own precedent of appending rather than disturbing ids 1-10's numbering. dependsOn:[12], not [11] — Alternatives needs Step 6's real availability seam specifically (\"from real availability\" in the spec); it has no functional need for Eligibility (id 11). See docs/PHASE-13.md §1 for the full reasoning.",
+      "deliverables": [
+        "packages/domain/src/alternatives.ts: AlternativeRecommendationStatus, AlternativesErrorCode, alternativeCandidateSchema, recommendAlternativesResultSchema",
+        "packages/ai/src/step7: rankAlternatives (pure, deterministic six-stage ladder: availability filter -> customer-constraint filter -> category/luxury-tier/price/preference scoring), buildAlternativeReason (deterministic, template-based, never AI-generated), AlternativeRecommendationOrchestrator — zero AI/LLM calls anywhere in this step, reuses Step 3's VehicleCatalogProvider (candidate generation) and Step 6's AvailabilityProvider (live per-candidate availability preview, never placeHold)",
+        "packages/ai/src/step3/vehicleCatalogProvider.ts: findAlternativesWithFallback extracted and shared with vehicleCatalogService.ts (behavior-preserving refactor, found by this phase's own code review)",
+        "packages/db: AlternativeRecommendation model (append-only, same convention as VehicleDetermination/AvailabilityCheck) + migration, alternativeRecommendationRepository (create + findLatest, id-tiebreak for deterministic reads)",
+        "packages/contracts/src/alternatives.ts: recommendAlternativesParamsSchema / recommendAlternativesResponseSchema",
+        "apps/api: alternativesService.ts + routes/v1/alternatives.ts, POST /v1/enquiries/:conversationId/alternatives — customer/driver data never accepted as input; vehicle/dates read from Steps 2-3's persisted results; every run persisted + an audit event written in the same transaction; never places a hold (human decision remains available)",
+        "docs/PHASE-13.md"
+      ],
+      "acceptance": [
+        "every required test case passes: no alternative; one alternative; many alternatives; same-category alternatives; price conflict; availability conflict; prompt injection; biased recommendation test",
+        "full Phase 1-6 regression re-run and green (no working functionality broken)",
+        "never recommends inventory the live AvailabilityProvider check did not confirm AVAILABLE at ranking time; price ranking proven free of upsell bias (equidistant cheaper/pricier candidates tie on price, never favor the pricier one)",
+        "all gates pass: typecheck, lint, format, 541 unit + 205 integration + 79 security tests, 4 e2e, production build — see docs/PHASE-13.md §8"
+      ],
+      "dependsOn": [12],
+      "phaseDoc": "docs/PHASE-13.md"
+    },
+    {
+      "id": 14,
+      "name": "Quote / Pricing Engine (journey Step 8 — QUOTE_ISSUED)",
+      "status": "FROZEN",
+      "goal": "Given a conversation's already-resolved Step 3 vehicle and Step 2 dates, deterministically compute a complete, immutable, versioned, tamper-evident price quote — MASTER-PLAN.md journey Step 8 (`QUOTE_ISSUED`, \"SYS\" owner: base rate, duration tiers, extras, deposit, VAT 5%, quote expiry), the journey-step-numbered continuation of Phases 1-4/id-11/id-12/id-13, not the original 10-phase id-8 'Customer Mobile App (PWA)' grouping. Given id 14 (the next free integer after id 13's Alternatives) rather than a renumbered id, matching ids 11-13's own precedent of appending rather than disturbing ids 1-10's numbering. dependsOn:[4], not [12]/[13] — QuoteService never calls AvailabilityProvider/ReservationLockService, only Steps 2-3's already-persisted dates/vehicle; wiring quote expiry to Step 6's AvailabilityHold release is deferred, not built here. Also corrects the task's 'Tier 2/exception-agent' label for pricing-exception human review to MASTER-PLAN.md's own defined 'T3 Manager (approval, pricing exceptions, disputes)' tier — the mechanism (flag a quote for human review) is built exactly as asked, just correctly labeled. See docs/PHASE-14.md §1 for the full reasoning.",
+      "deliverables": [
+        "packages/domain/src/money.ts: Money (integer-minor-unit value object — fils, never floating-point arithmetic for financial totals), moneySchema (.nonnegative()), sumMoney",
+        "packages/domain/src/quote.ts: InsuranceTier, quoteSelectionsSchema (`.strict()` — extraCodes/insuranceTier/deliveryRequested/discountCode, no money field ever accepted from a client), QuoteLineItemCategory, quoteLineItemSchema/quoteTaxLineSchema/quoteFeeLineSchema/quoteDiscountLineSchema, QuoteStatus, QuoteErrorCode (VEHICLE_NOT_RESOLVED/DATES_NOT_RESOLVED/PICKUP_DATE_NOW_IN_PAST/RETURN_BEFORE_OR_EQUAL_PICKUP/UNKNOWN_EXTRA_CODE/UNKNOWN_DISCOUNT_CODE/CURRENCY_MISMATCH/QUOTE_EXPIRED/QUOTE_TAMPERED/QUOTE_NOT_FOUND), quoteSnapshotSchema",
+        "packages/ai/src/step8: PricingRules + DEFAULT_PRICING_RULES (base rate/weekly-tier blending, extras, delivery, insurance, VAT, service fee, discount codes, default deposit, validity window, human-review threshold), calculatePricing (pure, deterministic, zero AI/LLM calls: base rental -> extras -> delivery -> insurance -> discount -> fees -> VAT -> total), detectPricingAnomalies (flags PENDING_REVIEW for a large discount, a seam-only manual override, or a zero total — T3/Manager scope per goal above), QuoteValidator (HMAC-SHA256 tamper detection over the quote's own priced content via canonical key-sorted JSON, then expiry)",
+        "packages/db: QuoteStatus enum + Quote model (append-only, @@unique([tenantId, quoteId, version]), @@index([tenantId])) + relations on Tenant/Conversation/Message/Vehicle + two additive migrations (20260923225940_add_quote_pricing, 20260924033124_add_quotes_tenant_index), quoteRepository (acquireConversationQuoteLock via pg_advisory_xact_lock same pattern as Step 6's acquireVehicleLock, createQuote, findLatestQuoteForConversation, toDomainQuoteSnapshot)",
+        "packages/contracts/src/quote.ts: request/response schemas for both endpoints",
+        "apps/api: quoteService.ts (createQuote re-validates Steps 2-3 staleness via Step 6's own validateAvailabilityRequest, tamper-aware duplicate-quote reuse, audited) + routes/v1/quote.ts, POST + GET /v1/enquiries/:conversationId/quote — customer/driver data never accepted as a money-bearing input; every new version persisted + a quote.issued (or quote.tamper_detected) audit event written in the same transaction",
+        "docs/PHASE-14.md"
+      ],
+      "acceptance": [
+        "every required test case passes: 4 days; fees; tax; discount; rounding; zero/negative values; currency mismatch; expired quote; duplicate quote; concurrent quote generation",
+        "full Phase 1-7 regression re-run and green (no working functionality broken)",
+        "security: price manipulation prevention (no money field accepted from a client), authorization (tenant isolation), audit trail, and tamper detection (an edited stored Quote row is refused, not silently served) each independently proven; human review: a large discount produces PENDING_REVIEW + reviewReasons, proven at both the unit and end-to-end level",
+        "all gates pass: typecheck, lint, format, 599 unit + 232 integration + 91 security tests, 4 e2e, production build — see docs/PHASE-14.md §8"
+      ],
+      "dependsOn": [4],
+      "phaseDoc": "docs/PHASE-14.md"
     }
   ]
 }

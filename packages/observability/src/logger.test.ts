@@ -31,11 +31,37 @@ describe('logger redaction', () => {
     expect(line.config.secret).toBe('[REDACTED]');
   });
 
-  it('redacts customer message content', () => {
+  it('redacts a whole nested message object, not just its content property', () => {
+    // The bare top-level `message` path (see the test below) also matches
+    // one level deep, and redacts the *entire* value at that key — a
+    // strictly safer superset of redacting only its `.content` child.
     const line = captureLog((logger) =>
-      logger.info({ message: { content: 'my email is a@b.com' } }, 'enquiry'),
-    ) as { message: { content: string } };
-    expect(line.message.content).toBe('[REDACTED]');
+      logger.info({ wrapper: { message: { content: 'my email is a@b.com' } } }, 'enquiry'),
+    ) as { wrapper: { message: string } };
+    expect(line.wrapper.message).toBe('[REDACTED]');
+  });
+
+  it('redacts a top-level message field (the common flat logger.info({ ... }) call shape)', () => {
+    const line = captureLog((logger) =>
+      logger.info({ requestId: 'req-1', message: 'raw customer text +971501234567' }, 'decision'),
+    ) as { message: string; requestId: string };
+    expect(line.message).toBe('[REDACTED]');
+    expect(line.requestId).toBe('req-1');
+  });
+
+  it('redacts a top-level secret-shaped field', () => {
+    const line = captureLog((logger) =>
+      logger.info({ webhookSigningSecret: 'super-secret-value' }, 'boot'),
+    ) as { webhookSigningSecret: string };
+    expect(line.webhookSigningSecret).toBe('[REDACTED]');
+  });
+
+  it('redacts a top-level rawBody/content field', () => {
+    const line = captureLog((logger) =>
+      logger.info({ rawBody: 'raw', content: 'also raw' }, 'inbound'),
+    ) as { rawBody: string; content: string };
+    expect(line.rawBody).toBe('[REDACTED]');
+    expect(line.content).toBe('[REDACTED]');
   });
 
   it('does not redact unrelated fields', () => {

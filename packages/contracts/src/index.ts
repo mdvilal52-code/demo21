@@ -6,3 +6,8 @@ export * from './vehicle.js';
 export * from './missingInfo.js';
 export * from './auth.js';
 export * from './adminEvents.js';
+export * from './eligibility.js';
+export * from './whatsapp.js';
+export * from './availability.js';
+export * from './alternatives.js';
+export * from './quote.js';
