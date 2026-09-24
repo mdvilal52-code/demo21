@@ -86,6 +86,18 @@ services:
         sync: false
       - key: WHATSAPP_APP_SECRET
         sync: false
+      # Phase 6 — AuthN/AuthZ. Both required; the API refuses to boot
+      # without them (see apps/api/src/env.ts — no NOT_CONFIGURED state for
+      # staff login, unlike the provider seams above).
+      - key: JWT_SIGNING_SECRET
+        generateValue: true
+      # NOT `generateValue: true`: this must decode as base64 to exactly 32
+      # bytes (AES-256), which Render's generic random-value generator does
+      # not guarantee. Generate it yourself and paste it into the Render
+      # dashboard:
+      #   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+      - key: MFA_ENCRYPTION_KEY
+        sync: false
 
   - type: worker
     name: ai-concierge-worker

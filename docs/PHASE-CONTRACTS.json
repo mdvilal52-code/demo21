@@ -1,8 +1,8 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.5.0",
-  "updatedAt": "2026-09-20",
+  "version": "0.6.0",
+  "updatedAt": "2026-09-24",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
   "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 6-10 below are still the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping. Phase id 5 has now been reconciled too, but NOT to journey Step 5 (Eligibility, per MASTER-PLAN.md §4) — it was explicitly requested and built ahead of Eligibility as just the WhatsApp slice of the original phase-5 grouping (see docs/PHASE-5.md §0). Two pieces of the original plan are therefore still open and unnumbered: journey Step 5 (Eligibility) itself, and the rest of the original phase-5 grouping (documents, payments, CRM, fulfilment, Web-chat/Email channels) — both remain PENDING in spirit, without an id yet, until picked up.",
   "rules": {
@@ -148,26 +148,26 @@
     {
       "id": 6,
       "name": "Security Engine & Zero Trust",
-      "status": "PENDING",
+      "status": "FROZEN",
       "goal": "Zero-trust layering verified by tests (WAF -> AuthN -> AuthZ -> Tenant -> Sandbox -> Egress -> DB policy -> Encrypted data).",
       "deliverables": [
-        "Edge: Redis rate limiting + WAF rules (body size, schema, IP lists, bot signals)",
-        "AuthN: OIDC/OAuth2, <=15-min access tokens, rotating refresh, step-up/MFA for admin",
-        "AuthZ: RBAC + ABAC policy engine (tenant, ownership, journey state, tier) in one middleware and in services",
-        "Tenant isolation: RLS on every table, per-connection tenant context, cross-tenant negative tests",
-        "AI sandbox: tool permission matrix, egress allowlist, injection defences, output DLP",
-        "Data: TLS, field-level PII encryption, secrets management, key rotation runbook",
-        "Detection & response: anomaly rules, automatic restricted response, security event stream, T4 escalation",
-        "CI: Semgrep, dependency scan, gitleaks, Trivy image scan, ZAP baseline",
-        "docs/SECURITY-MODEL.md (STRIDE) + compromised-account kill-chain test"
+        "Edge: Redis-backed rate limiting (shared across instances, was in-memory) + a stricter dedicated limit on /v1/auth/*; known-scanner-user-agent WAF denylist; body-size + schema validation unchanged from Phase 1",
+        "AuthN: real, working local email+password+TOTP-MFA staff auth (argon2id, <=15-min HS256 access tokens, rotating opaque refresh tokens with reuse detection incl. the concurrent-refresh race); IdentityProvider OIDC seam + NotConfiguredIdentityProvider (no external provider chosen yet, matching the AIProvider/WhatsAppClient precedent) — see docs/SECURITY-MODEL.md §3",
+        "AuthZ: RBAC role->permission matrix + ABAC tenant-match policy engine (authorize()), enforced as Fastify preHandlers (authenticate, requirePermission) on every new admin route",
+        "Tenant isolation: Postgres RLS (ENABLE+FORCE ROW LEVEL SECURITY) on every tenant-scoped table old and new, keyed on a per-transaction app.tenant_id session setting (withTenantContext()); real least-privilege ai_concierge_api/ai_concierge_worker DB roles (no DELETE/DDL/BYPASSRLS); cross-tenant negative tests proven against the real scoped role connection, not just app-level filtering",
+        "AI sandbox: tool permission matrix seam (packages/ai/src/sandbox) -- no AIProvider does real LLM tool-calling yet, so nothing exists to gate for real; egress allowlist unchanged from Phase 1 (ssrfSafeFetch); injection defences unchanged from Phase 1-2; output DLP is a tripwire on outbound text (should never fire today -- every reply is template-built, no free-text AI generation exists) -- see docs/SECURITY-MODEL.md §3 for the honest scope split",
+        "Data: TLS at the edge (platform-terminated); AES-256-GCM field-level encryption applied to the one real secret this phase introduces (the MFA TOTP seed) -- passport/licence-number encryption reuses the same primitive once a document pipeline exists; docs/SECURITY-MODEL.md's key rotation runbook",
+        "Detection & response: SecurityEvent append-only stream + five anomaly/detection rules (login lockout, tenant-wide login velocity, token-reuse, mass-export, permission-denied/cross-tenant) with automatic response (immediate session revocation via a Redis family-revocation set, closing the residual-JWT-validity window) and manual response (POST /v1/users/:id/lock|unlock); GET /v1/security-events is the current T4 escalation surface until a full EscalationCase model exists",
+        "CI: pnpm audit + gitleaks + Semgrep unchanged and unaffected (security.yml); Trivy image scan and ZAP baseline explicitly NOT wired -- no Dockerfile and no deployed ephemeral environment exist yet to scan, both are Phase 10 (Infrastructure, CI/CD & Release) deliverables, not fabricated here",
+        "docs/SECURITY-MODEL.md (full STRIDE table, zero-trust layer mapping, RBAC matrix, key rotation runbook) + apps/api/src/killChain.security.test.ts (three independent compromised-account containment stories end to end over the real HTTP API + real Postgres)"
       ],
       "acceptance": [
-        "kill-chain test proves each layer contains a compromised account",
-        "authz matrix tests",
-        "all scanners green with zero critical"
+        "kill-chain test proves each layer contains a compromised account -- proven for AuthZ containment, tenant-isolation containment (RLS), and token-theft containment (incl. the concurrent-refresh race) followed by human response",
+        "authz matrix tests -- full role x permission matrix incl. the 'ADMIN is always a superset' invariant, packages/security/src/authz/policy.test.ts",
+        "all scanners green with zero critical -- pnpm audit/gitleaks/Semgrep green; Trivy/ZAP deferred to Phase 10 with a documented reason (no image, no deployed env), not silently skipped"
       ],
       "dependsOn": [5],
-      "phaseDoc": "docs/phases/PHASE-06.md"
+      "phaseDoc": "docs/PHASE-6.md"
     },
     {
       "id": 7,

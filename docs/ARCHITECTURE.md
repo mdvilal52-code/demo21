@@ -153,6 +153,50 @@ customer text into trusted, deterministically-verified fields; Step 4's only job
 exists (or doesn't) across all three and decide what's still needed, so it cannot itself introduce a
 hallucinated value.
 
+## Phase 6 scope: Security Engine & Zero Trust
+
+No request-flow diagram in the Steps 1-4 style — Phase 6 is a cross-cutting layer, not a journey
+step. Full detail (STRIDE, the zero-trust layer mapping, RBAC matrix, key rotation runbook,
+deliberate scope decisions) lives in `docs/SECURITY-MODEL.md`; `docs/PHASE-6.md` has what was built
+and why. Summary:
+
+```
+POST /v1/auth/login {email, password, mfaCode?}
+                │
+                ▼
+  find User by (tenantId, email) — tenantId is always DEFAULT_TENANT_ID today,
+  same convention as every /v1 route; no tenant-selection step exists yet
+                │
+                ├─ wrong password / MFA code → recordLoginFailure + SecurityEvent,
+                │    lock the account after 5 failures, flag tenant-wide velocity after 20
+                │
+                ▼ (success)
+  issueRefreshToken() (new rotation family) + signAccessToken() (<=15 min JWT)
+                │
+                ▼
+  201 { accessToken, refreshToken, user }
+
+Authenticated request:  Authorization: Bearer <accessToken>
+                │
+                ▼
+  verifyAccessToken() ── check Redis session-family revocation set ──▶ request.auth
+                │
+                ▼
+  requirePermission(permission) preHandler ── authorize(auth, permission, {tenantId})
+       (ABAC tenant-match, unconditional, before RBAC permission-matrix check)
+                │
+                ▼
+  route handler, every DB call inside withTenantContext(prisma, auth.tenantId, …)
+       (sets app.tenant_id for the transaction — Postgres RLS enforces it as the backstop)
+```
+
+Refresh-token rotation: every use both issues a new token AND revokes the old one
+(`revokeRefreshTokenIfActive`, conditional on `revokedAt IS NULL` — race-safe under genuine
+concurrency, not just sequential reuse). Presenting an already-revoked token — whether because it was
+genuinely reused, or because a concurrent request won the same race — kills the entire rotation
+family: every refresh token for that session is revoked in Postgres, and live access tokens are
+denied immediately via the Redis revocation set rather than waiting out their own `exp`.
+
 ## Monorepo layout
 
 ```
@@ -168,10 +212,14 @@ packages/
                   VehicleDeterminationOrchestrator; Step 4: RequiredFieldsEvaluator,
                   clarificationPromptBuilder, MissingInfoOrchestrator
   security/       secure headers, CORS allowlist, SSRF-safe fetch, webhook HMAC, CSRF primitive,
-                  resilience primitives (timeout, circuit breaker, rate limiter)
+                  resilience primitives (timeout, circuit breaker, rate limiter), AES-256-GCM field
+                  encryption; `/authn` subpath (argon2id, JWT access tokens, rotating refresh tokens,
+                  TOTP MFA, OIDC seam — kept out of the main barrel so apps/web's build never pulls in
+                  argon2's native addon, see docs/PHASE-6.md §3); `authz/` RBAC+ABAC policy engine
   observability/  pino logger (with redaction), request correlation (AsyncLocalStorage), OTel bootstrap
   contracts/      HTTP request/response Zod schemas + BullMQ job schema shared by api/worker/web
-  db/             Prisma schema, generated client, repositories (tenant-scoped), migrations
+  db/             Prisma schema, generated client, repositories (tenant-scoped), migrations,
+                  withTenantContext() (sets the per-transaction session variable Postgres RLS keys on)
   config/         shared env schema + fail-fast loader
   testing/        shared test fixtures + real-Postgres/Redis test helpers (no mocks)
 ```
@@ -187,13 +235,21 @@ imports, use `tsc --noEmit` for typecheck since they don't need to emit for anyo
 
 `Tenant`, `Conversation`, `Message`, `IntentRecord`, `AuditEvent`, `IdempotencyKey` (Phase 1),
 `DateLocationExtraction` (Phase 2), `Vehicle` and `VehicleDetermination` (Phase 3),
-`MissingInfoCheck` (Phase 4) — see `packages/db/prisma/schema.prisma`. Every business table carries
-`tenantId`; every repository function takes `tenantId` explicitly and filters by it
-(`findFirst`/`updateMany` with `tenantId` in the WHERE clause). This is the **application-level**
-half of tenant isolation. Database-level Row Level Security is still not implemented — see Known
-Limitations in `docs/phases/PHASE-01.md`, `docs/PHASE-2.md`, `docs/PHASE-3.md` and
-`docs/PHASE-4.md`. `Vehicle` additionally supports soft deletion (`deletedAt`) — every repository
-query excludes soft-deleted rows, and nothing in the codebase issues a hard `DELETE` on that table.
+`MissingInfoCheck` (Phase 4), `User`, `RefreshToken`, `SecurityEvent` (Phase 6) — see
+`packages/db/prisma/schema.prisma`. Every business table carries `tenantId`; every repository
+function takes `tenantId` explicitly and filters by it (`findFirst`/`updateMany` with `tenantId` in
+the WHERE clause) — the **application-level** half of tenant isolation, unchanged since Phase 1.
+**Database-level Row Level Security is implemented as of Phase 6** — `ENABLE`+`FORCE ROW LEVEL
+SECURITY` plus a `tenant_isolation` policy on every table above except `refresh_tokens` and
+`idempotency_keys` (looked up by an opaque secret alone, before any tenant is known — see
+`docs/SECURITY-MODEL.md` §3 for why those two get a different policy shape), keyed on the
+`app.tenant_id` session setting `withTenantContext()` sets per-transaction. Proven against real
+Postgres, connected as the real least-privilege `ai_concierge_api`/`ai_concierge_worker` roles the
+same migration creates — see `packages/db/src/repositories/rowLevelSecurity.security.test.ts`. Those
+roles are not yet what the API/worker's own default `DATABASE_URL` connects as in local dev, CI, or
+production as currently documented (`docs/SECURITY-MODEL.md` §3 — a Phase 10 cutover). `Vehicle`
+additionally supports soft deletion (`deletedAt`) — every repository query excludes soft-deleted
+rows, and nothing in the codebase issues a hard `DELETE` on that table.
 
 ## Security posture (Phase 1)
 
