@@ -1,5 +1,5 @@
 import { AppError, type AuthContext } from '@ai-concierge/domain';
-import { verifyAccessToken, InvalidAccessTokenError } from '@ai-concierge/security';
+import { verifyAccessToken, InvalidAccessTokenError } from '@ai-concierge/security/authn';
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { isSessionFamilyRevoked } from '../lib/sessionRevocation.js';
 

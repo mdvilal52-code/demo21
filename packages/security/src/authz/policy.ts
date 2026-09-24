@@ -5,8 +5,7 @@ export interface ResourceAttributes {
 }
 
 export type AuthorizationDecision =
-  | { allowed: true }
-  | { allowed: false; reason: 'CROSS_TENANT' | 'MISSING_PERMISSION' };
+  { allowed: true } | { allowed: false; reason: 'CROSS_TENANT' | 'MISSING_PERMISSION' };
 
 /**
  * RBAC + ABAC in one function, per MASTER-PLAN.md §1's "AuthZ: RBAC + ABAC

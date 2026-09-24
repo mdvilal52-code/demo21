@@ -32,9 +32,13 @@ describe('authorize — RBAC + ABAC', () => {
   });
 
   it('denies same-tenant access when the role lacks the permission', () => {
-    const decision = authorize(auth({ role: UserRole.OPS_AGENT }), Permission.SECURITY_EVENT_RESPOND, {
-      tenantId: TENANT_A,
-    });
+    const decision = authorize(
+      auth({ role: UserRole.OPS_AGENT }),
+      Permission.SECURITY_EVENT_RESPOND,
+      {
+        tenantId: TENANT_A,
+      },
+    );
     expect(decision).toEqual({ allowed: false, reason: 'MISSING_PERMISSION' });
   });
 

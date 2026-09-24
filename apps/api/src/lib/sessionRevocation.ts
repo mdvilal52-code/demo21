@@ -1,5 +1,5 @@
 import type { Redis } from 'ioredis';
-import { ACCESS_TOKEN_TTL_SECONDS } from '@ai-concierge/security';
+import { ACCESS_TOKEN_TTL_SECONDS } from '@ai-concierge/security/authn';
 
 const KEY_PREFIX = 'revoked-session-family:';
 

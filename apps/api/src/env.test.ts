@@ -28,7 +28,10 @@ describe('loadApiEnv', () => {
 
   it('rejects an MFA_ENCRYPTION_KEY that is not exactly 32 bytes decoded', () => {
     expect(() =>
-      loadApiEnv({ ...validSource, MFA_ENCRYPTION_KEY: Buffer.from('too-short').toString('base64') }),
+      loadApiEnv({
+        ...validSource,
+        MFA_ENCRYPTION_KEY: Buffer.from('too-short').toString('base64'),
+      }),
     ).toThrow(/32 bytes/);
   });
 

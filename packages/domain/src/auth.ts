@@ -43,6 +43,7 @@ export const SecurityEventType = {
   SESSION_REVOKED: 'SESSION_REVOKED',
   ANOMALY_LOGIN_VELOCITY: 'ANOMALY_LOGIN_VELOCITY',
   ANOMALY_MASS_EXPORT: 'ANOMALY_MASS_EXPORT',
+  DLP_OUTBOUND_PII_DETECTED: 'DLP_OUTBOUND_PII_DETECTED',
 } as const;
 
 export const securityEventTypeSchema = z.enum([
@@ -57,6 +58,7 @@ export const securityEventTypeSchema = z.enum([
   SecurityEventType.SESSION_REVOKED,
   SecurityEventType.ANOMALY_LOGIN_VELOCITY,
   SecurityEventType.ANOMALY_MASS_EXPORT,
+  SecurityEventType.DLP_OUTBOUND_PII_DETECTED,
 ]);
 export type SecurityEventTypeValue = z.infer<typeof securityEventTypeSchema>;
 

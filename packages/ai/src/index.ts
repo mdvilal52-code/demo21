@@ -3,6 +3,7 @@ export * from './dates.js';
 export * from './lexicon.js';
 export * from './intent-engine.js';
 export * from './provider.js';
+export * from './sandbox/toolPermissionMatrix.js';
 
 // Step 2 — Extract Dates & Location
 export * from './step2/calendar.js';

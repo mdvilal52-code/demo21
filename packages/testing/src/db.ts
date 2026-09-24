@@ -1,5 +1,5 @@
 import { PrismaClient } from '@prisma/client';
-import { hashPassword } from '@ai-concierge/security';
+import { hashPassword } from '@ai-concierge/security/authn';
 
 export function requireTestDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;

@@ -34,7 +34,12 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     '/v1/auth/login',
     {
-      config: { rateLimit: { max: app.ctx.config.AUTH_RATE_LIMIT_MAX, timeWindow: app.ctx.config.AUTH_RATE_LIMIT_WINDOW_MS } },
+      config: {
+        rateLimit: {
+          max: app.ctx.config.AUTH_RATE_LIMIT_MAX,
+          timeWindow: app.ctx.config.AUTH_RATE_LIMIT_WINDOW_MS,
+        },
+      },
       schema: { tags: ['auth'], body: loginRequestSchema, response: { 200: authTokenPairSchema } },
     },
     async (request, reply) => {
@@ -54,8 +59,17 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     '/v1/auth/refresh',
     {
-      config: { rateLimit: { max: app.ctx.config.AUTH_RATE_LIMIT_MAX, timeWindow: app.ctx.config.AUTH_RATE_LIMIT_WINDOW_MS } },
-      schema: { tags: ['auth'], body: refreshRequestSchema, response: { 200: authTokenPairSchema } },
+      config: {
+        rateLimit: {
+          max: app.ctx.config.AUTH_RATE_LIMIT_MAX,
+          timeWindow: app.ctx.config.AUTH_RATE_LIMIT_WINDOW_MS,
+        },
+      },
+      schema: {
+        tags: ['auth'],
+        body: refreshRequestSchema,
+        response: { 200: authTokenPairSchema },
+      },
     },
     async (request, reply) => {
       const result = await refresh(deps(), {
@@ -78,7 +92,10 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
 
   app.get(
     '/v1/auth/me',
-    { preHandler: [authenticate], schema: { tags: ['auth'], response: { 200: authenticatedUserSchema } } },
+    {
+      preHandler: [authenticate],
+      schema: { tags: ['auth'], response: { 200: authenticatedUserSchema } },
+    },
     async (request, reply) => {
       const user = await getMe(deps(), request.auth!);
       reply.status(200).send(user);

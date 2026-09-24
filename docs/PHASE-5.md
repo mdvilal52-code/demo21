@@ -59,7 +59,7 @@ Out of scope (deferred, not silently skipped):
 - **Every inbound message starts a fresh conversation** — matching `submitEnquiry`'s own contract
   exactly (channel `WHATSAPP`, `customerRef` = the sender's WhatsApp id). There is deliberately no
   "find the customer's open conversation and append to it" logic: Steps 2-3 already only ever read
-  a conversation's *latest* message, so threading messages together wouldn't accumulate context
+  a conversation's _latest_ message, so threading messages together wouldn't accumulate context
   without also building real cross-message field carry-forward — exactly the conversational loop
   `PHASE-4.md` §13 scoped to the Event/Workflow Engine, not a channel adapter. A customer's reply to
   a clarification question is processed as its own independent enquiry today; documented below as a
@@ -138,7 +138,7 @@ Out of scope (deferred, not silently skipped):
 
 ## 5. APIs
 
-| Method | Path                 | Purpose                                                             |
+| Method | Path                 | Purpose                                                              |
 | ------ | -------------------- | -------------------------------------------------------------------- |
 | GET    | `/webhooks/whatsapp` | Meta's webhook subscription challenge/verification                   |
 | POST   | `/webhooks/whatsapp` | Inbound WhatsApp messages; triggers Steps 1-4 and an automatic reply |
@@ -168,7 +168,7 @@ instead of a client-supplied header) are all reused unchanged.
   exactly as inertly as the existing REST path already proved (Phases 1-2's own sanitizer/Prisma
   parameterization — nothing new was added or needed here).
 - **No secrets or stack traces in any error response** — proven the same way `missingInfo.security.
-  test.ts` already proves it for the REST endpoints.
+test.ts` already proves it for the REST endpoints.
 - **NOT_CONFIGURED is explicit** — a `POST` with `WHATSAPP_APP_SECRET` unset returns `501` with that
   code, never a silent 200 or a crash; the same is true for outbound sends via
   `NotConfiguredWhatsAppClient`.
@@ -177,7 +177,7 @@ instead of a client-supplied header) are all reused unchanged.
 **Explicitly deferred (documented, not silently skipped):**
 
 - Database-level Row Level Security — unchanged from Phases 1-4, still Phase 6 scope.
-- The pre-existing idempotency race noted in `enquiryService.ts` (two *genuinely concurrent*
+- The pre-existing idempotency race noted in `enquiryService.ts` (two _genuinely concurrent_
   deliveries of the same message id could both pass the pre-check before either's write commits) —
   inherited from Phase 1's `submitEnquiry`, not introduced here, and no more likely for WhatsApp
   redeliveries (minutes apart, not concurrent) than it already was for REST clients.
@@ -194,16 +194,16 @@ Docker daemon still unavailable here, same as every prior phase) — genuine HTT
 real Fastify app (`app.inject`), real HMAC signatures, real database writes, not mocks standing in
 for the boundary being tested.
 
-| Gate          | Command                 | Result                                                      |
-| ------------- | ------------------------ | ------------------------------------------------------------ |
-| Typecheck     | `pnpm typecheck`        | ✅ 11/11 packages                                            |
-| Lint          | `pnpm lint`             | ✅ 0 errors, 0 warnings                                      |
-| Format        | `pnpm format:check`     | ✅ clean                                                     |
-| Unit          | `pnpm test:unit`        | ✅ 340 tests (31 new: signature 6, payload 9, client 6, reply 5, service 5) |
-| Integration   | `pnpm test:integration` | ✅ 69 tests (5 new — real webhook → real conversation → real reply capture) |
-| Security      | `pnpm test:security`    | ✅ 48 tests (11 new — signature/shape/NOT_CONFIGURED/injection) |
-| E2E           | `pnpm test:e2e`         | ✅ 4 tests, unchanged (no UI touched)                        |
-| Build         | `pnpm build`            | ✅ every package + Next.js production build                  |
+| Gate        | Command                 | Result                                                                      |
+| ----------- | ----------------------- | --------------------------------------------------------------------------- |
+| Typecheck   | `pnpm typecheck`        | ✅ 11/11 packages                                                           |
+| Lint        | `pnpm lint`             | ✅ 0 errors, 0 warnings                                                     |
+| Format      | `pnpm format:check`     | ✅ clean                                                                    |
+| Unit        | `pnpm test:unit`        | ✅ 340 tests (31 new: signature 6, payload 9, client 6, reply 5, service 5) |
+| Integration | `pnpm test:integration` | ✅ 69 tests (5 new — real webhook → real conversation → real reply capture) |
+| Security    | `pnpm test:security`    | ✅ 48 tests (11 new — signature/shape/NOT_CONFIGURED/injection)             |
+| E2E         | `pnpm test:e2e`         | ✅ 4 tests, unchanged (no UI touched)                                       |
+| Build       | `pnpm build`            | ✅ every package + Next.js production build                                 |
 
 Full Phase 1-4 regression re-run and green: every pre-existing test (302 unit baseline +
 `redisHealth`'s 4 from the prior session, 64 integration, 37 security, 4 e2e) still passes
@@ -212,18 +212,18 @@ unchanged, plus this phase's new coverage — nothing existing was broken.
 Key scenarios proven end-to-end in `apps/api/src/whatsapp.integration.test.ts` /
 `whatsapp.security.test.ts`:
 
-| Case                                                             | Result                                          |
-| ----------------------------------------------------------------- | -------------------------------------------------- |
-| GET challenge with the correct verify token                       | raw challenge echoed, `200`                        |
-| GET with wrong token / wrong mode                                 | `403`, no leak of the expected token               |
-| POST with no / wrong / tampered signature                         | `401`, no conversation created                     |
-| POST with `WHATSAPP_APP_SECRET` unset                              | `501 NOT_CONFIGURED`                               |
-| POST with malformed JSON (valid signature over those exact bytes)  | `400`                                              |
-| POST with valid JSON, wrong shape                                  | `400`                                              |
-| A real text message                                                | conversation + message created, Steps 2-4 all run, `missingInfoCheck` persisted, reply captured |
-| The same message id redelivered                                    | processed once — one conversation, one reply       |
-| Prompt injection / SQL injection in the message body               | inert text, `200`, flagged the same as the REST path |
-| Existing `POST /v1/enquiries`                                      | still `201` — unaffected by the new route           |
+| Case                                                              | Result                                                                                          |
+| ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| GET challenge with the correct verify token                       | raw challenge echoed, `200`                                                                     |
+| GET with wrong token / wrong mode                                 | `403`, no leak of the expected token                                                            |
+| POST with no / wrong / tampered signature                         | `401`, no conversation created                                                                  |
+| POST with `WHATSAPP_APP_SECRET` unset                             | `501 NOT_CONFIGURED`                                                                            |
+| POST with malformed JSON (valid signature over those exact bytes) | `400`                                                                                           |
+| POST with valid JSON, wrong shape                                 | `400`                                                                                           |
+| A real text message                                               | conversation + message created, Steps 2-4 all run, `missingInfoCheck` persisted, reply captured |
+| The same message id redelivered                                   | processed once — one conversation, one reply                                                    |
+| Prompt injection / SQL injection in the message body              | inert text, `200`, flagged the same as the REST path                                            |
+| Existing `POST /v1/enquiries`                                     | still `201` — unaffected by the new route                                                       |
 
 ## 9. Known limitations
 

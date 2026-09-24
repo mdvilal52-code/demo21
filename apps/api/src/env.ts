@@ -31,11 +31,10 @@ export const apiEnvSchema = baseEnvSchema.extend({
   // environment that boots the API issues/verifies its own staff sessions,
   // there is no NOT_CONFIGURED state for "nobody can log in".
   JWT_SIGNING_SECRET: z.string().min(32),
-  MFA_ENCRYPTION_KEY: z
-    .string()
-    .refine((value) => Buffer.from(value, 'base64').length === 32, {
-      message: 'MFA_ENCRYPTION_KEY must be base64 for exactly 32 bytes (AES-256) — see generateEncryptionKey()',
-    }),
+  MFA_ENCRYPTION_KEY: z.string().refine((value) => Buffer.from(value, 'base64').length === 32, {
+    message:
+      'MFA_ENCRYPTION_KEY must be base64 for exactly 32 bytes (AES-256) — see generateEncryptionKey()',
+  }),
   AUTH_TOKEN_ISSUER: z.string().default('AI Concierge'),
   // Stricter than RATE_LIMIT_MAX/_WINDOW_MS above — brute-force protection
   // scoped to /v1/auth/login specifically (see plugins/security.ts).

@@ -1,7 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { UserRole } from '@ai-concierge/domain';
-import { ACCESS_TOKEN_TTL_SECONDS, InvalidAccessTokenError, signAccessToken, verifyAccessToken } from './accessTokens.js';
+import {
+  ACCESS_TOKEN_TTL_SECONDS,
+  InvalidAccessTokenError,
+  signAccessToken,
+  verifyAccessToken,
+} from './accessTokens.js';
 
 const SECRET = 'test-jwt-signing-secret-at-least-32-bytes-long';
 

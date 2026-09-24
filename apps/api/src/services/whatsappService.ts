@@ -15,6 +15,7 @@ import {
 } from './whatsappReply.js';
 import type { WhatsAppClient } from '../lib/whatsappClient.js';
 import type { InboundWhatsAppMessage } from '../lib/whatsappWebhookPayload.js';
+import { flagUnexpectedPiiInOutboundText } from '../lib/dlp.js';
 
 export interface WhatsAppServiceDeps {
   prisma: PrismaClient;
@@ -130,10 +131,12 @@ export async function handleInboundWhatsAppMessage(
       },
     );
 
-    await deps.whatsappClient.sendTextMessage(
-      message.from,
-      buildWhatsAppReplyText(missingInfo.missingInfo),
+    const replyText = buildWhatsAppReplyText(missingInfo.missingInfo);
+    await flagUnexpectedPiiInOutboundText(
+      { prisma: deps.prisma, logger: deps.logger },
+      { tenantId: input.tenantId, channel: 'WHATSAPP', text: replyText },
     );
+    await deps.whatsappClient.sendTextMessage(message.from, replyText);
   } catch (error) {
     deps.logger.error(
       { err: error, whatsappMessageId: message.id },

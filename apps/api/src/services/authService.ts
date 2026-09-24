@@ -1,4 +1,5 @@
 import {
+  countRecentSecurityEvents,
   createRefreshToken,
   createUser as dbCreateUser,
   enableMfa,
@@ -19,10 +20,9 @@ import {
   type PrismaClient,
   type User,
 } from '@ai-concierge/db';
+import { decryptField, encryptField } from '@ai-concierge/security';
 import {
   buildTotpEnrollmentUri,
-  decryptField,
-  encryptField,
   generateTotpSecret,
   hashPassword,
   hashRefreshToken,
@@ -31,7 +31,7 @@ import {
   signAccessToken,
   verifyPassword,
   verifyTotpCode,
-} from '@ai-concierge/security';
+} from '@ai-concierge/security/authn';
 import {
   AppError,
   SecurityEventType,
@@ -69,6 +69,10 @@ interface RequestMeta {
   userAgent?: string;
 }
 
+/** A tenant-wide burst of failed logins (any account) beyond ordinary single-account lockout — a credential-stuffing/brute-force sweep signal. */
+const LOGIN_VELOCITY_THRESHOLD = 20;
+const LOGIN_VELOCITY_WINDOW_MS = 5 * 60 * 1000;
+
 async function issueAccessToken(deps: AuthServiceDeps, user: User, familyId: string) {
   return signAccessToken(
     { userId: user.id, tenantId: user.tenantId, role: user.role, sessionFamilyId: familyId },
@@ -104,21 +108,35 @@ export interface LoginInput extends RequestMeta {
   requestId: string;
 }
 
+type LoginOutcome =
+  | { ok: true; pair: AuthTokenPair }
+  | { ok: false; code: 'UNAUTHORIZED' | 'FORBIDDEN'; message: string; mfaRequired?: true };
+
+/**
+ * A failed attempt still needs its `recordLoginFailure`/`recordSecurityEvent`
+ * writes to survive — but `withTenantContext` wraps this in a
+ * `prisma.$transaction`, and throwing from inside a Prisma interactive
+ * transaction rolls back everything written in it, including those writes.
+ * So this returns a result instead of throwing on the failure paths that
+ * write anything, and the caller throws once, after the transaction has
+ * already committed.
+ */
 export async function login(deps: AuthServiceDeps, input: LoginInput): Promise<AuthTokenPair> {
-  return withTenantContext(deps.prisma, input.tenantId, async (tx) => {
+  const outcome = await withTenantContext<LoginOutcome>(deps.prisma, input.tenantId, async (tx) => {
     const user = await findUserByEmail(tx, input.tenantId, input.email);
     if (!user) {
       // Same error as a wrong password — never reveal whether the account exists.
-      throw new AppError('UNAUTHORIZED', 'Invalid email or password');
+      return { ok: false, code: 'UNAUTHORIZED', message: 'Invalid email or password' };
     }
     if (user.status !== 'ACTIVE') {
-      throw new AppError('FORBIDDEN', 'This account is suspended');
+      return { ok: false, code: 'FORBIDDEN', message: 'This account is suspended' };
     }
     if (user.lockedUntil && user.lockedUntil > new Date()) {
-      throw new AppError(
-        'FORBIDDEN',
-        'This account is temporarily locked after repeated failed logins',
-      );
+      return {
+        ok: false,
+        code: 'FORBIDDEN',
+        message: 'This account is temporarily locked after repeated failed logins',
+      };
     }
 
     const passwordValid = await verifyPassword(user.passwordHash, input.password);
@@ -132,12 +150,29 @@ export async function login(deps: AuthServiceDeps, input: LoginInput): Promise<A
         ...(input.ip ? { ip: input.ip } : {}),
         ...(input.userAgent ? { userAgent: input.userAgent } : {}),
       });
-      throw new AppError('UNAUTHORIZED', 'Invalid email or password');
+
+      const recentFailures = await countRecentSecurityEvents(
+        tx,
+        input.tenantId,
+        SecurityEventType.LOGIN_FAILURE,
+        new Date(Date.now() - LOGIN_VELOCITY_WINDOW_MS),
+      );
+      if (recentFailures >= LOGIN_VELOCITY_THRESHOLD) {
+        await recordSecurityEvent(tx, {
+          tenantId: input.tenantId,
+          type: SecurityEventType.ANOMALY_LOGIN_VELOCITY,
+          severity: SecuritySeverity.CRITICAL,
+          metadata: { recentFailures, windowMs: LOGIN_VELOCITY_WINDOW_MS },
+          ...(input.ip ? { ip: input.ip } : {}),
+        });
+      }
+
+      return { ok: false, code: 'UNAUTHORIZED', message: 'Invalid email or password' };
     }
 
     if (user.mfaEnabled) {
       if (!input.mfaCode) {
-        throw new AppError('UNAUTHORIZED', 'MFA code required', { details: { mfaRequired: true } });
+        return { ok: false, code: 'UNAUTHORIZED', message: 'MFA code required', mfaRequired: true };
       }
       const secret = decryptField(user.mfaSecretCiphertext as string, deps.mfaEncryptionKey);
       const codeValid = await verifyTotpCode(secret, input.mfaCode);
@@ -149,7 +184,7 @@ export async function login(deps: AuthServiceDeps, input: LoginInput): Promise<A
           severity: SecuritySeverity.WARNING,
           ...(input.ip ? { ip: input.ip } : {}),
         });
-        throw new AppError('UNAUTHORIZED', 'Invalid MFA code');
+        return { ok: false, code: 'UNAUTHORIZED', message: 'Invalid MFA code' };
       }
     }
 
@@ -187,13 +222,23 @@ export async function login(deps: AuthServiceDeps, input: LoginInput): Promise<A
     });
 
     return {
-      accessToken: access.token,
-      accessTokenExpiresAt: access.expiresAt.toISOString(),
-      refreshToken: newRefreshToken.token,
-      refreshTokenExpiresAt: newRefreshToken.expiresAt.toISOString(),
-      user: toAuthenticatedUser(user),
+      ok: true,
+      pair: {
+        accessToken: access.token,
+        accessTokenExpiresAt: access.expiresAt.toISOString(),
+        refreshToken: newRefreshToken.token,
+        refreshTokenExpiresAt: newRefreshToken.expiresAt.toISOString(),
+        user: toAuthenticatedUser(user),
+      },
     };
   });
+
+  if (!outcome.ok) {
+    throw new AppError(outcome.code, outcome.message, {
+      ...(outcome.mfaRequired ? { details: { mfaRequired: true } } : {}),
+    });
+  }
+  return outcome.pair;
 }
 
 export interface RefreshInput extends RequestMeta {

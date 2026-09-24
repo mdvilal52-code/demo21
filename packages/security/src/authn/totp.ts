@@ -1,4 +1,9 @@
-import { generate as generateTotp, generateSecret, generateURI, verify as verifyTotp } from 'otplib';
+import {
+  generate as generateTotp,
+  generateSecret,
+  generateURI,
+  verify as verifyTotp,
+} from 'otplib';
 
 /**
  * TOTP (RFC 6238) step-up MFA — MASTER-PLAN.md §6 "step-up/MFA for admin

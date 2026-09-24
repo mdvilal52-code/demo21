@@ -5,7 +5,11 @@ import {
   truncateAllTables,
   TEST_TENANT_ID,
 } from '@ai-concierge/testing';
-import { hashRefreshToken, issueRefreshToken, rotateRefreshToken } from '@ai-concierge/security';
+import {
+  hashRefreshToken,
+  issueRefreshToken,
+  rotateRefreshToken,
+} from '@ai-concierge/security/authn';
 import type { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createUser } from './userRepository.js';
