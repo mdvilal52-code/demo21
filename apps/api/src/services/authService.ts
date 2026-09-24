@@ -14,6 +14,7 @@ import {
   revokeAllRefreshTokensForUser,
   revokeRefreshToken,
   revokeRefreshTokenFamily,
+  revokeRefreshTokenIfActive,
   setMfaSecret,
   setUserStatus,
   withTenantContext,
@@ -23,6 +24,7 @@ import {
 import { decryptField, encryptField } from '@ai-concierge/security';
 import {
   buildTotpEnrollmentUri,
+  DUMMY_PASSWORD_HASH,
   generateTotpSecret,
   hashPassword,
   hashRefreshToken,
@@ -125,7 +127,12 @@ export async function login(deps: AuthServiceDeps, input: LoginInput): Promise<A
   const outcome = await withTenantContext<LoginOutcome>(deps.prisma, input.tenantId, async (tx) => {
     const user = await findUserByEmail(tx, input.tenantId, input.email);
     if (!user) {
-      // Same error as a wrong password — never reveal whether the account exists.
+      // Same error AND same rough latency as a wrong password: without
+      // paying argon2's real hashing cost here too, a timing measurement
+      // alone (not just the response body) would reveal whether the email
+      // exists — this dummy hash secures nothing, it only burns the same
+      // number of CPU cycles a real verification would.
+      await verifyPassword(DUMMY_PASSWORD_HASH, input.password);
       return { ok: false, code: 'UNAUTHORIZED', message: 'Invalid email or password' };
     }
     if (user.status !== 'ACTIVE') {
@@ -243,7 +250,37 @@ export async function login(deps: AuthServiceDeps, input: LoginInput): Promise<A
 
 export interface RefreshInput extends RequestMeta {
   refreshToken: string;
+  requestId: string;
 }
+
+type ExistingRefreshToken = NonNullable<Awaited<ReturnType<typeof findRefreshTokenByHash>>>;
+
+/** Stolen-token containment: revokes every token in the family and records why. Shared by both ways reuse is discovered — see `refresh()`. */
+async function containReusedTokenFamily(
+  deps: AuthServiceDeps,
+  existing: ExistingRefreshToken,
+  meta: RequestMeta,
+): Promise<void> {
+  await withTenantContext(deps.prisma, existing.tenantId, (tx) =>
+    Promise.all([
+      revokeRefreshTokenFamily(tx, existing.familyId),
+      recordSecurityEvent(tx, {
+        tenantId: existing.tenantId,
+        userId: existing.userId,
+        type: SecurityEventType.TOKEN_REUSE_DETECTED,
+        severity: SecuritySeverity.CRITICAL,
+        metadata: { familyId: existing.familyId },
+        ...(meta.ip ? { ip: meta.ip } : {}),
+        ...(meta.userAgent ? { userAgent: meta.userAgent } : {}),
+      }),
+    ]),
+  );
+  await revokeSessionFamily(deps.redis, existing.familyId);
+}
+
+class InactiveAccountError extends Error {}
+/** Thrown, never returned, specifically so the transaction that created the (now-unwanted) replacement token rolls it back — see the comment at the throw site. */
+class RefreshRaceLostError extends Error {}
 
 export async function refresh(deps: AuthServiceDeps, input: RefreshInput): Promise<AuthTokenPair> {
   const tokenHash = hashRefreshToken(input.refreshToken);
@@ -252,60 +289,86 @@ export async function refresh(deps: AuthServiceDeps, input: RefreshInput): Promi
     throw new AppError('UNAUTHORIZED', 'Invalid refresh token');
   }
 
+  if (existing.expiresAt.getTime() < Date.now()) {
+    throw new AppError('UNAUTHORIZED', 'Refresh token expired');
+  }
+
   if (existing.revokedAt) {
     // Presenting an already-rotated-out token is a stolen-token signal — contain the whole family, not just this one token.
-    await withTenantContext(deps.prisma, existing.tenantId, (tx) =>
-      Promise.all([
-        revokeRefreshTokenFamily(tx, existing.familyId),
-        recordSecurityEvent(tx, {
-          tenantId: existing.tenantId,
-          userId: existing.userId,
-          type: SecurityEventType.TOKEN_REUSE_DETECTED,
-          severity: SecuritySeverity.CRITICAL,
-          metadata: { familyId: existing.familyId },
-          ...(input.ip ? { ip: input.ip } : {}),
-          ...(input.userAgent ? { userAgent: input.userAgent } : {}),
-        }),
-      ]),
-    );
-    await revokeSessionFamily(deps.redis, existing.familyId);
+    await containReusedTokenFamily(deps, existing, input);
     throw new AppError(
       'UNAUTHORIZED',
       'This refresh token was already used; the session has been revoked',
     );
   }
 
-  if (existing.expiresAt.getTime() < Date.now()) {
-    throw new AppError('UNAUTHORIZED', 'Refresh token expired');
-  }
+  try {
+    return await withTenantContext(deps.prisma, existing.tenantId, async (tx) => {
+      const user = await findUserById(tx, existing.tenantId, existing.userId);
+      if (!user || user.status !== 'ACTIVE') {
+        throw new InactiveAccountError();
+      }
 
-  return withTenantContext(deps.prisma, existing.tenantId, async (tx) => {
-    const user = await findUserById(tx, existing.tenantId, existing.userId);
-    if (!user || user.status !== 'ACTIVE') {
+      const rotated = rotateRefreshToken(existing.familyId);
+      const newRow = await createRefreshToken(tx, {
+        tenantId: existing.tenantId,
+        userId: existing.userId,
+        tokenHash: rotated.tokenHash,
+        familyId: rotated.familyId,
+        expiresAt: rotated.expiresAt,
+        ...(input.ip ? { ip: input.ip } : {}),
+        ...(input.userAgent ? { userAgent: input.userAgent } : {}),
+      });
+
+      // Conditional, not the plain `revokeRefreshToken`: two concurrent
+      // refreshes of the same token could otherwise both observe
+      // `existing.revokedAt === null` above and both reach here. Losing
+      // this race throws below, which rolls back `newRow` — Prisma's
+      // interactive transactions roll back every write on a throw, which
+      // is exactly what's wanted for this one (contrast with login()'s
+      // failure paths, which need their writes to survive and so return
+      // a result instead of throwing).
+      const wonRace = await revokeRefreshTokenIfActive(tx, existing.id, newRow.id);
+      if (!wonRace) {
+        throw new RefreshRaceLostError();
+      }
+
+      const access = await issueAccessToken(deps, user, rotated.familyId);
+      await new PrismaAuditWriter(tx).record({
+        tenantId: existing.tenantId,
+        actor: user.id,
+        action: 'auth.token_refreshed',
+        entityType: 'User',
+        entityId: user.id,
+        requestId: input.requestId,
+        ...(input.ip ? { ip: input.ip } : {}),
+      });
+
+      return {
+        accessToken: access.token,
+        accessTokenExpiresAt: access.expiresAt.toISOString(),
+        refreshToken: rotated.token,
+        refreshTokenExpiresAt: rotated.expiresAt.toISOString(),
+        user: toAuthenticatedUser(user),
+      };
+    });
+  } catch (error) {
+    if (error instanceof RefreshRaceLostError) {
+      // Someone else's refresh committed first — from this caller's point
+      // of view that's indistinguishable from the token having been stolen
+      // and used by someone else, so it gets the same response: contain
+      // the family.
+      await containReusedTokenFamily(deps, existing, input);
+      throw new AppError(
+        'UNAUTHORIZED',
+        'This refresh token was already used; the session has been revoked',
+      );
+    }
+    if (error instanceof InactiveAccountError) {
       throw new AppError('UNAUTHORIZED', 'Account is no longer active');
     }
-
-    const rotated = rotateRefreshToken(existing.familyId);
-    const newRow = await createRefreshToken(tx, {
-      tenantId: existing.tenantId,
-      userId: existing.userId,
-      tokenHash: rotated.tokenHash,
-      familyId: rotated.familyId,
-      expiresAt: rotated.expiresAt,
-      ...(input.ip ? { ip: input.ip } : {}),
-      ...(input.userAgent ? { userAgent: input.userAgent } : {}),
-    });
-    await revokeRefreshToken(tx, existing.id, newRow.id);
-
-    const access = await issueAccessToken(deps, user, rotated.familyId);
-    return {
-      accessToken: access.token,
-      accessTokenExpiresAt: access.expiresAt.toISOString(),
-      refreshToken: rotated.token,
-      refreshTokenExpiresAt: rotated.expiresAt.toISOString(),
-      user: toAuthenticatedUser(user),
-    };
-  });
+    throw error;
+  }
 }
 
 export interface LogoutInput {
@@ -340,6 +403,13 @@ export async function enrollMfa(
   return withTenantContext(deps.prisma, auth.tenantId, async (tx) => {
     const user = await findUserById(tx, auth.tenantId, auth.userId);
     if (!user) throw new AppError('NOT_FOUND', 'User not found');
+    if (user.mfaEnabled) {
+      // Silently overwriting a working secret would strand the user: their
+      // authenticator app still has the old one, but every future login
+      // would verify against the new one. There is no "disable MFA" flow
+      // yet for a user to explicitly opt into re-enrolling.
+      throw new AppError('CONFLICT', 'MFA is already enabled for this account');
+    }
     const secret = generateTotpSecret();
     await setMfaSecret(tx, user.id, encryptField(secret, deps.mfaEncryptionKey));
     return {

@@ -74,6 +74,7 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
     async (request, reply) => {
       const result = await refresh(deps(), {
         refreshToken: request.body.refreshToken,
+        requestId: request.id,
         ip: request.ip,
         ...(request.headers['user-agent'] ? { userAgent: request.headers['user-agent'] } : {}),
       });

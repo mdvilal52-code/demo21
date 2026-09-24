@@ -25,3 +25,17 @@ export async function verifyPassword(hash: string, plaintext: string): Promise<b
     return false;
   }
 }
+
+/**
+ * A fixed, valid argon2id hash of a fixed dummy string — not a secret,
+ * verifiable by anyone, secures nothing. Its only purpose: callers that
+ * look up a user by email and find none should still run one
+ * `verifyPassword(DUMMY_PASSWORD_HASH, input.password)` before responding,
+ * so an unknown-email response takes roughly the same time as a wrong-
+ * password response on a real account. Without this, argon2's real,
+ * deliberately-slow hashing cost only shows up on the "account exists"
+ * path, and that latency gap is enough to enumerate valid emails by timing
+ * alone even though the two responses are byte-identical.
+ */
+export const DUMMY_PASSWORD_HASH =
+  '$argon2id$v=19$m=19456,p=1,t=2$EWYANcjMG/75c9K3cYtGQQ$LoL5D2dioKuZ/MF3B6TvtP0wPw26pSWXw3f6o7ezqxk';

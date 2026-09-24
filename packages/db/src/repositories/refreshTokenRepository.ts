@@ -53,6 +53,29 @@ export async function revokeRefreshToken(
   });
 }
 
+/**
+ * Conditional revoke — only succeeds (returns true) if the row was still
+ * non-revoked at the moment of the write. Rotation uses this instead of the
+ * unconditional `revokeRefreshToken` above specifically to close a
+ * check-then-act race: two concurrent refreshes of the same token could
+ * otherwise both read `revokedAt === null`, then both proceed to mint a new
+ * token pair before either commits. Returning `false` tells the caller it
+ * lost that race, so it can treat its own just-created replacement token as
+ * invalid (see authService.ts's `refresh()`) instead of leaving two live
+ * children from one parent token.
+ */
+export async function revokeRefreshTokenIfActive(
+  db: Executor,
+  id: string,
+  replacedByTokenId: string | null = null,
+): Promise<boolean> {
+  const result = await db.refreshToken.updateMany({
+    where: { id, revokedAt: null },
+    data: { revokedAt: new Date(), replacedByTokenId },
+  });
+  return result.count === 1;
+}
+
 /** Stolen-token containment: revokes every token in a rotation chain, e.g. on reuse detection or an operator-triggered session revoke. */
 export async function revokeRefreshTokenFamily(db: Executor, familyId: string) {
   await db.refreshToken.updateMany({

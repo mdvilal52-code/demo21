@@ -136,3 +136,101 @@ describe('Row Level Security + least-privilege DB roles', () => {
     expect(rows).toHaveLength(0);
   });
 });
+
+/**
+ * `refresh_tokens` and `idempotency_keys` deliberately do NOT use the
+ * blanket tenant_isolation policy — they are looked up by an opaque secret
+ * alone, before any tenant is known (see migration
+ * `..._fix_bearer_token_rls_policies` for why the blanket policy is a
+ * landmine for exactly these two tables). Proves the replacement policies:
+ * SELECT is unconditional (the secret is the real access control), but
+ * INSERT/UPDATE stay tenant-scoped.
+ */
+describe('Row Level Security — bearer-secret tables (refresh_tokens, idempotency_keys)', () => {
+  let admin: PrismaClient;
+  let scoped: PrismaClient;
+
+  beforeAll(async () => {
+    admin = createTestPrismaClient();
+    await admin.$connect();
+    scoped = createScopedRoleTestPrismaClient('ai_concierge_api');
+    await scoped.$connect();
+  });
+
+  afterAll(async () => {
+    await admin.$disconnect();
+    await scoped.$disconnect();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables(admin);
+    await seedTestTenants(admin);
+  });
+
+  it('finds a refresh token by hash with NO tenant context set at all', async () => {
+    const user = await admin.user.create({
+      data: {
+        tenantId: TEST_TENANT_ID,
+        email: 'bearer-test@example.com',
+        passwordHash: 'irrelevant-for-this-test',
+        role: 'ADMIN',
+      },
+    });
+    await admin.refreshToken.create({
+      data: {
+        tenantId: TEST_TENANT_ID,
+        userId: user.id,
+        tokenHash: 'a-fixed-test-hash-value',
+        familyId: randomUUID(),
+        expiresAt: new Date(Date.now() + 60_000),
+      },
+    });
+
+    // No withTenantContext at all — exactly how findRefreshTokenByHash calls it.
+    const found = await scoped.refreshToken.findUnique({
+      where: { tokenHash: 'a-fixed-test-hash-value' },
+    });
+    expect(found?.userId).toBe(user.id);
+  });
+
+  it('still refuses to INSERT a refresh token under the wrong tenant context', async () => {
+    const user = await admin.user.create({
+      data: {
+        tenantId: TEST_TENANT_ID,
+        email: 'bearer-write-test@example.com',
+        passwordHash: 'irrelevant-for-this-test',
+        role: 'ADMIN',
+      },
+    });
+
+    await expect(
+      withTenantContext(scoped, OTHER_TENANT_ID, (tx) =>
+        tx.refreshToken.create({
+          data: {
+            tenantId: TEST_TENANT_ID, // mismatched on purpose
+            userId: user.id,
+            tokenHash: 'another-fixed-test-hash',
+            familyId: randomUUID(),
+            expiresAt: new Date(Date.now() + 60_000),
+          },
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('finds an idempotency key by its key alone with no tenant context', async () => {
+    await admin.idempotencyKey.create({
+      data: {
+        key: 'a-fixed-idempotency-key',
+        tenantId: TEST_TENANT_ID,
+        requestHash: 'hash',
+        responseStatus: 201,
+        responseBody: {},
+      },
+    });
+    const found = await scoped.idempotencyKey.findUnique({
+      where: { key: 'a-fixed-idempotency-key' },
+    });
+    expect(found?.tenantId).toBe(TEST_TENANT_ID);
+  });
+});

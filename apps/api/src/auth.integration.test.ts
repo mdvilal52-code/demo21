@@ -189,6 +189,42 @@ describe('Phase 6 — AuthN integration', () => {
       expect(second.refreshToken).not.toBe(first.refreshToken);
     });
 
+    it('two genuinely concurrent refreshes of the same token: exactly one wins, and the race is treated as reuse (family killed)', async () => {
+      await seedTestUser(testApp.ctx.prisma, { email: 'concurrent@example.com', role: 'ADMIN' });
+      const first = await login('concurrent@example.com');
+
+      const [responseA, responseB] = await Promise.all([
+        testApp.app.inject({
+          method: 'POST',
+          url: '/v1/auth/refresh',
+          payload: { refreshToken: first.refreshToken },
+        }),
+        testApp.app.inject({
+          method: 'POST',
+          url: '/v1/auth/refresh',
+          payload: { refreshToken: first.refreshToken },
+        }),
+      ]);
+      const statusCodes = [responseA.statusCode, responseB.statusCode].sort();
+      expect(statusCodes).toEqual([200, 401]);
+
+      // The race itself is a reuse signal — even the winner's brand-new
+      // token gets killed as part of containing it, not left live.
+      const winner = responseA.statusCode === 200 ? responseA : responseB;
+      const winnersToken = winner.json().refreshToken;
+      const afterRace = await testApp.app.inject({
+        method: 'POST',
+        url: '/v1/auth/refresh',
+        payload: { refreshToken: winnersToken },
+      });
+      expect(afterRace.statusCode).toBe(401);
+
+      const reuseEvents = await testApp.ctx.prisma.securityEvent.findMany({
+        where: { type: 'TOKEN_REUSE_DETECTED' },
+      });
+      expect(reuseEvents.length).toBeGreaterThan(0);
+    });
+
     it('detects reuse of an already-rotated token and revokes the whole session', async () => {
       await seedTestUser(testApp.ctx.prisma, { email: 'reuse@example.com', role: 'ADMIN' });
       const first = await login('reuse@example.com');
