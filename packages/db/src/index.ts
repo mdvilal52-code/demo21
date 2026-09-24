@@ -14,3 +14,4 @@ export * from './repositories/vehicleUnitRepository.js';
 export * from './repositories/availabilityHoldRepository.js';
 export * from './repositories/availabilityCheckRepository.js';
 export * from './repositories/alternativeRecommendationRepository.js';
+export * from './repositories/quoteRepository.js';

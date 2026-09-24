@@ -54,3 +54,9 @@ export * from './step7/types.js';
 export * from './step7/rankingEngine.js';
 export * from './step7/reasonBuilder.js';
 export * from './step7/orchestrator.js';
+
+// Step 8 — Quote/Pricing
+export * from './step8/pricingRules.js';
+export * from './step8/pricingCalculator.js';
+export * from './step8/pricingAnomalyDetector.js';
+export * from './step8/quoteValidator.js';

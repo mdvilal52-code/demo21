@@ -15,20 +15,21 @@ model Tenant {
   name      String
   createdAt DateTime @default(now())
 
-  conversations            Conversation[]
-  auditEvents              AuditEvent[]
-  intentRecords            IntentRecord[]
-  dateLocationExtractions  DateLocationExtraction[]
-  vehicles                 Vehicle[]
-  vehicleDeterminations    VehicleDetermination[]
-  missingInfoChecks        MissingInfoCheck[]
-  eligibilityPolicies      EligibilityPolicy[]
-  eligibilityExceptions    EligibilityException[]
-  eligibilityDecisions     EligibilityDecision[]
-  vehicleUnits             VehicleUnit[]
-  availabilityHolds        AvailabilityHold[]
-  availabilityChecks       AvailabilityCheck[]
+  conversations              Conversation[]
+  auditEvents                AuditEvent[]
+  intentRecords              IntentRecord[]
+  dateLocationExtractions    DateLocationExtraction[]
+  vehicles                   Vehicle[]
+  vehicleDeterminations      VehicleDetermination[]
+  missingInfoChecks          MissingInfoCheck[]
+  eligibilityPolicies        EligibilityPolicy[]
+  eligibilityExceptions      EligibilityException[]
+  eligibilityDecisions       EligibilityDecision[]
+  vehicleUnits               VehicleUnit[]
+  availabilityHolds          AvailabilityHold[]
+  availabilityChecks         AvailabilityCheck[]
   alternativeRecommendations AlternativeRecommendation[]
+  quotes                     Quote[]
 
   @@map("tenants")
 }
@@ -49,6 +50,7 @@ model Conversation {
   processedAt DateTime?
 
   messages Message[]
+  quotes   Quote[]
 
   @@index([tenantId])
   @@map("conversations")
@@ -61,13 +63,14 @@ model Message {
   content        String
   createdAt      DateTime     @default(now())
 
-  intentRecords            IntentRecord[]
-  dateLocationExtractions  DateLocationExtraction[]
-  vehicleDeterminations    VehicleDetermination[]
-  missingInfoChecks        MissingInfoCheck[]
-  eligibilityDecisions     EligibilityDecision[]
-  availabilityChecks       AvailabilityCheck[]
+  intentRecords              IntentRecord[]
+  dateLocationExtractions    DateLocationExtraction[]
+  vehicleDeterminations      VehicleDetermination[]
+  missingInfoChecks          MissingInfoCheck[]
+  eligibilityDecisions       EligibilityDecision[]
+  availabilityChecks         AvailabilityCheck[]
   alternativeRecommendations AlternativeRecommendation[]
+  quotes                     Quote[]
 
   @@index([conversationId])
   @@map("messages")
@@ -253,11 +256,12 @@ model Vehicle {
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
 
-  vehicleDeterminations VehicleDetermination[]
-  units                 VehicleUnit[]
-  availabilityHolds     AvailabilityHold[]
-  availabilityChecks    AvailabilityCheck[]
+  vehicleDeterminations      VehicleDetermination[]
+  units                      VehicleUnit[]
+  availabilityHolds          AvailabilityHold[]
+  availabilityChecks         AvailabilityCheck[]
   alternativeRecommendations AlternativeRecommendation[]
+  quotes                     Quote[]
 
   @@unique([tenantId, make, model])
   @@index([tenantId])
@@ -521,22 +525,22 @@ model AvailabilityHold {
 /// here unlike Steps 1-4 — this step takes no raw customer text as input,
 /// only already-validated Step 2/3 output.
 model AvailabilityCheck {
-  id            String           @id @default(uuid())
+  id            String          @id @default(uuid())
   tenantId      String
-  tenant        Tenant           @relation(fields: [tenantId], references: [id])
+  tenant        Tenant          @relation(fields: [tenantId], references: [id])
   messageId     String
-  message       Message          @relation(fields: [messageId], references: [id])
+  message       Message         @relation(fields: [messageId], references: [id])
   vehicleId     String
-  vehicle       Vehicle          @relation(fields: [vehicleId], references: [id])
+  vehicle       Vehicle         @relation(fields: [vehicleId], references: [id])
   pickupAt      DateTime
   returnAt      DateTime
   status        InventoryStatus
   holdId        String?
   source        String
   reason        String?
-  retryable     Boolean          @default(false)
+  retryable     Boolean         @default(false)
   modelMetadata Json
-  createdAt     DateTime         @default(now())
+  createdAt     DateTime        @default(now())
 
   @@index([tenantId])
   @@index([messageId])
@@ -554,21 +558,71 @@ enum AlternativeRecommendationStatus {
 /// AlternativeCandidate (Zod-validated before being written) the customer was
 /// shown — never re-derived later, never a live vehicle re-lookup.
 model AlternativeRecommendation {
-  id                 String                           @id @default(uuid())
+  id                 String                          @id @default(uuid())
   tenantId           String
-  tenant             Tenant                           @relation(fields: [tenantId], references: [id])
+  tenant             Tenant                          @relation(fields: [tenantId], references: [id])
   messageId          String
-  message            Message                          @relation(fields: [messageId], references: [id])
+  message            Message                         @relation(fields: [messageId], references: [id])
   requestedVehicleId String
-  requestedVehicle   Vehicle                          @relation(fields: [requestedVehicleId], references: [id])
+  requestedVehicle   Vehicle                         @relation(fields: [requestedVehicleId], references: [id])
   status             AlternativeRecommendationStatus
   primary            Json?
   secondary          Json?
   consideredCount    Int
   modelMetadata      Json
-  createdAt          DateTime                         @default(now())
+  createdAt          DateTime                        @default(now())
 
   @@index([tenantId])
   @@index([messageId])
   @@map("alternative_recommendations")
+}
+
+enum QuoteStatus {
+  ISSUED
+  PENDING_REVIEW
+}
+
+/// Step 8 — Quote. Append-only per version: a "change" (different
+/// selections, or a re-quote after the previous version expired) always
+/// inserts a new row with the same `quoteId` and `version + 1`, never an
+/// update — same convention as VehicleDetermination/AvailabilityCheck/
+/// AlternativeRecommendation, specialized with a stable `quoteId` lineage
+/// across versions. "Current" for a conversation = the row with the highest
+/// `version` for that `(tenantId, conversationId)`; `@@unique([tenantId,
+/// quoteId, version])` is the structural backstop against a duplicate
+/// version number, the same dual-layer safety
+/// (`pg_advisory_xact_lock` + unique constraint) Phase 6's
+/// `AvailabilityHold` already established.
+model Quote {
+  id                  String       @id @default(uuid())
+  tenantId            String
+  tenant              Tenant       @relation(fields: [tenantId], references: [id])
+  conversationId      String
+  conversation        Conversation @relation(fields: [conversationId], references: [id])
+  messageId           String
+  message             Message      @relation(fields: [messageId], references: [id])
+  vehicleId           String
+  vehicle             Vehicle      @relation(fields: [vehicleId], references: [id])
+  quoteId             String
+  version             Int
+  status              QuoteStatus
+  currency            String
+  lineItems           Json
+  taxes               Json
+  fees                Json
+  discounts           Json
+  deposit             Json
+  total               Json
+  validUntil          DateTime
+  pricingVersion      String
+  requiresHumanReview Boolean
+  reviewReasons       Json
+  integrityHash       String
+  modelMetadata       Json
+  createdAt           DateTime     @default(now())
+
+  @@unique([tenantId, quoteId, version])
+  @@index([tenantId])
+  @@index([tenantId, conversationId])
+  @@map("quotes")
 }

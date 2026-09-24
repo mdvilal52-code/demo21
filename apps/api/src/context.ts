@@ -5,6 +5,8 @@ import type {
   FleetProvider,
   IntentEngine,
   MissingInfoOrchestrator,
+  PricingRules,
+  QuoteValidator,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
 import type { WhatsAppProvider } from '@ai-concierge/channels';
@@ -27,6 +29,8 @@ export interface AppContext {
   missingInfoOrchestrator: MissingInfoOrchestrator;
   eligibilityOrchestrator: EligibilityOrchestrator;
   alternativeRecommendationOrchestrator: AlternativeRecommendationOrchestrator;
+  pricingRules: PricingRules;
+  quoteValidator: QuoteValidator;
   whatsappProvider: WhatsAppProvider;
   /** Exposed for future admin-Settings visibility (matches `whatsappProvider`'s role) — consumed directly by `reservationLockService`, not read elsewhere yet. */
   fleetProvider: FleetProvider;

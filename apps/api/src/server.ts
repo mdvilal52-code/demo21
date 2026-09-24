@@ -3,6 +3,8 @@ import {
   DateLocationExtractionOrchestrator,
   EligibilityOrchestrator,
   MissingInfoOrchestrator,
+  PricingRules,
+  QuoteValidator,
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
@@ -68,6 +70,8 @@ async function main(): Promise<void> {
       bufferMinutes: config.AVAILABILITY_TURNAROUND_BUFFER_MINUTES,
     }),
   });
+  const pricingRules = new PricingRules();
+  const quoteValidator = new QuoteValidator(config.WEBHOOK_SIGNING_SECRET);
 
   const ctx: AppContext = {
     config,
@@ -81,6 +85,8 @@ async function main(): Promise<void> {
     missingInfoOrchestrator,
     eligibilityOrchestrator,
     alternativeRecommendationOrchestrator,
+    pricingRules,
+    quoteValidator,
     whatsappProvider,
     fleetProvider,
     reservationLockService,

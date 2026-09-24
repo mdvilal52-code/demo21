@@ -10,3 +10,5 @@ export * from './missingInfo.js';
 export * from './eligibility.js';
 export * from './availability.js';
 export * from './alternatives.js';
+export * from './money.js';
+export * from './quote.js';

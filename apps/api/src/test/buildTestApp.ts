@@ -3,6 +3,8 @@ import {
   DateLocationExtractionOrchestrator,
   EligibilityOrchestrator,
   MissingInfoOrchestrator,
+  PricingRules,
+  QuoteValidator,
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
   type FleetProvider,
@@ -35,6 +37,8 @@ export interface TestAppCtxOverrides {
   fleetProvider?: FleetProvider;
   /** Overridable clock for `ReservationLockService`, used by expiry tests. */
   now?: () => Date;
+  /** Overridable pricing config — used by tests exercising a specific discount/threshold/validity rule. */
+  pricingRules?: PricingRules;
 }
 
 export async function buildTestApp(
@@ -97,6 +101,8 @@ export async function buildTestApp(
         bufferMinutes: config.AVAILABILITY_TURNAROUND_BUFFER_MINUTES,
       }),
     }),
+    pricingRules: ctxOverrides.pricingRules ?? new PricingRules(),
+    quoteValidator: new QuoteValidator(config.WEBHOOK_SIGNING_SECRET),
     whatsappProvider: ctxOverrides.whatsappProvider ?? new NotConfiguredWhatsAppProvider(),
     fleetProvider,
     reservationLockService: new ReservationLockService(prisma, fleetProvider, {

@@ -19,6 +19,7 @@ const TABLES = [
   'eligibility_decisions',
   'eligibility_exceptions',
   'eligibility_policies',
+  'quotes',
   'alternative_recommendations',
   'availability_checks',
   'availability_holds',

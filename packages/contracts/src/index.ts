@@ -8,3 +8,4 @@ export * from './eligibility.js';
 export * from './whatsapp.js';
 export * from './availability.js';
 export * from './alternatives.js';
+export * from './quote.js';
