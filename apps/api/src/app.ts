@@ -20,6 +20,7 @@ import { availabilityRoutes } from './routes/v1/availability.js';
 import { alternativesRoutes } from './routes/v1/alternatives.js';
 import { quoteRoutes } from './routes/v1/quote.js';
 import { whatsappWebhookRoutes } from './routes/webhooks/whatsapp.js';
+import { emailWebhookRoutes } from './routes/webhooks/email.js';
 import { authRoutes } from './routes/v1/auth.js';
 import { auditRoutes } from './routes/v1/audit.js';
 import { securityEventRoutes } from './routes/v1/securityEvents.js';
@@ -59,6 +60,7 @@ export async function buildApp(
   await app.register(alternativesRoutes);
   await app.register(quoteRoutes);
   await app.register(whatsappWebhookRoutes);
+  await app.register(emailWebhookRoutes);
   await app.register(authRoutes);
   await app.register(auditRoutes);
   await app.register(securityEventRoutes);
