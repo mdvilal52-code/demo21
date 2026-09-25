@@ -21,6 +21,7 @@
     "@ai-concierge/domain": "workspace:*",
     "@ai-concierge/observability": "workspace:*",
     "@ai-concierge/security": "workspace:*",
+    "@ai-concierge/workflow": "workspace:*",
     "@fastify/cors": "^11.0.0",
     "@fastify/helmet": "^13.0.0",
     "@fastify/rate-limit": "^11.0.0",

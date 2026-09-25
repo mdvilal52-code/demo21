@@ -44,12 +44,6 @@ export async function findConversationById(
 }
 
 /**
- * `processedAt: null` in the WHERE clause is what makes this idempotent: a
- * second call for the same conversation matches zero rows (count 0) instead
- * of re-stamping a new timestamp, so callers can use the returned count to
- * decide whether this was the transition that actually happened.
- */
-/**
  * Step 2 needs "the conversation's latest message" specifically (not just
  * any message via `findConversationById`'s unordered include), scoped to
  * the same tenant-isolation convention via the conversation relation.
@@ -65,6 +59,12 @@ export async function findLatestMessageForConversation(
   });
 }
 
+/**
+ * `processedAt: null` in the WHERE clause is what makes this idempotent: a
+ * second call for the same conversation matches zero rows (count 0) instead
+ * of re-stamping a new timestamp, so callers can use the returned count to
+ * decide whether this was the transition that actually happened.
+ */
 export async function markConversationProcessed(
   db: Executor,
   tenantId: TenantId,
@@ -78,9 +78,9 @@ export async function markConversationProcessed(
 
 /**
  * Every message for a conversation, oldest first — the accumulated
- * transcript Steps 1-3 extract against for a multi-turn conversation (see
- * `appendMessageToConversation`), as opposed to `findLatestMessageForConversation`'s
- * single latest row.
+ * transcript Steps 1-3 extract against for a multi-turn conversation, and
+ * the short-term memory the conversational reply generator draws its
+ * recent-turns slice from.
  */
 export async function findMessagesForConversation(
   db: Executor,
@@ -126,10 +126,9 @@ export async function appendMessageToConversation(
  *
  * Read outside any transaction, so two genuinely concurrent deliveries for
  * the same customer could both see "nothing open" and each start their own
- * conversation — the same class of race PHASE-5.md §7 already documents and
- * accepts for the idempotency-key pre-check (inherited from Phase 1's
- * submitEnquiry), and no more likely here: real WhatsApp replies from one
- * person are seconds-to-minutes apart, not concurrent.
+ * conversation — real WhatsApp replies from one person are seconds-to-minutes
+ * apart, not concurrent, so this is an accepted, documented race, not an
+ * oversight.
  */
 export async function findOpenConversationForCustomer(
   db: Executor,

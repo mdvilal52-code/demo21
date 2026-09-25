@@ -205,6 +205,16 @@ async function main() {
   // row yet, and DEFAULT_TENANT_ID has nothing to reference until this runs
   // once. Idempotent (upserts), so safe on every deploy.
   await runToCompletion('seed', 'pnpm', ['--filter', '@ai-concierge/db', 'run', 'seed']);
+  // Idempotent (skips if the account already exists) and a no-op unless
+  // BOOTSTRAP_ADMIN_EMAIL/BOOTSTRAP_ADMIN_PASSWORD are set — without it a
+  // fresh deploy has a fleet and a tenant but no account to sign into the
+  // Admin Dashboard with.
+  await runToCompletion('bootstrap-admin', 'pnpm', [
+    '--filter',
+    '@ai-concierge/db',
+    'run',
+    'bootstrap-admin',
+  ]);
 
   children = [
     run('api', 'node', ['apps/api/dist/server.js'], {

@@ -4,6 +4,23 @@ Status: **IN_PROGRESS** (first slice of `PHASE-CONTRACTS.json` id 5,
 "Channels, Documents, Payments, CRM & Fulfilment" — not FROZEN; see §2 for exactly what is and
 isn't in this slice)
 
+> **Renamed 2026-09-23** from `docs/PHASE-5.md` to `docs/PHASE-5-CHANNELS.md` to make room for
+> `docs/PHASE-5.md` documenting journey Step 5 (Eligibility) — a separate, journey-step-numbered
+> phase, matching the numbering Phases 1-4 already used (see `PHASE-CONTRACTS.json`'s
+> `phaseNumbering` note and this doc's own §13). This file's content and scope are otherwise
+> unchanged; the contract-id-5 "Channels, Documents, Payments, CRM & Fulfilment" phase this
+> documents is still `IN_PROGRESS`, unaffected by the rename.
+>
+> **Reconciled again 2026-09-24** (merging this branch with a concurrent one that independently
+> built id 6, "Security Engine & Zero Trust," and froze it as `docs/PHASE-6.md`): `docs/PHASE-5.md`
+> collided a second time, now with the concurrent branch's own content, and every journey-step doc
+> this reconciliation chain produced (Eligibility/Availability/Alternatives/Quote — ids 11-14) was
+> moved to a filename matching its own id instead — `docs/PHASE-11.md` through `docs/PHASE-14.md`.
+> `docs/PHASE-5.md` no longer exists as a filename at all; `docs/PHASE-6.md`/`PHASE-7.md`/`PHASE-8.md`
+> are reserved for the original id-6/7/8 phases (Security — now frozen —, Admin Dashboard, Customer
+> PWA) and never mean Availability/Alternatives/Quote going forward. See the merge commit and
+> `docs/PHASE-CONTRACTS.json` for the full picture.
+
 ## 1. Pre-flight
 
 - Read `docs/PHASE-EXECUTION-PROTOCOL.md`, `docs/PHASE-CONTRACTS.json`, `docs/MASTER-PLAN.md`.
@@ -281,7 +298,8 @@ signature,provider,replyBuilder}.ts` + matching `.test.ts` + `whatsapp.security.
 - `packages/contracts/src/whatsapp.ts`
 - `apps/api/src/lib/conversationTranscript.ts` (+ `.test.ts`)
 - `apps/api/src/services/enquiryPipelineService.test.ts`
-- `docs/PHASE-5.md` (this file)
+- `docs/PHASE-5-CHANNELS.md` (this file, originally `docs/PHASE-5.md` — renamed 2026-09-23, see the
+  note at the top of this document)
 
 ## 11. Files modified
 

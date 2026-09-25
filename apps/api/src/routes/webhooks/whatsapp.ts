@@ -1,27 +1,32 @@
 import { createHash, createHmac } from 'node:crypto';
-import {
-  buildWhatsAppReplyText,
-  parseWhatsAppTextMessages,
-  verifyMetaSignature,
-} from '@ai-concierge/channels';
+import { parseWhatsAppTextMessages, verifyMetaSignature } from '@ai-concierge/channels';
 import {
   claimIdempotencyKey,
   completeIdempotencyKey,
   releaseIdempotencyKeyClaim,
+  findMessagesForConversation,
   PrismaAuditWriter,
   type Channel,
 } from '@ai-concierge/db';
-import { AppError } from '@ai-concierge/domain';
+import { AppError, CustomerTimelineEventType } from '@ai-concierge/domain';
 import {
   whatsappInboundAckResponseSchema,
   whatsappVerifyQuerySchema,
 } from '@ai-concierge/contracts';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { AppContext } from '../../context.js';
+import { flagUnexpectedPiiInOutboundText } from '../../lib/dlp.js';
+import {
+  generateConversationalReply,
+  MAX_RECENT_TURNS_FOR_REPLY,
+  type RecentTurn,
+} from '../../services/conversationalReplyService.js';
 import {
   runFullEnquiryPipeline,
   type FullEnquiryPipelineResult,
 } from '../../services/enquiryPipelineService.js';
+import { syncJourneyAfterMissingInfo } from '../../services/journeyService.js';
+import { syncCustomerFromJourney } from '../../services/crmService.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -119,7 +124,61 @@ async function processInboundMessage(
 
     logPipelineDecision(ctx, requestId, pipeline);
 
-    const replyText = buildWhatsAppReplyText(pipeline.missingInfo.missingInfo);
+    // Best-effort journey tracking/escalation — deliberately caught locally,
+    // never allowed to reach the outer catch below: that catch releases the
+    // idempotency claim and rethrows, which would make Meta redeliver this
+    // webhook and re-run the pipeline (and re-send the reply) a second time
+    // for a failure that has nothing to do with whether the customer's
+    // message was actually handled correctly.
+    try {
+      const journey = await syncJourneyAfterMissingInfo(
+        { prisma: ctx.prisma, notificationProvider: ctx.notificationProvider },
+        {
+          tenantId: ctx.config.DEFAULT_TENANT_ID,
+          conversationId: pipeline.enquiry.conversationId,
+          messageId: pipeline.enquiry.messageId,
+          resolvedVehicleId: pipeline.vehicle.determination.resolvedVehicle?.id ?? null,
+          missingInfoStatus: pipeline.missingInfo.missingInfo.status,
+          requestId,
+        },
+      );
+      await syncCustomerFromJourney(
+        { prisma: ctx.prisma },
+        {
+          tenantId: ctx.config.DEFAULT_TENANT_ID,
+          conversationId: pipeline.enquiry.conversationId,
+          journeyId: journey.id,
+          eventType: CustomerTimelineEventType.JOURNEY_STARTED,
+          eventSummary: `Journey started on WhatsApp (${pipeline.missingInfo.missingInfo.status})`,
+          vehicleId: pipeline.vehicle.determination.resolvedVehicle?.id ?? null,
+          quoteId: null,
+          bookingCompleted: false,
+        },
+      );
+    } catch (error) {
+      ctx.logger.error({ err: error }, 'journey/CRM sync failed after WhatsApp pipeline');
+    }
+
+    const conversationMessages = await findMessagesForConversation(
+      ctx.prisma,
+      ctx.config.DEFAULT_TENANT_ID,
+      pipeline.enquiry.conversationId,
+    );
+    const recentTurns: RecentTurn[] = conversationMessages
+      .slice(-MAX_RECENT_TURNS_FOR_REPLY)
+      .map((row) => ({ role: 'customer', content: row.content }));
+
+    const reply = await generateConversationalReply(
+      { aiProvider: ctx.aiProvider, logger: ctx.logger },
+      { missingInfo: pipeline.missingInfo.missingInfo, recentTurns },
+    );
+    const replyText = reply.text;
+
+    await flagUnexpectedPiiInOutboundText(
+      { prisma: ctx.prisma, logger: ctx.logger },
+      { tenantId: ctx.config.DEFAULT_TENANT_ID, channel: WHATSAPP_CHANNEL, text: replyText },
+    );
+
     const sendResult = await ctx.whatsappProvider.sendTextMessage(inbound.from, replyText);
 
     const auditWriter = new PrismaAuditWriter(ctx.prisma);
@@ -170,7 +229,13 @@ export const whatsappWebhookRoutes: FastifyPluginAsyncZod = async (app) => {
 
   app.get(
     '/webhooks/whatsapp',
-    { schema: { tags: ['whatsapp'], querystring: whatsappVerifyQuerySchema } },
+    {
+      // Meta calls this from a shared IP pool serving every customer's
+      // messages, not one IP per customer — the app-wide per-IP rate limit
+      // is the wrong shape here and would throttle the whole business.
+      config: { rateLimit: false },
+      schema: { tags: ['whatsapp'], querystring: whatsappVerifyQuerySchema },
+    },
     async (request, reply) => {
       const configuredToken = app.ctx.config.WHATSAPP_VERIFY_TOKEN;
       if (!configuredToken) {
@@ -193,6 +258,10 @@ export const whatsappWebhookRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     '/webhooks/whatsapp',
     {
+      // Same shared-IP-pool reasoning as the GET route above — this is the
+      // route that actually matters for it, since a throttled 429 here
+      // reads to Meta as a failed delivery and triggers a redelivery storm.
+      config: { rateLimit: false },
       schema: {
         tags: ['whatsapp'],
         response: { 200: whatsappInboundAckResponseSchema },

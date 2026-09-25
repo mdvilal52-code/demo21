@@ -1,0 +1,25 @@
+{
+  "name": "@ai-concierge/workflow",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc",
+    "test:unit": "vitest run",
+    "test:security": "echo \"no security tests in @ai-concierge/workflow\""
+  },
+  "dependencies": {
+    "@ai-concierge/domain": "workspace:*",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}
