@@ -294,13 +294,13 @@ importers:
       '@ai-concierge/domain':
         specifier: workspace:*
         version: link:../domain
+      '@ai-concierge/security':
+        specifier: workspace:*
+        version: link:../security
       '@prisma/client':
         specifier: ^6.19.0
         version: 6.19.3(prisma@6.19.3(typescript@5.9.3))(typescript@5.9.3)
     devDependencies:
-      '@ai-concierge/security':
-        specifier: workspace:*
-        version: link:../security
       '@ai-concierge/testing':
         specifier: workspace:*
         version: link:../testing

@@ -1,184 +1,211 @@
 # Pilot Readiness Report — Phases 1-8
 
-**Snapshot commit:** `267daa8` (branch `claude/phase-4-whatsapp-sms-check-2ngbgx`)
+**Snapshot commit:** `9c1a442` (branch `claude/phase-4-whatsapp-sms-check-2ngbgx`, after merging two
+independently-developed lines of work — see §0)
 **Date:** 2026-09-25
-**Scope:** `PHASE-CONTRACTS.json` phases 1-8 only, as requested. Phases 9-10 (Observability/QA,
-Infra/Release) and journey Steps 9-19 (Eligibility onward) are explicitly out of scope for this
-report.
+**Scope:** the phases originally numbered 1-8 (Foundation, Dates/Location, Vehicle, Missing Info,
+Channels/CRM, Security, Admin Dashboard, Customer PWA). Phases 9-10/journey Steps 9-19 (Documents
+onward) are explicitly out of scope, per request.
 
-This document is a point-in-time audit, not a live status feed. `PHASE-CONTRACTS.json` remains the
-single source of truth for phase status; if it and this report ever disagree, trust
-`PHASE-CONTRACTS.json` and treat this report as stale. Re-run the verification in §7 before relying
-on this document again after any further implementation work.
+This is a point-in-time audit, not a live status feed. `docs/PHASE-CONTRACTS.json` remains the single
+source of truth for phase status; if the two ever disagree, trust `PHASE-CONTRACTS.json`. Re-verify
+before trusting this document after any further implementation work.
 
-## 1. Purpose
+**This replaces an earlier version of this same report written about 30 minutes earlier in this same
+session.** That version was wrong: it was written by reading only the commits present at the time,
+before discovering that this branch had a second, independently-pushed line of work sitting on
+`origin` that had to be merged in first (see §0). It claimed the Admin Dashboard, CRM, Email channel,
+and human-escalation did not exist. **They do exist** — this version corrects that, verified against
+the actual merged code, not documentation claims.
 
-This report exists to answer three questions that were asked directly, honestly, and with evidence
-rather than assumptions:
+## 0. Why this report was rewritten — a two-branch merge happened today
 
-1. Is the phase 1-8 pilot ready to handle real customers / real business problems today?
-2. Specifically: do the Admin Dashboard, automatic CRM updates, and automatic email
-   resend/handling exist?
-3. Specifically: when the AI cannot handle something correctly, is there a mechanism that flags a
-   human worker to step in?
+While auditing this branch, `git push` was rejected: `origin/claude/phase-4-whatsapp-sms-check-2ngbgx`
+had 24 commits that weren't in the local checkout — a second, independently-developed line of work
+(Security Engine, journey Steps 5-8, a real Gemini-backed conversational layer, and, on top of those,
+a second slice adding the Event/Workflow Engine, CRM, Email, human escalation, and the Admin
+Dashboard). Those 24 commits were merged in locally with a plain merge commit — no history rewritten,
+nothing force-pushed, nothing discarded. `docs/PHASE-CONTRACTS.json` itself documents this: its
+`phaseNumbering` field explains that the project split into two branches after phase 4, each phase
+was numbered independently, and on 2026-09-25 both were merged and renumbered into one sequential
+15-phase list. **If you know this project by the old 10-phase numbering** (where Security = Phase 6,
+Admin Dashboard = Phase 7, Customer PWA = Phase 8), here is the mapping used throughout this report:
 
-**Short answers: No / No / No.** Details and evidence below.
+| Old id (10-phase scheme) | New id (current `PHASE-CONTRACTS.json`) | Name |
+|---|---|---|
+| 1-4 | 1-4 (unchanged) | Foundation, Dates/Location, Vehicle, Missing Info |
+| 5 | 5 (unchanged) | Channels, Documents, Payments, CRM & Fulfilment |
+| — | 6-9 (new) | Eligibility, Availability, Alternatives, Quote (journey Steps 5-8 — did not exist in the old 10-phase scheme at all) |
+| 6 | **10** | Security Engine & Zero Trust |
+| — | 11 (new) | Conversational AI Engine (Gemini) |
+| 7 | **12** | Admin Dashboard (Web) |
+| 8 | **13** | Customer Mobile App (PWA) |
+| 9 | 14 | Observability, AI Evaluation & Automatic QA |
+| 10 | 15 | Infrastructure, CI/CD & Release |
 
-## 2. Executive verdict
+## 1. Executive verdict
 
-Only one narrow slice of the full 19-step, 10-phase system is real: a customer can message a real
-WhatsApp number and have Steps 1-4 of the journey (Enquiry/Intent → Extract Dates & Location →
-Determine Vehicle → Ask Missing Information) run automatically, with a scripted WhatsApp reply.
-Nothing after Step 4 is automated, and three of the four things this report was specifically asked
-to check (Admin Dashboard, CRM, human-escalation indication) do not exist in code at all. Email
-does not exist as a channel at all (neither inbound nor outbound).
+This pilot is materially closer to real-life-ready than it looked an hour ago. **All three things
+this report was asked to check now exist, with real code and real tests, not just plans:** an Admin
+Dashboard staff can actually log into, automatic CRM updates, a working Email channel, and an
+automatic human-escalation path. Security (auth, RBAC, tenant isolation) is also fully built and
+frozen. What's still missing is concentrated in a smaller, clearer set of gaps than before: Documents,
+Payments, delivery/return, invoice, and follow-up (journey Steps 9-19) don't exist yet; the Customer
+Mobile App doesn't exist; and — the most important nuance for a real conversation today — **the
+automatic WhatsApp/Email pipeline still only runs Steps 1-4 by itself.** Steps 5-8 (Eligibility,
+Availability, Alternatives, Quote) are real, tested, and wired into the persisted journey record when
+called, but nothing yet calls them automatically after Step 4 finishes — advancing a real booking past
+"information collected" requires a person to trigger the next step today (see §5).
 
-What **is** real is solid: Phases 1-4 are fully frozen with strong automated test coverage, and the
-WhatsApp slice of Phase 5 follows the project's own non-negotiables correctly (no fake successes,
-explicit `NOT_CONFIGURED` states, real idempotency, real signature verification, audited mutations).
-The gap is not quality of what exists — it's the sheer amount of the master plan that does not exist
-yet.
+## 2. Phase-by-phase status (current `PHASE-CONTRACTS.json` ids)
 
-## 3. Phase-by-phase status (verified against `PHASE-CONTRACTS.json` + code)
+| id | Phase | Status | What's real |
+|----|-------|--------|-------------|
+| 1 | Foundation + Enquiry/Intent (Step 1) | **FROZEN** | Unchanged from before — solid. |
+| 2 | Dates & Location (Step 2) | **FROZEN** | Unchanged — solid. |
+| 3 | Determine Vehicle (Step 3) | **FROZEN** | Unchanged — solid. |
+| 4 | Ask Missing Information (Step 4) | **FROZEN** | Unchanged — solid. |
+| 5 | Channels/Documents/Payments/CRM/Fulfilment | **IN_PROGRESS** | WhatsApp **and now Email** (Mailgun) channels done; **Event/Workflow Engine done** (persisted `Journey`/`JourneyTransition`); **CRM done** (auto-upserted `Customer`/`CustomerTimelineEvent`); **human escalation done** (`EscalationCase`, Twilio SMS paging, SLA-breach sweep). Web chat, Documents, Payments, delivery/return, invoice PDF, follow-up scheduler still **PENDING**. |
+| 6 | Eligibility (journey Step 5) | **FROZEN** | Real, tested, deterministic (zero AI calls). Standalone endpoint — not auto-chained (§5). |
+| 7 | Availability (journey Step 6) | **FROZEN** | Real DB-backed inventory + TTL holds, concurrency-tested. Standalone endpoint. |
+| 8 | Alternatives (journey Step 7) | **FROZEN** | Real ranking engine against live availability. Standalone endpoint. |
+| 9 | Quote / Pricing Engine (journey Step 8) | **FROZEN** | Real pricing, VAT, tamper-evident (HMAC). Standalone endpoint; not linked to the availability hold it prices against. |
+| 10 | Security Engine & Zero Trust | **FROZEN** | Real email+password+TOTP MFA, RBAC+ABAC, Postgres RLS, least-privilege DB roles (see §6 caveat). |
+| 11 | Conversational AI Engine (Gemini) | **FROZEN** | A real LLM (Gemini) now phrases WhatsApp replies, strictly grounded in Steps 1-4's deterministic output — falls back to the old template on any failure. This is the **first actual generative-AI call anywhere in the system**; everything before it was rule-based. |
+| 12 | **Admin Dashboard** | **IN_PROGRESS** | Real login, 5 working screens (Escalation Queue, Journeys, Customers, Fleet, Settings). Home page, live stat tiles, Bookings/Documents/Pricing/Payments/Audit-log screens still **PENDING** (honestly, because their backends don't exist yet either). |
+| 13 | Customer Mobile App (PWA) | **PENDING** | Still 0% — no `apps/customer` directory exists. |
 
-| # | Phase | Contract status | What "done" actually means here |
-|---|-------|------------------|----------------------------------|
-| 1 | Foundation & Platform Skeleton + Enquiry/Intent (journey Step 1) | **FROZEN** | Monorepo, Fastify API, BullMQ worker, Next.js web shell, Postgres/Prisma, design tokens, CI. Intent recognition is a **deterministic keyword engine** (`RuleBasedIntentEngine`), not an LLM call. |
-| 2 | Extract Dates & Location (Step 2) | **FROZEN** | Pickup/return date + location extraction and validation. English-only regex/heuristics, small fixed gazetteer. |
-| 3 | Determine Vehicle (Step 3) | **FROZEN** | Maps a customer's wording to the real fleet catalog. Regex/edit-distance matching, not NLP; small fixed fleet. |
-| 4 | Ask Missing Information (Step 4) | **FROZEN** | Generates one combined clarification question for whatever Steps 1-3 didn't resolve. Template-based, English-only. |
-| 5 | Channels, Documents, Payments, CRM & Fulfilment | **IN_PROGRESS** | Only the WhatsApp inbound/outbound adapter + a hardcoded Step 1-4 pipeline runner is built (see `docs/PHASE-5.md`). Web chat, Email, Document pipeline, `PaymentProvider`, **CRM adapter**, delivery/return coordination, invoice PDF, and follow-up scheduler are all still **PENDING** — none of that code exists. |
-| 6 | Security Engine & Zero Trust | **PENDING** | 0% started. No AuthN, no AuthZ/RBAC, no DB-level tenant isolation (RLS), no MFA, no field-level encryption, no anomaly detection. |
-| 7 | **Admin Dashboard (Web)** | **PENDING** | 0% started. Zero dashboard routes/screens exist in `apps/web` — it only contains the customer-facing enquiry form from Phase 1. A design contract exists in `docs/DESIGN-SYSTEM.md` §5, but no implementation. |
-| 8 | Customer Mobile App (PWA) | **PENDING** | 0% started. `apps/` contains only `api`, `web`, `worker` — no `apps/customer` directory exists at all. |
+## 3. Verified this session (not just read from docs)
 
-## 4. What was actually verified this session (not just read)
+- `pnpm install` + `pnpm db:generate` — clean, on the fully merged tree.
+- `pnpm typecheck` — **green, 13/13 packages/apps.**
+- `pnpm test:unit` — **green, 658/658 tests** (up from 329 before the merge — the new work roughly
+  doubled the test count).
+- Read `apps/api/src/services/enquiryPipelineService.ts` in full: confirms the automatic pipeline
+  (called by both the WhatsApp and Email webhooks) still only runs Steps 1-4.
+- Read the relevant half of `apps/api/src/services/journeyService.ts`: confirms
+  `syncJourneyAfterMissingInfo` runs automatically right after Step 4 on every channel message, and
+  **does** create/advance a persisted `Journey` row and **does** call `decideMissingInfoEscalation`,
+  which escalates to a human once a conversation has stayed stuck in `NEEDS_INFO` for too many
+  attempts — this is a real, working, automatic escalation trigger, not just an on-demand one.
+- Confirmed by direct file listing: `apps/web/src/app/dashboard/**` (13 files: layout, home,
+  escalations + actions, journeys list/detail, customers list/detail, fleet, settings, error/loading
+  states), `apps/api/src/services/crmService.ts`, `packages/channels/src/email/**` (8 files mirroring
+  the WhatsApp adapter), `packages/workflow/**` (state machine + escalation policy),
+  `apps/worker/src/jobs/escalationSlaSweep.ts`, `apps/api/src/lib/notificationProvider.ts` (Twilio).
+- Confirmed via the Prisma schema: 25 models now exist, including `User`, `RefreshToken`,
+  `SecurityEvent`, `EligibilityPolicy/Exception/Decision`, `VehicleUnit`, `AvailabilityHold`,
+  `AlternativeRecommendation`, `Quote`, `Journey`/`JourneyTransition`, `EscalationCase`, `Customer`,
+  `CustomerTimelineEvent`.
+- Confirmed `render.yaml` has been updated with `JWT_SIGNING_SECRET`, `MFA_ENCRYPTION_KEY`,
+  `GEMINI_API_KEY`, and `BOOTSTRAP_ADMIN_EMAIL`/`PASSWORD` — but **not** `TWILIO_*` or `MAILGUN_*`.
+  On the live Render deployment as currently configured, the Email channel and staff SMS paging would
+  both report `NOT_CONFIGURED` until those are added there too (the code correctly degrades rather
+  than faking them — this is a deployment-config gap, not a code gap).
+- `git branch -a`: still exactly one branch.
 
-- `pnpm install` — clean.
-- `pnpm typecheck` — **green, 12/12 packages/apps** (api, web, worker + 9 packages).
-- `pnpm test:unit` — **green, 329/329 tests**, across every package and app.
-- Integration/security/e2e suites were **not** re-run (they need live Postgres/Redis/Playwright
-  Chromium and take significantly longer); `docs/PHASE-5.md` §8 records them last green at 498
-  total automated tests. Typecheck + unit alone don't prove feature correctness end-to-end — only
-  that nothing regressed at the type/unit level since that freeze.
-- Every route file in `apps/api/src/routes/**` was enumerated: `enquiries`, `temporal`, `vehicle`,
-  `missingInfo`, `health`, `privacy`, and the WhatsApp webhook. No admin, CRM, or email route exists.
-- Every file in `packages/security/src/**` was enumerated: SSRF-safe fetch, resilience
-  (timeout/circuit-breaker/rate-limiter), CSRF, webhook signature verification, CORS, secure headers.
-  **No authentication or authorization module exists anywhere in the codebase.**
-- The Prisma schema (`packages/db/prisma/schema.prisma`) was read in full: `Tenant`, `Conversation`,
-  `Message`, `IntentRecord`, `AuditEvent`, `IdempotencyKey`, `DateLocationExtraction`, `Vehicle`,
-  `VehicleDetermination`, `MissingInfoCheck`. No `Customer`, `Booking`, `Payment`, `Document`,
-  `Quote`, `Invoice`, or `EscalationCase` model exists yet.
-- Full-text search for `crm`, `escalat`, `nodemailer`/`sendgrid`/`smtp`, and any admin route across
-  `apps/` and `packages/` (excluding tests): **zero matches** for actual implementation in every
-  case.
-- `.env.example` and `render.yaml` were read in full: no AI provider key (Anthropic/OpenAI), no CRM
-  key, no email provider key, no payment provider key is wired anywhere — only WhatsApp, Postgres,
-  and Redis. This independently confirms the codebase-search findings above.
-- `git branch -a`: **exactly one branch exists**, `claude/phase-4-whatsapp-sms-check-2ngbgx` (local
-  and its `origin` remote), nothing else to reconcile.
+## 4. The specific questions asked — corrected answers
 
-## 5. The specific questions asked
+### 4.1 Admin Dashboard — **exists, real, working**
 
-### 5.1 Admin Dashboard
+`apps/web/src/app/dashboard`: real cookie-based staff login (httpOnly access+refresh tokens, silent
+refresh), a shared nav shell, and five working screens wired to real backend data: **Escalation
+Queue** (list/filter/assign/resolve against the real `EscalationCase` workflow), **Journeys** (list +
+full transition timeline), **Customers** (CRM list + detail + timeline), **Fleet** (read-only
+catalog), **Settings** (live per-provider CONFIGURED/NOT_CONFIGURED status). Verified by the phase's
+own doc to have been checked by hand in a real browser (login → every screen → a full escalation
+assign/resolve cycle → sign-out → auth-gate redirect), not just typechecked. Honestly still missing:
+the Home page's live stat tiles (no aggregate-count endpoint exists yet — Home just links to each
+section), and screens for Bookings/Documents/Pricing/Payments/Audit log — deliberately not built
+because those backends don't exist yet either (building the UI first would be exactly the kind of
+fake functionality `CLAUDE.md` forbids).
 
-**Does not exist.** `apps/web/src/app` has exactly one page (the customer enquiry form) plus its
-API proxy route. Phase 7 owns this and is `PENDING`. Per `PHASE-CONTRACTS.json`, Phase 7
-`dependsOn: [6]` — the project's own plan requires Security (Phase 6) before the dashboard, because
-the dashboard is where bookings, customers, escalations, and revenue data would be exposed.
+### 4.2 CRM auto-update — **exists, real, working**
 
-### 5.2 CRM auto-update
+`apps/api/src/services/crmService.ts`: a `Customer` record and `CustomerTimelineEvent` history are
+automatically created/updated from journey and webhook activity — no manual step required. Visible
+live on the dashboard's Customers screen.
 
-**Does not exist.** No CRM adapter, no `Customer` model, no upsert-on-booking logic anywhere. This
-is explicitly listed as a `PENDING` deliverable of Phase 5 (the current in-progress phase) in
-`PHASE-CONTRACTS.json`.
+### 4.3 Email auto-resend / Email channel — **exists as a channel; not the exact "resend" behavior**
 
-### 5.3 Email auto-resend
+A full Email channel now exists (`packages/channels/src/email`, Mailgun): real inbound webhook with
+signature verification and real outbound sending, mirroring the WhatsApp adapter end to end
+(`apps/api/src/routes/webhooks/email.ts`). One clarification: this is a customer-facing reply
+channel, not an "automatically resend an email that didn't get answered" feature specifically — no
+code was found that resends a previously-sent email. If that specific resend/retry behavior is what
+was meant, it doesn't exist yet and would need to be scoped separately.
 
-**Does not exist, in either direction.** There is no inbound email webhook and no outbound email
-sending code anywhere in the repository (no mail library is even a dependency). WhatsApp is the only
-working channel. This is also an explicitly `PENDING` Phase 5 deliverable.
+### 4.4 "AI fails → a human worker is indicated" — **exists and is automatic for Steps 1-4**
 
-### 5.4 "AI fails → human worker is indicated"
+Confirmed in code, not just claimed: every WhatsApp/Email message runs `syncJourneyAfterMissingInfo`
+after Step 4, which counts repeated `NEEDS_INFO` attempts and automatically escalates
+(`decideMissingInfoEscalation` → creates an `EscalationCase` → staff get an SMS page via Twilio, tier-
+mapped to an on-call role → the case appears on the dashboard's Escalation Queue) once a customer
+conversation is genuinely stuck. Once escalated, the automated pipeline stops sending scripted replies
+to that conversation. An SLA-breach sweep (`apps/worker/src/jobs/escalationSlaSweep.ts`) also runs
+independently. This is real and tested (24 unit tests across `escalationPolicy`/`stateMachine`, plus
+integration tests for the escalation routes).
 
-**Does not exist as a mechanism.** There is no escalation queue, no `EscalationCase` record, no
-notification, and no admin visibility of any kind. Concretely, today, when the rule-based engine
-cannot classify a customer's message (or a conversation reaches `NOT_APPLICABLE`), the system just
-sends the same generic scripted WhatsApp reply again — it does not notify anyone, and there is no
-screen where a human could even see that a customer is stuck. `docs/MASTER-PLAN.md` names a
-Human Escalation component (tiers T1-T4) and Phase 7's dashboard spec even reserves a "Human
-Escalations" stat tile and an "Escalation queue" screen for it — but under the actual phase
-numbering that was followed (journey-step granularity for Phases 1-4, then the WhatsApp slice of
-Phase 5), no phase has yet delivered this. It needs to be explicitly scheduled, not assumed to be
-part of a phase already in progress.
+**Important boundary**: this escalation trigger only fires for the Step 1-4 "stuck collecting info"
+case. It does not (and cannot yet) fire for a customer who successfully completes Steps 1-4 but then
+needs a human for something in Steps 5-19 (eligibility exceptions, availability conflicts, pricing
+review, documents, payment issues) purely automatically — see §5. Eligibility/Quote's own
+`decideEligibilityEscalation`/`decideQuoteEscalation` logic exists and is real, but only runs when
+their endpoint is actually called, which today means a person (or the dashboard) has to call it.
 
-## 6. Live deployment reality (Render + Vercel)
+## 5. The gap that matters most for "is a real booking possible today"
 
-Commit history and `render.yaml` show this has already been deployed and debugged against a real
-WhatsApp webhook, not just run locally. Three things matter for real-world readiness:
+The automatic, no-human-needed pipeline (`runFullEnquiryPipeline`, called by both WhatsApp and Email
+webhooks) still only executes Steps 1-4, exactly as before the merge. Steps 5-8 (Eligibility,
+Availability, Alternatives, Quote) are real, independently tested, and — when called — correctly
+update the same persisted `Journey` record and can themselves trigger escalation. But nothing
+automatically calls them once Step 4 reaches `COMPLETE`. Concretely: a customer can message WhatsApp,
+get asked for missing details, provide them all, and their journey will sit in `ELIGIBILITY_CHECK`
+state indefinitely until a person (via the dashboard, or a direct API call) manually advances it.
+This is each phase's own documented, honest limitation (`docs/PHASE-11.md`/`12.md`/`13.md`/`14.md`
+§9: "not wired into the WhatsApp auto-pipeline"), not something this audit is guessing at — and it
+was still true after re-reading the actual pipeline code today.
 
-- **The background worker is disabled in production** (`render.yaml`, Render's free plan has no
-  "worker" service type). The BullMQ post-enquiry job is enqueued but never consumed in the live
-  deployment — `conversation.processedAt` and its audit event never get written, though every HTTP
-  path (including the WhatsApp webhook) still works because that part doesn't depend on the worker.
-- **No authentication exists on any API endpoint.** `POST /v1/enquiries` and every other route are
-  reachable by anyone who has the URL, not only through the website or WhatsApp — CORS only blocks
-  browser-based cross-origin calls, not direct HTTP clients. This is expected, given Phase 6 hasn't
-  started, but it means the live deployment today has no access control at all.
-- **Redis eviction risk**: BullMQ needs `maxmemory-policy=noeviction`; the free-tier default
-  (`allkeys-lru`) can silently drop queued job keys under memory pressure. Both services log a
-  startup warning when this is misconfigured.
-- WhatsApp credentials are optional (`sync: false` in `render.yaml`) — whether real Meta credentials
-  are currently filled in on the live Render dashboard cannot be confirmed from the repo alone, but
-  commit `4520f06` ("log signature-mismatch diagnostics on the live webhook") indicates real webhook
-  traffic has been debugged against this deployment.
+## 6. Other real gaps worth knowing about
 
-## 7. Ranked list of what will cause real-life problems (highest impact first)
+- **RLS is proven, not yet enforced in the live connection.** `docs/PHASE-6.md` §10 states plainly
+  that Postgres Row-Level Security and the least-privilege DB roles are real and tested against a
+  scoped connection, but the application's actual default `DATABASE_URL` (local dev, CI, and
+  `render.yaml` as it stands) hasn't been switched over to use those scoped roles yet — that cutover
+  is deferred to the Infrastructure phase (id 15). Until that switch happens, the deployed app likely
+  still connects with broader privileges than RLS is designed to assume.
+- **Twilio/Mailgun aren't in `render.yaml` yet** (§3) — Email and SMS paging will report
+  `NOT_CONFIGURED` on the live deployment until someone adds those credentials there.
+- **Quote and Availability hold are independent** — a quote expiring doesn't release the matching
+  hold, and vice versa (`docs/PHASE-14.md` §9).
+- **Money in the newer Steps 7-8 work is a JS float in some places** (`docs/PHASE-13.md` §9 flags
+  this directly), where `MASTER-PLAN.md` §6 specifies integer minor units everywhere — worth a
+  deliberate look before this touches real payments.
+- Documents, Payments, delivery/return, invoice PDF, follow-up scheduler (journey Steps 9-19): still
+  entirely unbuilt, as expected and out of this report's requested scope.
+- Customer Mobile App (PWA, id 13): still 0%.
+- Real Docker/CI-scale scanning (Trivy, ZAP): explicitly deferred to the Infrastructure phase, not
+  silently skipped.
 
-1. **No human escalation/visibility.** A confused or non-English-speaking customer, or one asking
-   about price/documents/support, gets the same scripted reply indefinitely with no human ever
-   notified.
-2. **No Admin Dashboard.** The business cannot see bookings, conversations, or anything else without
-   querying the database directly.
-3. **No CRM.** No durable customer profile/history beyond raw conversation rows.
-4. **No email channel.** Any customer who emails instead of WhatsApp-ing gets no response at all.
-5. **No authentication on the API.** Publicly callable by anyone with the URL, not just your own
-   channels.
-6. **A booking can never actually complete.** Pricing, documents, payments, and confirmation (Steps
-   5-19) don't exist yet — the automated part stops after Step 4 gathers information.
-7. **The background worker is disabled in the live deployment**, so the one asynchronous job that
-   does exist silently never runs there.
-8. **The "AI" is keyword/regex matching, not a language model** — by design, for zero hallucination
-   risk, but it means genuinely novel phrasing, non-English messages, or off-script questions get no
-   real answer, only a generic fallback or a repeated clarification prompt.
-9. **Single hardcoded tenant, small fixed fleet/vocabulary** — not yet wired for a real multi-vehicle,
-   multi-location business without extending fixed lists in code.
+## 7. What is genuinely solid (credit where due)
 
-## 8. What is genuinely solid (credit where due)
+Everything in the previous version of this report's §8 still holds, plus: real working staff
+authentication (argon2id passwords, TOTP MFA, rotating refresh tokens with reuse detection), Postgres
+RLS with a documented STRIDE threat model and a passing kill-chain test, a real LLM in the loop for
+the first time (Gemini) with a grounding check that rejects hallucinated prices/availability even from
+well-formed model output, and a human-escalation path that was actually exercised end-to-end (login →
+escalation → resolve) in a real browser, not just asserted in a test file.
 
-- Phases 1-4 are frozen with real, passing automated tests (typecheck + 329 unit tests reconfirmed
-  live this session), not just claimed in documentation.
-- The `NOT_CONFIGURED`/`UNAVAILABLE` discipline from `PHASE-EXECUTION-PROTOCOL.md` is followed
-  correctly everywhere it was checked — the AI provider seam, the WhatsApp provider, OpenTelemetry —
-  none of them fake a working integration when credentials are absent.
-- The WhatsApp slice has real signature verification, atomic claim-before-work idempotency (proven
-  under genuine concurrency, per `docs/PHASE-5.md` §3/§8), audited replies, and SSRF-restricted
-  egress to exactly one host.
-- Every mutation observed is audited; every phase's regression suite was re-run green before
-  freezing, per each phase doc's own test tables.
+## 8. Open decisions for the user
 
-## 9. Open decisions for the user (not to be made unilaterally)
-
-These were already flagged in `docs/PHASE-5.md` §13 and remain unresolved:
-
-1. Whether to broaden Phase 1's intent lexicon so naming a specific vehicle alone (no booking verb)
-   counts as booking evidence.
-2. What comes next after this report: continuing Phase 5's remaining deliverables (CRM, Email,
-   Documents, Payments), building the Human Escalation mechanism (not clearly owned by any phase
-   under the current numbering), or Journey Step 5 (Eligibility).
-3. Whether Phase 6 (Security) must precede Phase 7 (Admin Dashboard), as `PHASE-CONTRACTS.json`'s own
-   `dependsOn` graph requires, or whether that order should be deliberately overridden and the risk
-   of an unauthenticated dashboard accepted.
+1. Whether/when to wire Steps 5-8 into the automatic pipeline so a completed enquiry progresses
+   without a person triggering each next step (§5) — the single highest-leverage change for making a
+   real booking possible without manual intervention.
+2. Whether to add the missing Twilio/Mailgun credentials to `render.yaml` so Email and SMS paging
+   actually work on the live deployment, not just locally/in tests.
+3. Whether the DB-role/RLS cutover (§6) should be pulled forward rather than left until Infrastructure
+   (id 15), given it's a live-deployment security gap, not just a future-phase checkbox.
+4. What comes next overall: Web chat + Documents + Payments (finishing id 5), the Customer PWA (id
+   13), or wiring Steps 5-8 into the pipeline (#1 above).
 
 Do not start building any of the above until the user has explicitly chosen.
