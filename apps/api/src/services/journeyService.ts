@@ -4,12 +4,14 @@ import {
   createJourney,
   findActiveUsersByRole,
   findJourneyByConversationId,
+  findJourneyTransitions,
   PrismaAuditWriter,
   transitionJourney,
   type PrismaClient,
 } from '@ai-concierge/db';
 import {
   createInitialJourneyContext,
+  AppError,
   EligibilityDecisionStatus,
   InventoryStatus,
   JourneyState,
@@ -20,6 +22,7 @@ import {
   type Journey,
   type JourneyContext,
   type JourneyStateValue,
+  type JourneyTransition,
   type MissingInfoStatusValue,
   type QuoteStatusValue,
   type TenantId,
@@ -471,4 +474,31 @@ export async function recordAlternativesOutcome(
       'alternatives presented',
     );
   });
+}
+
+export interface GetJourneyInput {
+  tenantId: TenantId;
+  conversationId: string;
+}
+
+export interface GetJourneyResult {
+  journey: Journey;
+  transitions: JourneyTransition[];
+}
+
+/** The admin dashboard's read surface for one conversation's journey — current state plus its full, append-only timeline. */
+export async function getJourney(
+  deps: JourneyServiceDeps,
+  input: GetJourneyInput,
+): Promise<GetJourneyResult> {
+  const journey = await findJourneyByConversationId(
+    deps.prisma,
+    input.tenantId,
+    input.conversationId,
+  );
+  if (!journey) {
+    throw new AppError('NOT_FOUND', 'No journey exists for this conversation');
+  }
+  const transitions = await findJourneyTransitions(deps.prisma, input.tenantId, journey.id);
+  return { journey, transitions };
 }

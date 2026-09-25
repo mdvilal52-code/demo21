@@ -11,3 +11,4 @@ export * from './whatsapp.js';
 export * from './availability.js';
 export * from './alternatives.js';
 export * from './quote.js';
+export * from './journey.js';

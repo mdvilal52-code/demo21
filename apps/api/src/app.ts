@@ -24,6 +24,8 @@ import { authRoutes } from './routes/v1/auth.js';
 import { auditRoutes } from './routes/v1/audit.js';
 import { securityEventRoutes } from './routes/v1/securityEvents.js';
 import { userRoutes } from './routes/v1/users.js';
+import { escalationRoutes } from './routes/v1/escalations.js';
+import { journeyRoutes } from './routes/v1/journeys.js';
 
 export async function buildApp(
   ctx: AppContext,
@@ -61,6 +63,8 @@ export async function buildApp(
   await app.register(auditRoutes);
   await app.register(securityEventRoutes);
   await app.register(userRoutes);
+  await app.register(escalationRoutes);
+  await app.register(journeyRoutes);
 
   return app;
 }

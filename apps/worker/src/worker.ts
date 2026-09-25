@@ -8,6 +8,7 @@ import {
   createLogger,
 } from '@ai-concierge/observability';
 import { loadWorkerEnv } from './env.js';
+import { startEscalationSlaSweep } from './jobs/escalationSlaSweep.js';
 import { startHoldExpirationSweep } from './jobs/holdExpirationSweep.js';
 import { processPostEnquiryJob } from './processors/postEnquiryProcessor.js';
 
@@ -46,12 +47,18 @@ async function main(): Promise<void> {
     logger,
     intervalMs: config.HOLD_EXPIRATION_SWEEP_INTERVAL_MS,
   });
+  const stopEscalationSlaSweep = startEscalationSlaSweep({
+    prisma,
+    logger,
+    intervalMs: config.ESCALATION_SLA_SWEEP_INTERVAL_MS,
+  });
 
   logger.info({ concurrency: config.WORKER_CONCURRENCY }, 'worker started');
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'shutting down');
     stopHoldExpirationSweep();
+    stopEscalationSlaSweep();
     await worker.close();
     await Promise.allSettled([prisma.$disconnect(), connection.quit(), observability.shutdown()]);
     process.exit(0);
