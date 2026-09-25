@@ -64,6 +64,21 @@ function classifyIntentType(lowerText: string): Classification {
       best = { intentType, keywordScore: score };
     }
   }
+
+  // "cancel my booking" must never be read as a fresh BOOKING_REQUEST just
+  // because "booking" (which itself contains "book") scores two keyword
+  // hits against "cancel"'s one — a cancellation phrase almost always also
+  // names the thing being cancelled. Scoped to this one pair, not a blanket
+  // override: BOOKING_REQUEST is the only list with this substring-inflation
+  // shape ("book"/"booking", "reserve"/"reservation"), so no other intent
+  // type needs the same correction.
+  if (best.intentType === IntentType.BOOKING_REQUEST) {
+    const cancelScore = countMatches(lowerText, INTENT_KEYWORDS[IntentType.CANCEL_REQUEST]);
+    if (cancelScore > 0) {
+      return { intentType: IntentType.CANCEL_REQUEST, keywordScore: cancelScore };
+    }
+  }
+
   return best;
 }
 

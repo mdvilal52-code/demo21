@@ -1,9 +1,14 @@
 import {
+  AlternativeRecommendationOrchestrator,
   DateLocationExtractionOrchestrator,
+  EligibilityOrchestrator,
   MissingInfoOrchestrator,
+  PricingRules,
+  QuoteValidator,
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
+import { MetaWhatsAppProvider, NotConfiguredWhatsAppProvider } from '@ai-concierge/channels';
 import { createPrismaClient } from '@ai-concierge/db';
 import {
   createLogger,
@@ -13,9 +18,14 @@ import {
 import { buildApp } from './app.js';
 import type { AppContext } from './context.js';
 import { loadApiEnv } from './env.js';
+import { createAIProvider } from './lib/geminiProvider.js';
+import { createEmailProvider } from './lib/createEmailProvider.js';
+import { createNotificationProvider } from './lib/notificationProvider.js';
 import { createPostEnquiryQueue } from './lib/queue.js';
 import { createRedisClient } from './lib/redis.js';
-import { createWhatsAppClient } from './lib/whatsappClient.js';
+import { createFleetProvider } from './services/createFleetProvider.js';
+import { PrismaAvailabilityProvider } from './services/availabilityProvider.js';
+import { ReservationLockService } from './services/reservationLockService.js';
 import { PrismaVehicleCatalogProvider } from './services/vehicleCatalogProvider.js';
 
 async function main(): Promise<void> {
@@ -42,7 +52,53 @@ async function main(): Promise<void> {
     catalogProvider: new PrismaVehicleCatalogProvider(prisma),
   });
   const missingInfoOrchestrator = new MissingInfoOrchestrator();
-  const { client: whatsappClient, status: whatsappStatus } = createWhatsAppClient(config);
+  const eligibilityOrchestrator = new EligibilityOrchestrator();
+  const whatsappConfigured = Boolean(
+    config.WHATSAPP_ACCESS_TOKEN && config.WHATSAPP_PHONE_NUMBER_ID,
+  );
+  const whatsappProvider = whatsappConfigured
+    ? new MetaWhatsAppProvider({
+        accessToken: config.WHATSAPP_ACCESS_TOKEN!,
+        phoneNumberId: config.WHATSAPP_PHONE_NUMBER_ID!,
+        apiVersion: config.WHATSAPP_API_VERSION,
+      })
+    : new NotConfiguredWhatsAppProvider();
+  const whatsappProviderStatus: 'CONFIGURED' | 'NOT_CONFIGURED' = whatsappConfigured
+    ? 'CONFIGURED'
+    : 'NOT_CONFIGURED';
+  const { provider: emailProvider, status: emailProviderStatus } = createEmailProvider(config);
+  const { provider: notificationProvider, status: notificationProviderStatus } =
+    createNotificationProvider(config);
+
+  const fleetProvider = createFleetProvider(config, prisma, redis);
+  const reservationLockService = new ReservationLockService(prisma, fleetProvider, {
+    ttlSeconds: config.AVAILABILITY_HOLD_TTL_SECONDS,
+    bufferMinutes: config.AVAILABILITY_TURNAROUND_BUFFER_MINUTES,
+  });
+  const alternativeRecommendationOrchestrator = new AlternativeRecommendationOrchestrator({
+    catalogProvider: new PrismaVehicleCatalogProvider(prisma),
+    availabilityProvider: new PrismaAvailabilityProvider(prisma, fleetProvider, {
+      bufferMinutes: config.AVAILABILITY_TURNAROUND_BUFFER_MINUTES,
+    }),
+  });
+  const pricingRules = new PricingRules();
+  const quoteValidator = new QuoteValidator(config.WEBHOOK_SIGNING_SECRET);
+
+  const { provider: aiProvider, status: aiProviderStatus } = createAIProvider(config);
+  if (aiProviderStatus === 'CONFIGURED') {
+    // Catches a bad GEMINI_MODEL_ID (or an unreachable API) at deploy time
+    // instead of discovering it silently later, one degraded-to-fallback
+    // reply at a time — see docs/phases/PHASE-06.md §7.
+    const health = await aiProvider.healthCheck();
+    if (health === 'CONFIGURED') {
+      logger.info({ modelId: config.GEMINI_MODEL_ID }, 'Gemini provider reachable');
+    } else {
+      logger.error(
+        { modelId: config.GEMINI_MODEL_ID, health },
+        'GEMINI_API_KEY is set but the configured model is not reachable — conversational replies will fall back to deterministic templates until this is fixed',
+      );
+    }
+  }
 
   const ctx: AppContext = {
     config,
@@ -54,11 +110,23 @@ async function main(): Promise<void> {
     dateLocationOrchestrator,
     vehicleOrchestrator,
     missingInfoOrchestrator,
+    eligibilityOrchestrator,
+    alternativeRecommendationOrchestrator,
+    pricingRules,
+    quoteValidator,
+    whatsappProvider,
+    whatsappProviderStatus,
+    emailProvider,
+    emailProviderStatus,
+    notificationProvider,
+    notificationProviderStatus,
+    fleetProvider,
+    reservationLockService,
     observabilityStatus: observability.status,
-    whatsappClient,
-    whatsappStatus,
+    aiProvider,
+    aiProviderStatus,
   };
-  logger.info({ whatsappStatus }, 'WhatsApp adapter status');
+  logger.info({ aiProviderStatus }, 'AI provider status');
 
   const app = await buildApp(ctx, logger);
 

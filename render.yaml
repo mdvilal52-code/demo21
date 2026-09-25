@@ -1,20 +1,22 @@
-# Render Blueprint for the full system: API, background worker, and web
-# frontend. Deploying only the first service (ai-concierge-api) gets you
-# every HTTP endpoint (Steps 1-4) working, but two things silently won't:
-#   - the BullMQ post-enquiry job never gets consumed, so
-#     conversation.processedAt and its audit event never get written
-#     (Phase 1's enqueue is "best-effort" — it doesn't fail the request,
-#     it just has nothing listening on the other end)
-#   - there is no browser UI at all — only the raw JSON API
-# The worker and web services below close both gaps. Deploy all three
-# together (Render dashboard -> New + -> Blueprint, point at this repo) for
-# every feature to actually work end to end.
+# Render Blueprint for the system: API and web frontend. (A background
+# worker service is defined further down but commented out — Render's free
+# plan doesn't offer the "worker" service type, and leaving it active makes
+# the *whole* Blueprint sync fail, which silently blocks ai-concierge-api
+# and ai-concierge-web from redeploying too. Re-enable it once you're on a
+# paid plan.)
+#
+# Without the worker, every HTTP endpoint (Steps 1-4, the WhatsApp webhook)
+# still works end to end. What silently won't: the BullMQ post-enquiry job
+# never gets consumed, so conversation.processedAt and its audit event
+# never get written (Phase 1's enqueue is "best-effort" — it doesn't fail
+# the request, it just has nothing listening on the other end).
 #
 # This is a pnpm workspace monorepo, so Render's zero-config Node detection
 # (which just runs `npm install` / `npm start` at the repo root) does not
-# work — the root package.json intentionally has no "start" script, since
-# nothing runnable lives at the repo root itself. Every service below has
-# its own explicit build/start command instead.
+# work for this Blueprint — the root `npm start` (scripts/start-production.mjs)
+# runs api+web+worker combined in one process instead, a different single-
+# service deployment shape than the one below. Every service in this
+# Blueprint has its own explicit build/start command instead.
 #
 # If you already created a Web Service manually, either delete it and
 # redeploy via Blueprint, or copy the relevant service's
@@ -26,11 +28,16 @@ services:
     runtime: node
     plan: free
     buildCommand: corepack enable && corepack prepare pnpm@10.33.0 --activate && pnpm install --frozen-lockfile && pnpm run build
-    # `prisma migrate deploy` only applies pending migrations, so it's safe
-    # to re-run on every start; the more correct place for it long-term is
-    # Render's own "Pre-Deploy Command" setting, once you're on a plan that
-    # has it.
-    startCommand: pnpm --filter @ai-concierge/db exec prisma migrate deploy && node apps/api/dist/server.js
+    # `prisma migrate deploy` only applies pending migrations, and the seed
+    # is upsert-based (packages/db/src/seed.ts) — both safe to re-run on
+    # every start; the more correct place for them long-term is Render's own
+    # "Pre-Deploy Command" setting, once you're on a plan that has it.
+    # The seed step is required, not cosmetic: migrations only create the
+    # schema, so on a fresh database DEFAULT_TENANT_ID has no Tenant row to
+    # reference yet, and every write that references it (a WhatsApp webhook
+    # creating a Conversation, POST /v1/enquiries, ...) fails its foreign
+    # key constraint until this has run at least once.
+    startCommand: pnpm --filter @ai-concierge/db exec prisma migrate deploy && pnpm --filter @ai-concierge/db run seed && pnpm --filter @ai-concierge/db run bootstrap-admin && node apps/api/dist/server.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -64,51 +71,110 @@ services:
       # (the localhost default is meaningless in production).
       - key: CORS_ALLOWED_ORIGINS
         sync: false
+      # WhatsApp (Meta Cloud API) — all optional; the webhook and outbound
+      # replies report NOT_CONFIGURED until every one of them is set. Fill
+      # in from the Render dashboard once you have a Meta App with the
+      # WhatsApp product added (see .env.example for where each value comes
+      # from):
+      #   WHATSAPP_ACCESS_TOKEN    System User permanent access token
+      #   WHATSAPP_PHONE_NUMBER_ID from WhatsApp > API Setup for your number
+      #   WHATSAPP_VERIFY_TOKEN    any string you choose; re-enter the same
+      #                            value in the dashboard's webhook setup
+      #   WHATSAPP_APP_SECRET      App Dashboard > Settings > Basic
+      # Webhook URL to register with Meta:
+      # https://<this-service>.onrender.com/webhooks/whatsapp
+      - key: WHATSAPP_VERIFY_TOKEN
+        sync: false
+      - key: WHATSAPP_APP_SECRET
+        sync: false
+      - key: WHATSAPP_ACCESS_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: WHATSAPP_API_VERSION
+        value: v21.0
+      # Phase 6 — Availability. Defaults work with zero configuration
+      # (database-backed inventory, always real). Only set FLEET_API_BASE_URL/
+      # FLEET_API_KEY if this tenant has a real third-party fleet-management
+      # API to integrate with; left unset, FLEET_PROVIDER=external reports
+      # NOT_CONFIGURED rather than a fake integration (see .env.example).
+      - key: FLEET_PROVIDER
+        value: database
+      - key: FLEET_API_BASE_URL
+        sync: false
+      - key: FLEET_API_KEY
+        sync: false
+      - key: FLEET_API_TIMEOUT_MS
+        value: '3000'
+      - key: AVAILABILITY_HOLD_TTL_SECONDS
+        value: '900'
+      - key: AVAILABILITY_TURNAROUND_BUFFER_MINUTES
+        value: '120'
       # Cosmetic only (the "try it out" base URL shown in /docs) — set to
       # this service's own real Render URL once you know it.
       - key: API_PUBLIC_URL
         sync: false
       # PORT is provided automatically by Render; apps/api/src/env.ts
       # adopts it into API_PORT when API_PORT itself isn't set.
-      # Meta WhatsApp Cloud API — all four optional; the webhook and outbound
-      # replies report NOT_CONFIGURED until every one of them is set. Values
-      # come from the Meta App Dashboard, not generated by Render:
-      #   WHATSAPP_ACCESS_TOKEN    System User permanent access token
-      #   WHATSAPP_PHONE_NUMBER_ID from WhatsApp > API Setup for your number
-      #   WHATSAPP_VERIFY_TOKEN    any string you choose; re-enter the same
-      #                            value in the dashboard's webhook setup
-      #   WHATSAPP_APP_SECRET      App Dashboard > Settings > Basic
-      - key: WHATSAPP_ACCESS_TOKEN
+      # Phase 6 — AuthN/AuthZ. Both required; the API refuses to boot
+      # without them (see apps/api/src/env.ts — no NOT_CONFIGURED state for
+      # staff login, unlike the provider seams above).
+      - key: JWT_SIGNING_SECRET
+        generateValue: true
+      # NOT `generateValue: true`: this must decode as base64 to exactly 32
+      # bytes (AES-256), which Render's generic random-value generator does
+      # not guarantee. Generate it yourself and paste it into the Render
+      # dashboard:
+      #   node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"
+      - key: MFA_ENCRYPTION_KEY
         sync: false
-      - key: WHATSAPP_PHONE_NUMBER_ID
+      # Gemini — conversational reply generation only; leave unset to keep
+      # the adapter NOT_CONFIGURED (see .env.example). Get a key at
+      # https://aistudio.google.com/apikey. GEMINI_MODEL_ID/TEMPERATURE/etc.
+      # have safe defaults in code and don't need to be set here.
+      - key: GEMINI_API_KEY
         sync: false
-      - key: WHATSAPP_VERIFY_TOKEN
+      # First Admin Dashboard account — packages/db/src/bootstrapAdmin.ts.
+      # Idempotent (skips once this account exists) and a no-op if either
+      # is left unset, but without them a fresh deploy has no account to
+      # sign into the dashboard with. Set both in the Render dashboard,
+      # then sign in and change the password from there (no self-serve
+      # password change yet — see docs/phases/PHASE-07.md).
+      - key: BOOTSTRAP_ADMIN_EMAIL
         sync: false
-      - key: WHATSAPP_APP_SECRET
+      - key: BOOTSTRAP_ADMIN_PASSWORD
         sync: false
 
-  - type: worker
-    name: ai-concierge-worker
-    runtime: node
-    plan: free
-    buildCommand: corepack enable && corepack prepare pnpm@10.33.0 --activate && pnpm install --frozen-lockfile && pnpm run build
-    startCommand: node apps/worker/dist/worker.js
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: LOG_LEVEL
-        value: info
-      # Must be the *same* database/queue the API service uses above.
-      - key: DATABASE_URL
-        sync: false
-      - key: REDIS_URL
-        sync: false
-      - key: WEBHOOK_SIGNING_SECRET
-        generateValue: true
-      - key: DEFAULT_TENANT_ID
-        value: 00000000-0000-0000-0000-000000000001
-      - key: OUTBOUND_ALLOWED_HOSTS
-        value: localhost,127.0.0.1
+  # Disabled: Render's free plan does not offer the "worker" service type
+  # ("service type is not available for this plan"). Leaving it in the
+  # Blueprint makes the *entire* Blueprint sync fail — which silently
+  # blocks ai-concierge-api and ai-concierge-web from redeploying too, even
+  # though they'd succeed on their own. Uncomment this block once the
+  # Render account is on a paid plan that supports background workers.
+  # Until then, the BullMQ post-enquiry job is enqueued but never
+  # consumed (see the file header comment above).
+  # - type: worker
+  #   name: ai-concierge-worker
+  #   runtime: node
+  #   plan: free
+  #   buildCommand: corepack enable && corepack prepare pnpm@10.33.0 --activate && pnpm install --frozen-lockfile && pnpm run build
+  #   startCommand: node apps/worker/dist/worker.js
+  #   envVars:
+  #     - key: NODE_ENV
+  #       value: production
+  #     - key: LOG_LEVEL
+  #       value: info
+  #     # Must be the *same* database/queue the API service uses above.
+  #     - key: DATABASE_URL
+  #       sync: false
+  #     - key: REDIS_URL
+  #       sync: false
+  #     - key: WEBHOOK_SIGNING_SECRET
+  #       generateValue: true
+  #     - key: DEFAULT_TENANT_ID
+  #       value: 00000000-0000-0000-0000-000000000001
+  #     - key: OUTBOUND_ALLOWED_HOSTS
+  #       value: localhost,127.0.0.1
 
   - type: web
     name: ai-concierge-web

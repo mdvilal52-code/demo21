@@ -6,7 +6,13 @@ import {
 } from '@ai-concierge/testing';
 import type { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { findIdempotencyKey, saveIdempotencyKey } from './idempotencyRepository.js';
+import {
+  claimIdempotencyKey,
+  completeIdempotencyKey,
+  findIdempotencyKey,
+  releaseIdempotencyKeyClaim,
+  saveIdempotencyKey,
+} from './idempotencyRepository.js';
 
 describe('idempotencyRepository', () => {
   let prisma: PrismaClient;
@@ -61,5 +67,45 @@ describe('idempotencyRepository', () => {
         responseBody: {},
       }),
     ).rejects.toThrow();
+  });
+
+  it('claimIdempotencyKey: only one of many concurrent claims for the same key wins', async () => {
+    const attempts = Array.from({ length: 10 }, () =>
+      claimIdempotencyKey(prisma, {
+        key: 'concurrent-key',
+        tenantId: TEST_TENANT_ID,
+        requestHash: 'hash-concurrent',
+      }),
+    );
+    const results = await Promise.all(attempts);
+    expect(results.filter(Boolean)).toHaveLength(1);
+  });
+
+  it('completeIdempotencyKey fills in the real outcome on a claimed key', async () => {
+    await claimIdempotencyKey(prisma, {
+      key: 'claim-then-complete',
+      tenantId: TEST_TENANT_ID,
+      requestHash: 'hash-x',
+    });
+    await completeIdempotencyKey(prisma, 'claim-then-complete', 200, { done: true });
+
+    const result = await findIdempotencyKey(prisma, 'claim-then-complete');
+    expect(result).toEqual({ responseStatus: 200, responseBody: { done: true } });
+  });
+
+  it('releaseIdempotencyKeyClaim lets a later attempt reclaim the same key', async () => {
+    await claimIdempotencyKey(prisma, {
+      key: 'claim-then-fail',
+      tenantId: TEST_TENANT_ID,
+      requestHash: 'hash-y',
+    });
+    await releaseIdempotencyKeyClaim(prisma, 'claim-then-fail');
+
+    const reclaimed = await claimIdempotencyKey(prisma, {
+      key: 'claim-then-fail',
+      tenantId: TEST_TENANT_ID,
+      requestHash: 'hash-y-retry',
+    });
+    expect(reclaimed).toBe(true);
   });
 });

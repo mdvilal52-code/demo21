@@ -162,3 +162,20 @@ export async function findAlternativeVehicles(
   });
   return rows.map(toDomainVehicle);
 }
+
+export interface ListVehiclesParams {
+  tenantId: TenantId;
+  limit: number;
+  offset: number;
+}
+
+/** The admin dashboard's Fleet screen — every non-deleted catalog entry (active or not), so staff can see what's temporarily disabled too. */
+export async function listVehicles(db: Executor, params: ListVehiclesParams): Promise<Vehicle[]> {
+  const rows = await db.vehicle.findMany({
+    where: { tenantId: params.tenantId, deletedAt: null },
+    orderBy: { make: 'asc' },
+    take: params.limit,
+    skip: params.offset,
+  });
+  return rows.map(toDomainVehicle);
+}

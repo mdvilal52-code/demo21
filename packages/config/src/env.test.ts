@@ -36,6 +36,14 @@ describe('loadEnv', () => {
     ).toThrowError(/WEBHOOK_SIGNING_SECRET/);
   });
 
+  it('trims a trailing newline off WEBHOOK_SIGNING_SECRET (a common dashboard/`.env` paste artifact)', () => {
+    const env = loadEnv(baseEnvSchema, {
+      ...validSource,
+      WEBHOOK_SIGNING_SECRET: 'a-very-long-secret-value\n',
+    });
+    expect(env.WEBHOOK_SIGNING_SECRET).toBe('a-very-long-secret-value');
+  });
+
   it('rejects a malformed DATABASE_URL instead of passing it through', () => {
     expect(() =>
       loadEnv(baseEnvSchema, { ...validSource, DATABASE_URL: 'not-a-url' }),

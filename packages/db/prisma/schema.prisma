@@ -7,23 +7,162 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Root of tenant isolation. RLS-enforced isolation is a Phase 2/6 addition;
-/// Phase 1 enforces it at the application layer — every repository function
-/// takes a tenantId and filters by it explicitly (see @ai-concierge/db repositories).
+/// Root of tenant isolation. Phase 1-5 enforced it at the application layer only
+/// (every repository function takes a tenantId and filters by it explicitly).
+/// Phase 6 adds the enforced backstop: Postgres Row Level Security policies
+/// (see migration `..._add_security_engine`) keyed on the `app.tenant_id`
+/// session setting that `withTenantContext()` (@ai-concierge/security) sets
+/// per-transaction — so a bug that forgets a `WHERE tenantId` clause fails
+/// closed at the database, not just in application code.
 model Tenant {
   id        String   @id @default(uuid())
   name      String
   createdAt DateTime @default(now())
 
-  conversations            Conversation[]
-  auditEvents              AuditEvent[]
-  intentRecords            IntentRecord[]
-  dateLocationExtractions  DateLocationExtraction[]
-  vehicles                 Vehicle[]
-  vehicleDeterminations    VehicleDetermination[]
-  missingInfoChecks        MissingInfoCheck[]
+  conversations              Conversation[]
+  auditEvents                AuditEvent[]
+  intentRecords              IntentRecord[]
+  dateLocationExtractions    DateLocationExtraction[]
+  vehicles                   Vehicle[]
+  vehicleDeterminations      VehicleDetermination[]
+  missingInfoChecks          MissingInfoCheck[]
+  users                      User[]
+  refreshTokens              RefreshToken[]
+  securityEvents             SecurityEvent[]
+  eligibilityPolicies        EligibilityPolicy[]
+  eligibilityExceptions      EligibilityException[]
+  eligibilityDecisions       EligibilityDecision[]
+  vehicleUnits               VehicleUnit[]
+  availabilityHolds          AvailabilityHold[]
+  availabilityChecks         AvailabilityCheck[]
+  alternativeRecommendations AlternativeRecommendation[]
+  quotes                     Quote[]
+  journeys                   Journey[]
+  journeyTransitions         JourneyTransition[]
+  escalationCases            EscalationCase[]
+  customers                  Customer[]
+  customerTimelineEvents     CustomerTimelineEvent[]
 
   @@map("tenants")
+}
+
+/// Human staff accounts (admin dashboard / internal tooling), distinct from
+/// `Customer` (not yet modeled — journey Steps still identify customers by
+/// `customerRef` on `Conversation`). Roles map to MASTER-PLAN.md §4's
+/// escalation tiers: ADMIN is a superset, MANAGER=T3, OPS_AGENT=T2,
+/// SECURITY=T4. T1 is the AI itself, never a human role.
+enum UserRole {
+  ADMIN
+  MANAGER
+  OPS_AGENT
+  SECURITY
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+}
+
+/// `passwordHash` is an argon2id hash, never reversible. `mfaSecretCiphertext`
+/// is an AES-256-GCM ciphertext (packages/security/src/crypto.ts) of the TOTP
+/// seed, never the raw secret — field-level encryption for the one real
+/// per-user secret this phase introduces (passport/licence-number encryption
+/// applies once the document pipeline of the original phase-5 grouping is
+/// built; see docs/PHASE-6.md §3).
+model User {
+  id                  String     @id @default(uuid())
+  tenantId            String
+  tenant              Tenant     @relation(fields: [tenantId], references: [id])
+  email               String
+  /// E.164 phone number for staff SMS escalation alerts (notificationProvider.ts) — optional;
+  /// a worker with none set is simply skipped when paging a tier, never a fake send.
+  phone               String?
+  passwordHash        String
+  role                UserRole
+  status              UserStatus @default(ACTIVE)
+  mfaEnabled          Boolean    @default(false)
+  mfaSecretCiphertext String?
+  failedLoginCount    Int        @default(0)
+  lockedUntil         DateTime?
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  refreshTokens   RefreshToken[]
+  securityEvents  SecurityEvent[]
+  escalationCases EscalationCase[]
+
+  @@unique([tenantId, email])
+  @@index([tenantId])
+  @@map("users")
+}
+
+/// Rotating refresh tokens: only `tokenHash` (SHA-256 of the opaque token) is
+/// stored, never the raw token. `familyId` groups one rotation chain — reuse
+/// of an already-rotated (revoked) member is a stolen-token signal and
+/// revokes the whole family (see packages/security/src/authn/refreshTokens.ts).
+model RefreshToken {
+  id                String    @id @default(uuid())
+  tenantId          String
+  tenant            Tenant    @relation(fields: [tenantId], references: [id])
+  userId            String
+  user              User      @relation(fields: [userId], references: [id])
+  tokenHash         String    @unique
+  familyId          String
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  replacedByTokenId String?
+  ip                String?
+  userAgent         String?
+  createdAt         DateTime  @default(now())
+
+  @@index([tenantId])
+  @@index([userId])
+  @@index([familyId])
+  @@map("refresh_tokens")
+}
+
+enum SecurityEventType {
+  LOGIN_SUCCESS
+  LOGIN_FAILURE
+  MFA_ENROLLED
+  MFA_FAILURE
+  TOKEN_REUSE_DETECTED
+  ACCOUNT_LOCKED
+  PERMISSION_DENIED
+  CROSS_TENANT_ATTEMPT
+  SESSION_REVOKED
+  ANOMALY_LOGIN_VELOCITY
+  ANOMALY_MASS_EXPORT
+  DLP_OUTBOUND_PII_DETECTED
+}
+
+enum SecuritySeverity {
+  INFO
+  WARNING
+  CRITICAL
+}
+
+/// Append-only security event stream — the detection & response layer's
+/// record, and the current T4 (Security/Compliance) escalation surface via
+/// `GET /v1/security-events` until a full EscalationCase model exists
+/// (that is the Event/Workflow Engine's concern, still unbuilt).
+model SecurityEvent {
+  id        String            @id @default(uuid())
+  tenantId  String
+  tenant    Tenant            @relation(fields: [tenantId], references: [id])
+  userId    String?
+  user      User?             @relation(fields: [userId], references: [id])
+  type      SecurityEventType
+  severity  SecuritySeverity
+  ip        String?
+  userAgent String?
+  metadata  Json
+  createdAt DateTime          @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, severity])
+  @@index([userId])
+  @@map("security_events")
 }
 
 enum Channel {
@@ -42,6 +181,8 @@ model Conversation {
   processedAt DateTime?
 
   messages Message[]
+  quotes   Quote[]
+  journey  Journey?
 
   @@index([tenantId])
   @@map("conversations")
@@ -54,10 +195,14 @@ model Message {
   content        String
   createdAt      DateTime     @default(now())
 
-  intentRecords            IntentRecord[]
-  dateLocationExtractions  DateLocationExtraction[]
-  vehicleDeterminations    VehicleDetermination[]
-  missingInfoChecks        MissingInfoCheck[]
+  intentRecords              IntentRecord[]
+  dateLocationExtractions    DateLocationExtraction[]
+  vehicleDeterminations      VehicleDetermination[]
+  missingInfoChecks          MissingInfoCheck[]
+  eligibilityDecisions       EligibilityDecision[]
+  availabilityChecks         AvailabilityCheck[]
+  alternativeRecommendations AlternativeRecommendation[]
+  quotes                     Quote[]
 
   @@index([conversationId])
   @@map("messages")
@@ -66,6 +211,7 @@ model Message {
 enum IntentType {
   ENQUIRY
   BOOKING_REQUEST
+  CANCEL_REQUEST
   AVAILABILITY_REQUEST
   PRICE_REQUEST
   DOCUMENT_REQUEST
@@ -242,7 +388,12 @@ model Vehicle {
   createdAt          DateTime                  @default(now())
   updatedAt          DateTime                  @updatedAt
 
-  vehicleDeterminations VehicleDetermination[]
+  vehicleDeterminations      VehicleDetermination[]
+  units                      VehicleUnit[]
+  availabilityHolds          AvailabilityHold[]
+  availabilityChecks         AvailabilityCheck[]
+  alternativeRecommendations AlternativeRecommendation[]
+  quotes                     Quote[]
 
   @@unique([tenantId, make, model])
   @@index([tenantId])
@@ -282,6 +433,7 @@ enum MissingInfoStatus {
   NEEDS_INFO
   EXPIRED
   NOT_APPLICABLE
+  CANCELLED
 }
 
 /// Step 4 — Ask Missing Information. One row per completeness check against
@@ -306,4 +458,508 @@ model MissingInfoCheck {
   @@index([tenantId])
   @@index([messageId])
   @@map("missing_info_checks")
+}
+
+enum EligibilityDecisionStatus {
+  ELIGIBLE
+  INELIGIBLE
+  NEEDS_HUMAN_REVIEW
+}
+
+enum EligibilityExceptionType {
+  VIP
+  NATIONALITY_OVERRIDE
+  AGE_OVERRIDE
+  MANUAL_GRANT
+}
+
+enum EligibilityRiskLevel {
+  LOW
+  HIGH
+}
+
+/// Step 5 — Eligibility. Tenant-configurable, versioned, append-only:
+/// updating a policy never edits a row in place — it inserts a new version
+/// and deactivates the previous one (see eligibilityPolicyRepository), so a
+/// past EligibilityDecision's policyId/policyVersion always resolves to
+/// exactly the rules that were actually applied at decision time.
+model EligibilityPolicy {
+  id        String   @id @default(uuid())
+  tenantId  String
+  tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  version   Int
+  active    Boolean  @default(true)
+  /// Zod-validated EligibilityPolicyRules (age/license/passport/nationality/
+  /// vehicle/location/driver-requirement parameters) — the actual
+  /// configurable surface; rule *logic* is fixed code in
+  /// packages/ai/src/step5, never edited by this JSON.
+  rules     Json
+  createdAt DateTime @default(now())
+
+  decisions EligibilityDecision[]
+
+  @@unique([tenantId, version])
+  @@index([tenantId, active])
+  @@map("eligibility_policies")
+}
+
+/// A tenant-configured, pre-approved carve-out from specific rule
+/// categories (VIP / nationality / age overrides / a one-off manual grant).
+/// Matched and applied deterministically by the engine, exactly like a
+/// policy rule — never an ad hoc, in-the-moment AI decision.
+model EligibilityException {
+  id               String                   @id @default(uuid())
+  tenantId         String
+  tenant           Tenant                   @relation(fields: [tenantId], references: [id])
+  type             EligibilityExceptionType
+  /// Scopes a VIP/AGE_OVERRIDE/MANUAL_GRANT exception to one customer; null for a nationality-scoped exception.
+  scopeCustomerRef String?
+  /// Scopes a NATIONALITY_OVERRIDE exception; null for a customer-scoped exception.
+  scopeNationality String?
+  waivedCategories String[]
+  riskLevel        EligibilityRiskLevel
+  reason           String
+  active           Boolean                  @default(true)
+  expiresAt        DateTime?
+  createdAt        DateTime                 @default(now())
+
+  @@index([tenantId])
+  @@index([tenantId, scopeCustomerRef])
+  @@index([tenantId, scopeNationality])
+  @@map("eligibility_exceptions")
+}
+
+/// Step 5 — Eligibility. One row per eligibility-check run against a
+/// message — same append-only-history convention as IntentRecord/
+/// DateLocationExtraction/VehicleDetermination/MissingInfoCheck. Customer/
+/// driver data is validated request-boundary input (never collected by an
+/// earlier step); vehicle/dates/location are read from what Steps 2-3
+/// already resolved — never re-derived here.
+model EligibilityDecision {
+  id                String                    @id @default(uuid())
+  tenantId          String
+  tenant            Tenant                    @relation(fields: [tenantId], references: [id])
+  messageId         String
+  message           Message                   @relation(fields: [messageId], references: [id])
+  status            EligibilityDecisionStatus
+  ruleResults       Json
+  exceptionsApplied Json
+  policyConflicts   Json
+  reason            String
+  policyId          String
+  policy            EligibilityPolicy         @relation(fields: [policyId], references: [id])
+  policyVersion     Int
+  flags             Json
+  modelMetadata     Json
+  createdAt         DateTime                  @default(now())
+
+  @@index([tenantId])
+  @@index([messageId])
+  @@map("eligibility_decisions")
+}
+
+enum UnitStatus {
+  ACTIVE
+  MAINTENANCE
+  RETIRED
+}
+
+/// Phase 6 (journey Step 6 — Availability). Physical, countable fleet
+/// inventory behind a Vehicle catalog entry (Vehicle is a make/model class,
+/// e.g. "Lamborghini Urus" — not an individual car; see vehicle.ts). The
+/// default `DatabaseFleetProvider` counts these rows — "real
+/// database-backed inventory", never fabricated. Availability is
+/// capacity-based (like hotel room-type inventory): a hold blocks one unit
+/// of a vehicleId's count for a date range, never a specific VehicleUnit
+/// row, so no FK from AvailabilityHold to this table.
+model VehicleUnit {
+  id        String     @id @default(uuid())
+  tenantId  String
+  tenant    Tenant     @relation(fields: [tenantId], references: [id])
+  vehicleId String
+  vehicle   Vehicle    @relation(fields: [vehicleId], references: [id])
+  /// Internal fleet code / plate reference — tenant-scoped, not globally unique.
+  unitRef   String
+  status    UnitStatus @default(ACTIVE)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([tenantId, vehicleId, unitRef])
+  @@index([tenantId, vehicleId])
+  @@map("vehicle_units")
+}
+
+/// The outcome of a Step 6 availability check or hold attempt. AVAILABLE/
+/// UNAVAILABLE/MAINTENANCE/UNKNOWN are read-only outcomes; HELD/BOOKED are
+/// the public projection of an AvailabilityHold's own lifecycle (ACTIVE ->
+/// HELD, CONFIRMED -> BOOKED) once a hold actually exists for this request.
+enum InventoryStatus {
+  AVAILABLE
+  HELD
+  BOOKED
+  UNAVAILABLE
+  MAINTENANCE
+  UNKNOWN
+}
+
+/// ACTIVE = temporary, TTL pending. CONFIRMED = converted to a real booking
+/// (journey Step 14, out of this phase's scope) — permanent calendar block,
+/// no TTL. RELEASED = compensated/cancelled. EXPIRED = TTL lapsed without
+/// confirmation. See ReservationLockService for the state machine.
+enum HoldStatus {
+  ACTIVE
+  CONFIRMED
+  RELEASED
+  EXPIRED
+}
+
+/// Phase 6 — a temporary (TTL'd) or confirmed reservation lock against a
+/// vehicle's calendar. Capacity-based: blocks one unit of `vehicleId`'s
+/// countable inventory (VehicleUnit rows) for [pickupAt, returnAt), not a
+/// specific physical unit. ACTIVE rows past `expiresAt` are treated as
+/// already expired by every read (lazy expiration — see
+/// availabilityHoldRepository.countOverlappingHolds); a background worker
+/// sweep (expireDueHolds) flips them to EXPIRED for housekeeping/reporting
+/// only, never relied on for correctness. `version` backs optimistic
+/// locking on release/confirm transitions; placement itself is
+/// pessimistically serialized per (tenantId, vehicleId) via a Postgres
+/// advisory lock (see ReservationLockService.placeHold) so concurrent
+/// requests for the same vehicle can never oversell capacity.
+model AvailabilityHold {
+  id             String     @id @default(uuid())
+  tenantId       String
+  tenant         Tenant     @relation(fields: [tenantId], references: [id])
+  vehicleId      String
+  vehicle        Vehicle    @relation(fields: [vehicleId], references: [id])
+  pickupAt       DateTime
+  returnAt       DateTime
+  status         HoldStatus @default(ACTIVE)
+  expiresAt      DateTime
+  /// Unique per tenant — a retried/duplicate request with the same key
+  /// replays the existing hold instead of consuming capacity twice.
+  idempotencyKey String
+  requestedBy    String
+  version        Int        @default(0)
+  releaseReason  String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@unique([tenantId, idempotencyKey])
+  @@index([tenantId, vehicleId, status])
+  @@map("availability_holds")
+}
+
+/// Phase 6 — one row per availability-check run against a message, the same
+/// append-only-history convention as IntentRecord/DateLocationExtraction/
+/// VehicleDetermination/MissingInfoCheck. `holdId` is set only when the
+/// check actually placed a hold (status AVAILABLE -> a hold is always
+/// created; see ReservationLockService). No `flags`/prompt-injection field
+/// here unlike Steps 1-4 — this step takes no raw customer text as input,
+/// only already-validated Step 2/3 output.
+model AvailabilityCheck {
+  id            String          @id @default(uuid())
+  tenantId      String
+  tenant        Tenant          @relation(fields: [tenantId], references: [id])
+  messageId     String
+  message       Message         @relation(fields: [messageId], references: [id])
+  vehicleId     String
+  vehicle       Vehicle         @relation(fields: [vehicleId], references: [id])
+  pickupAt      DateTime
+  returnAt      DateTime
+  status        InventoryStatus
+  holdId        String?
+  source        String
+  reason        String?
+  retryable     Boolean         @default(false)
+  modelMetadata Json
+  createdAt     DateTime        @default(now())
+
+  @@index([tenantId])
+  @@index([messageId])
+  @@map("availability_checks")
+}
+
+enum AlternativeRecommendationStatus {
+  ALTERNATIVES_FOUND
+  NO_ALTERNATIVES
+}
+
+/// Step 7 — Alternatives. One row per recommendation run against a message —
+/// same append-only-history convention as VehicleDetermination/
+/// AvailabilityCheck. `primary`/`secondary` snapshot the exact
+/// AlternativeCandidate (Zod-validated before being written) the customer was
+/// shown — never re-derived later, never a live vehicle re-lookup.
+model AlternativeRecommendation {
+  id                 String                          @id @default(uuid())
+  tenantId           String
+  tenant             Tenant                          @relation(fields: [tenantId], references: [id])
+  messageId          String
+  message            Message                         @relation(fields: [messageId], references: [id])
+  requestedVehicleId String
+  requestedVehicle   Vehicle                         @relation(fields: [requestedVehicleId], references: [id])
+  status             AlternativeRecommendationStatus
+  primary            Json?
+  secondary          Json?
+  consideredCount    Int
+  modelMetadata      Json
+  createdAt          DateTime                        @default(now())
+
+  @@index([tenantId])
+  @@index([messageId])
+  @@map("alternative_recommendations")
+}
+
+enum QuoteStatus {
+  ISSUED
+  PENDING_REVIEW
+}
+
+/// Step 8 — Quote. Append-only per version: a "change" (different
+/// selections, or a re-quote after the previous version expired) always
+/// inserts a new row with the same `quoteId` and `version + 1`, never an
+/// update — same convention as VehicleDetermination/AvailabilityCheck/
+/// AlternativeRecommendation, specialized with a stable `quoteId` lineage
+/// across versions. "Current" for a conversation = the row with the highest
+/// `version` for that `(tenantId, conversationId)`; `@@unique([tenantId,
+/// quoteId, version])` is the structural backstop against a duplicate
+/// version number, the same dual-layer safety
+/// (`pg_advisory_xact_lock` + unique constraint) Phase 6's
+/// `AvailabilityHold` already established.
+model Quote {
+  id                  String       @id @default(uuid())
+  tenantId            String
+  tenant              Tenant       @relation(fields: [tenantId], references: [id])
+  conversationId      String
+  conversation        Conversation @relation(fields: [conversationId], references: [id])
+  messageId           String
+  message             Message      @relation(fields: [messageId], references: [id])
+  vehicleId           String
+  vehicle             Vehicle      @relation(fields: [vehicleId], references: [id])
+  quoteId             String
+  version             Int
+  status              QuoteStatus
+  currency            String
+  lineItems           Json
+  taxes               Json
+  fees                Json
+  discounts           Json
+  deposit             Json
+  total               Json
+  validUntil          DateTime
+  pricingVersion      String
+  requiresHumanReview Boolean
+  reviewReasons       Json
+  integrityHash       String
+  modelMetadata       Json
+  createdAt           DateTime     @default(now())
+
+  @@unique([tenantId, quoteId, version])
+  @@index([tenantId])
+  @@index([tenantId, conversationId])
+  @@map("quotes")
+}
+
+// ===========================================================================
+// Event / Workflow Engine — MASTER-PLAN.md §1's centerpiece, undelivered
+// until this phase. See packages/domain/src/journey.ts for the full state
+// list and rationale. `Journey` is the one persisted row per conversation
+// driving Steps 1-8 forward automatically; `JourneyTransition` is its
+// append-only timeline (same convention as AuditEvent, scoped to journey
+// state changes specifically so the admin dashboard can render a timeline
+// without filtering AuditEvent's much broader stream).
+// ===========================================================================
+
+enum JourneyState {
+  ENQUIRY_RECEIVED
+  EXTRACTING_REQUIREMENTS
+  VEHICLE_SELECTION
+  COLLECTING_MISSING_INFO
+  ELIGIBILITY_CHECK
+  AVAILABILITY_CHECK
+  OFFERING_ALTERNATIVES
+  QUOTE_ISSUED
+  DOCUMENTS_REQUESTED
+  DOCUMENTS_VERIFYING
+  PAYMENT_INSTRUCTED
+  CRM_UPDATED
+  AWAITING_HUMAN_APPROVAL
+  CONFIRMED
+  DELIVERY_SCHEDULED
+  ON_RENTAL
+  RETURN_SCHEDULED
+  RETURNED
+  FINAL_INVOICE_ISSUED
+  FOLLOW_UP_SENT
+  CLOSED
+  ESCALATED
+  CANCELLED
+  DECLINED
+  EXPIRED
+}
+
+/// One row per conversation — `version` backs optimistic concurrency on every
+/// transition (same pattern as AvailabilityHold), so two concurrent messages
+/// for the same conversation can never both advance the journey from the
+/// same stale state. `context` is the Zod-validated JourneyContext
+/// (packages/domain) — ids only, never a duplicate copy of another step's
+/// own persisted row.
+model Journey {
+  id             String       @id @default(uuid())
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [id])
+  conversationId String       @unique
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  state          JourneyState @default(ENQUIRY_RECEIVED)
+  context        Json
+  version        Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  transitions     JourneyTransition[]
+  escalationCases EscalationCase[]
+  timelineEvents  CustomerTimelineEvent[]
+
+  @@index([tenantId])
+  @@index([tenantId, state])
+  @@map("journeys")
+}
+
+enum JourneyActor {
+  AI
+  SYSTEM
+  HUMAN
+}
+
+/// Append-only, one row per state change — never updated or deleted.
+model JourneyTransition {
+  id        String        @id @default(uuid())
+  tenantId  String
+  tenant    Tenant        @relation(fields: [tenantId], references: [id])
+  journeyId String
+  journey   Journey       @relation(fields: [journeyId], references: [id])
+  fromState JourneyState?
+  toState   JourneyState
+  actor     JourneyActor
+  reason    String
+  createdAt DateTime      @default(now())
+
+  @@index([tenantId])
+  @@index([journeyId])
+  @@map("journey_transitions")
+}
+
+enum EscalationTier {
+  T2
+  T3
+  T4
+}
+
+enum EscalationReason {
+  ELIGIBILITY_NEEDS_REVIEW
+  AVAILABILITY_PROVIDER_FAILURE
+  QUOTE_NEEDS_REVIEW
+  DOCUMENT_REJECTED_REPEATEDLY
+  PAYMENT_EXCEPTION
+  DAMAGE_OR_DISPUTE
+  CUSTOMER_COMPLAINT
+  MISSING_INFO_STALLED
+  AI_UNABLE_TO_PROCEED
+}
+
+enum EscalationStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+}
+
+enum EscalationResolution {
+  APPROVED
+  REJECTED
+}
+
+/// One human-escalation case per hand-off. `slaDueAt`/`slaBreached` back the
+/// worker SLA sweep (apps/worker/src/jobs/escalationSlaSweep.ts); a case is
+/// created inside the same transaction as the Journey's transition into
+/// ESCALATED (see escalationService.ts), so a case can never exist without
+/// its journey actually being in ESCALATED, and vice versa never silently.
+model EscalationCase {
+  id               String                @id @default(uuid())
+  tenantId         String
+  tenant           Tenant                @relation(fields: [tenantId], references: [id])
+  journeyId        String
+  journey          Journey               @relation(fields: [journeyId], references: [id])
+  tier             EscalationTier
+  reason           EscalationReason
+  status           EscalationStatus      @default(OPEN)
+  detail           String
+  assignedToUserId String?
+  assignedToUser   User?                 @relation(fields: [assignedToUserId], references: [id])
+  slaDueAt         DateTime
+  slaBreached      Boolean               @default(false)
+  resolution       EscalationResolution?
+  resolutionNote   String?
+  resolvedByUserId String?
+  resolvedAt       DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([journeyId])
+  @@map("escalation_cases")
+}
+
+/// CRM — internal adapter (MASTER-PLAN.md §5 Phase 5: "CRM adapter (internal
+/// default)"). One row per (tenantId, channel, customerRef), the same
+/// identity key `findOpenConversationForCustomer` already uses. Populated
+/// and kept current automatically by crmService.ts as a journey progresses
+/// — never hand-entered.
+model Customer {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id])
+  channel        Channel
+  customerRef    String
+  displayName    String?
+  lastVehicleId  String?
+  lastQuoteId    String?
+  bookingCount   Int      @default(0)
+  lastJourneyId  String?
+  lastActivityAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  timelineEvents CustomerTimelineEvent[]
+
+  @@unique([tenantId, channel, customerRef])
+  @@index([tenantId])
+  @@map("customers")
+}
+
+enum CustomerTimelineEventType {
+  JOURNEY_STARTED
+  VEHICLE_RESOLVED
+  QUOTE_ISSUED
+  ESCALATED
+  ESCALATION_RESOLVED
+}
+
+/// Append-only CRM activity feed shown on the admin dashboard's Customer
+/// detail screen. `summary` is deterministic/template-built, never AI text.
+model CustomerTimelineEvent {
+  id         String                    @id @default(uuid())
+  tenantId   String
+  tenant     Tenant                    @relation(fields: [tenantId], references: [id])
+  customerId String
+  customer   Customer                  @relation(fields: [customerId], references: [id])
+  journeyId  String?
+  journey    Journey?                  @relation(fields: [journeyId], references: [id])
+  type       CustomerTimelineEventType
+  summary    String
+  createdAt  DateTime                  @default(now())
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@map("customer_timeline_events")
 }

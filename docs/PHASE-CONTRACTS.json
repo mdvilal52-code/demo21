@@ -1,10 +1,10 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.5.0",
-  "updatedAt": "2026-09-20",
+  "version": "1.0.0",
+  "updatedAt": "2026-09-25",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
-  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 6-10 below are still the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping. Phase id 5 has now been reconciled too, but NOT to journey Step 5 (Eligibility, per MASTER-PLAN.md §4) — it was explicitly requested and built ahead of Eligibility as just the WhatsApp slice of the original phase-5 grouping (see docs/PHASE-5.md §0). Two pieces of the original plan are therefore still open and unnumbered: journey Step 5 (Eligibility) itself, and the rest of the original phase-5 grouping (documents, payments, CRM, fulfilment, Web-chat/Email channels) — both remain PENDING in spirit, without an id yet, until picked up.",
+  "phaseNumbering": "History: phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4. After id 4, this project's git history split into two independently-developed branches, each needing journey-step work that didn't fit any open original-10-phase id: one branch built a real Security Engine and continued the journey (Eligibility/Availability/Alternatives/Quote), appending those at ids 6 and 11-14 rather than renumbering; the other (this branch) built a Gemini-backed conversational reply engine on top of the official WhatsApp channel adapter. Both branches' phase-numbered docs (docs/PHASE-2.md, docs/PHASE-5-CHANNELS.md, docs/PHASE-6.md, docs/PHASE-11.md … docs/PHASE-14.md, docs/phases/PHASE-06.md, …) were written under those branches' own id schemes and were NOT renamed during the 2026-09-25 merge+renumber below — each phase's `phaseDoc` field is the authoritative pointer to its actual detail; the filename's own number is historical, not necessarily this document's current id for that phase. On 2026-09-25 the two branches were merged and, per explicit request, every phase below was renumbered into one clean sequential list (id order = dependency/build order) rather than the prior 'append at the next free integer' scheme — dependsOn was re-derived from the original graph, not fabricated as a flat chain: id 8 (Alternatives) still depends specifically on id 7 (Availability), not on id 6 (Eligibility), because that was true in the original graph regardless of id numbers. Any future work gets the next free sequential id.",
   "rules": {
     "protocol": "docs/PHASE-EXECUTION-PROTOCOL.md",
     "masterPlan": "docs/MASTER-PLAN.md",
@@ -124,72 +124,183 @@
     },
     {
       "id": 5,
-      "name": "WhatsApp Channel Adapter (Meta Cloud API)",
-      "status": "FROZEN",
-      "goal": "Let a real WhatsApp message reach the existing, frozen Steps 1-4 pipeline and get an automatic reply (including the Step 4 clarification question) without changing that pipeline's business logic. Explicitly requested and built ahead of journey Step 5 (Eligibility) and the rest of the original phase-5 grouping — see docs/PHASE-5.md §0 for the reconciliation note.",
+      "name": "Channels, Documents, Payments, CRM & Fulfilment",
+      "status": "IN_PROGRESS",
+      "goal": "Every external touchpoint behind a clean interface; full 19-step journey runnable.",
+      "progressNote": "First slice: a real WhatsApp (Meta Cloud API) inbound/outbound adapter with signature verification (docs/PHASE-5-CHANNELS.md), plus runFullEnquiryPipeline, a fixed hardcoded sequence that runs Steps 1-4 automatically for one inbound message. Id 11's Conversational AI Engine (Gemini) supplies this channel's reply text instead of the fixed deterministic template alone. Second slice (2026-09-25, undocumented in a dedicated phase doc — see commit history: ffb728a, a5451df, 0e7238f, 825b671, 45839e9, 99f8284): the real Event/Workflow Engine (packages/workflow: state machine + escalation policy) plus its application layer (apps/api/src/services/journeyService.ts) now wire Steps 1-4's webhook handlers and Steps 5-8's routes into actual persisted Journey/JourneyTransition rows — the 'not persisted multi-journey resumption' gap above is closed. A parallel Email adapter (Mailgun, packages/channels/src/email) mirrors WhatsApp end to end (inbound webhook, signature verification, outbound replies), and the CRM adapter (internal default, apps/api/src/services/crmService.ts — Customer + CustomerTimelineEvent, upserted automatically from journey/webhook activity) is done. A human-escalation path (EscalationCase, SMS paging via Twilio to the tier-mapped on-call role, apps/worker's SLA-breach sweep) covers MASTER-PLAN.md's 'AI escalates to a human' requirement for Steps 1-8. Web chat, documents, payments, delivery/return, invoice PDF and the follow-up scheduler remain PENDING — none of those have a real backend yet, so no UI was built for them either (see id 12's progressNote).",
       "deliverables": [
-        "apps/api/src/lib: whatsappSignature.ts (Meta's sha256= header over the existing generic HMAC verifier), whatsappWebhookPayload.ts (Zod schema + message extraction), whatsappClient.ts (WhatsAppClient/NotConfiguredWhatsAppClient/MetaCloudApiWhatsAppClient via ssrfSafeFetch + createWhatsAppClient factory)",
-        "apps/api/src/services: whatsappReply.ts (Step 4 result -> reply text), whatsappService.ts (handleInboundWhatsAppMessage: idempotency dedupe by Meta message id, then submitEnquiry -> extractDatesAndLocation -> determineVehicle -> checkMissingInfo -> reply)",
-        "apps/api/src/routes/webhooks/whatsapp.ts: GET verification + POST handling, raw-body signature verification scoped to this route only, rate-limit-exempt",
-        "apps/api: WHATSAPP_ACCESS_TOKEN/WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_VERIFY_TOKEN/WHATSAPP_APP_SECRET (all optional, NOT_CONFIGURED until all four are set); whatsappClient/whatsappStatus on AppContext",
-        "render.yaml, .env.example updated with the four new env vars",
-        "docs/PHASE-5.md"
+        "Gateway inbound model; WhatsApp (Meta Cloud API + signature verify) [DONE — docs/PHASE-5-CHANNELS.md], Email (inbound webhook + outbound, Mailgun) [DONE], Web chat (REST + SSE) [PENDING]; templates, rate limits, receipts; NOT_CONFIGURED per adapter",
+        "Event/Workflow Engine: persisted Journey/JourneyTransition state machine (packages/workflow) wired into Steps 1-8's real routes/webhooks [DONE]; human escalation (EscalationCase, tier-mapped SMS paging via Twilio, SLA-breach sweep) [DONE]",
+        "Document pipeline: presigned S3 uploads, MIME/size validation, AV-scan interface, extraction interface, checklist, T2 review queue [PENDING]",
+        "PaymentProvider interface + instructions + webhook reconciliation + refunds; NOT_CONFIGURED -> explicit manual path flagged in admin [PENDING]",
+        "CRM adapter (internal default) [DONE], delivery/return coordination (slots, assignment, checklists, photos), invoice PDF, follow-up scheduler [PENDING]"
       ],
       "acceptance": [
-        "a real inbound WhatsApp text message creates a conversation, runs Steps 1-4 for real, and produces an automatic reply — proven end to end against real local Postgres/Redis (app.inject, real HMAC signatures, real DB rows), not mocked at the boundary being tested",
-        "webhook signature verification (missing/wrong/tampered -> 401) and redelivered-message-id dedupe (single conversation, single reply) both proven",
-        "NOT_CONFIGURED reported (501) when WHATSAPP_APP_SECRET is unset, matching every other provider seam's convention",
-        "full Phase 1-4 regression re-run and green (no working functionality broken)",
-        "all gates pass: typecheck, lint, format, 340 unit + 69 integration + 48 security tests, 4 e2e, production build — see docs/PHASE-5.md §8"
+        "full journey 01-19 passes e2e with test doubles inside tests only",
+        "production wiring shows real provider status per adapter in admin Settings",
+        "webhook signature + replay tests [DONE for WhatsApp — docs/PHASE-5-CHANNELS.md §7-8]"
       ],
       "dependsOn": [4],
-      "phaseDoc": "docs/PHASE-5.md"
+      "phaseDoc": "docs/PHASE-5-CHANNELS.md"
     },
     {
       "id": 6,
-      "name": "Security Engine & Zero Trust",
-      "status": "PENDING",
-      "goal": "Zero-trust layering verified by tests (WAF -> AuthN -> AuthZ -> Tenant -> Sandbox -> Egress -> DB policy -> Encrypted data).",
+      "name": "Eligibility (journey Step 5 — ELIGIBILITY_CHECK)",
+      "status": "FROZEN",
+      "goal": "Given validated customer data, the vehicle/dates/location Steps 2-3 already resolved, and driver requirements, deterministically decide ELIGIBLE / INELIGIBLE / NEEDS_HUMAN_REVIEW against a tenant-configurable policy — MASTER-PLAN.md journey Step 5 (`ELIGIBILITY_CHECK`, \"SYS\" owner).",
       "deliverables": [
-        "Edge: Redis rate limiting + WAF rules (body size, schema, IP lists, bot signals)",
-        "AuthN: OIDC/OAuth2, <=15-min access tokens, rotating refresh, step-up/MFA for admin",
-        "AuthZ: RBAC + ABAC policy engine (tenant, ownership, journey state, tier) in one middleware and in services",
-        "Tenant isolation: RLS on every table, per-connection tenant context, cross-tenant negative tests",
-        "AI sandbox: tool permission matrix, egress allowlist, injection defences, output DLP",
-        "Data: TLS, field-level PII encryption, secrets management, key rotation runbook",
-        "Detection & response: anomaly rules, automatic restricted response, security event stream, T4 escalation",
-        "CI: Semgrep, dependency scan, gitleaks, Trivy image scan, ZAP baseline",
-        "docs/SECURITY-MODEL.md (STRIDE) + compromised-account kill-chain test"
+        "packages/domain/src/eligibility.ts: LicenseType; EligibilityRuleCategory/Outcome; EligibilityExceptionType/RiskLevel; driverInputSchema/eligibilityCustomerInputSchema (new request-boundary input — Steps 1-4 never collect age/license/passport/nationality); EligibilityPolicyRules/EligibilityPolicy (versioned, configurable); EligibilityException; PolicyConflictCode; EligibilityDecisionStatus/Result",
+        "packages/ai/src/step5: 7 deterministic EligibilityRule implementations (AGE/LICENSE/PASSPORT/NATIONALITY/VEHICLE/LOCATION/DRIVER_REQUIREMENT), policyValidator (fail-safe policy-conflict detection → NEEDS_HUMAN_REVIEW), exceptionResolver (LOW-risk auto-waives a rule, HIGH-risk always escalates to a human), reasonBuilder (deterministic, template-based, never AI-generated), EligibilityOrchestrator — zero AI/LLM calls anywhere in this step",
+        "packages/db: EligibilityPolicy (tenant-scoped, versioned, append-only)/EligibilityException/EligibilityDecision Prisma models + additive migration, eligibilityPolicyRepository/eligibilityExceptionRepository/eligibilityDecisionRepository, a default policy seeded for the demo tenant",
+        "packages/contracts/src/eligibility.ts: checkEligibilityParamsSchema / checkEligibilityBodySchema (`.strict()`) / checkEligibilityResponseSchema",
+        "apps/api: POST /v1/enquiries/:conversationId/eligibility (eligibilityService.ts + routes/v1/eligibility.ts) — every decision persisted + an audit event written in the same transaction",
+        "docs/PHASE-11.md"
       ],
       "acceptance": [
-        "kill-chain test proves each layer contains a compromised account",
-        "authz matrix tests",
-        "all scanners green with zero critical"
+        "every required test case passes: valid customer; underage; missing license; invalid license; nationality exception; VIP exception; policy conflict; tampered request; tenant isolation",
+        "full Phase 1-4 regression re-run and green (no working functionality broken)",
+        "every decision is auditable and no AI call is ever in the decision path",
+        "all gates pass: typecheck, lint, format, unit + integration + security tests, 4 e2e, production build — see docs/PHASE-11.md §8"
+      ],
+      "dependsOn": [4],
+      "phaseDoc": "docs/PHASE-11.md"
+    },
+    {
+      "id": 7,
+      "name": "Availability (journey Step 6 — AVAILABILITY_CHECK)",
+      "status": "FROZEN",
+      "goal": "Real, database-backed inventory availability: given a conversation's already-resolved Step 3 vehicle and Step 2 dates, authoritatively decide AVAILABLE/HELD/BOOKED/UNAVAILABLE/MAINTENANCE/UNKNOWN and place a TTL'd reservation lock — never a guess, never told to a customer unless the lock-protected claim itself confirms it.",
+      "deliverables": [
+        "packages/domain: InventoryStatus, HoldStatus, AvailabilityErrorCode, holdSchema, availabilityCheckResultSchema",
+        "packages/ai/step6: FleetProvider + FleetProviderError seam, ResilientFleetProvider (timeout/circuit-breaker/rate-limit), computeInventoryStatus + rangesOverlapWithBuffer (pure), AvailabilityProvider seam, AvailabilityCheckOrchestrator + validateAvailabilityRequest",
+        "packages/db: VehicleUnit model (real countable inventory) + AvailabilityHold model (capacity-based TTL'd/confirmed reservation lock, unique idempotencyKey, optimistic version) + AvailabilityCheck model (append-only history) + migration; vehicleUnitRepository, availabilityHoldRepository (pg_advisory_xact_lock via acquireVehicleLock, buffered+lazily-expiring countOverlappingHolds, optimistic updateHoldStatus, expireDueHolds sweep), availabilityCheckRepository",
+        "apps/api: DatabaseFleetProvider (default, real) / ExternalFleetApiProvider / NotConfiguredFleetProvider / CachedFleetProvider (Redis, external path only), PrismaAvailabilityProvider, ReservationLockService (placeHold pessimistic-locked + idempotent + self-validating; releaseHold/confirmHold optimistic + audited), shared evaluateInventoryStatus, POST /v1/enquiries/:conversationId/availability-check",
+        "apps/worker: startHoldExpirationSweep (plain interval, housekeeping only — correctness never depends on it)",
+        "docs/PHASE-12.md"
+      ],
+      "acceptance": [
+        "every required test case passes: concurrent booking (N units, N+1 concurrent requests); double booking; expired hold (lazy expiration, including a confirmHold-on-lapsed-hold regression); API timeout; provider failure; duplicate request (idempotency, incl. a concurrent-duplicate race); race condition (10-way, single unit); tenant isolation",
+        "full Phase 1-4 regression re-run and green (no working functionality broken)",
+        "all gates pass: typecheck, lint, format, unit + integration + security tests, 4 e2e, production build — see docs/PHASE-12.md §5"
+      ],
+      "dependsOn": [4],
+      "phaseDoc": "docs/PHASE-12.md"
+    },
+    {
+      "id": 8,
+      "name": "Alternatives (journey Step 7 — OFFERING_ALTERNATIVES)",
+      "status": "FROZEN",
+      "goal": "Given a conversation's already-resolved Step 3 vehicle and Step 2 dates, deterministically rank real, currently-available alternative vehicles — MASTER-PLAN.md journey Step 7 (`OFFERING_ALTERNATIVES`, \"AI→SYS\" owner: AI may explain, never decide).",
+      "deliverables": [
+        "packages/domain/src/alternatives.ts: AlternativeRecommendationStatus, AlternativesErrorCode, alternativeCandidateSchema, recommendAlternativesResultSchema",
+        "packages/ai/src/step7: rankAlternatives (pure, deterministic six-stage ladder: availability filter -> customer-constraint filter -> category/luxury-tier/price/preference scoring), buildAlternativeReason (deterministic, template-based, never AI-generated), AlternativeRecommendationOrchestrator — zero AI/LLM calls anywhere in this step, reuses Step 3's VehicleCatalogProvider (candidate generation) and Step 6's AvailabilityProvider (live per-candidate availability preview, never placeHold)",
+        "packages/ai/src/step3/vehicleCatalogProvider.ts: findAlternativesWithFallback extracted and shared with vehicleCatalogService.ts",
+        "packages/db: AlternativeRecommendation model (append-only) + migration, alternativeRecommendationRepository (create + findLatest, id-tiebreak for deterministic reads)",
+        "packages/contracts/src/alternatives.ts: recommendAlternativesParamsSchema / recommendAlternativesResponseSchema",
+        "apps/api: alternativesService.ts + routes/v1/alternatives.ts, POST /v1/enquiries/:conversationId/alternatives — never places a hold (human decision remains available)",
+        "docs/PHASE-13.md"
+      ],
+      "acceptance": [
+        "every required test case passes: no alternative; one alternative; many alternatives; same-category alternatives; price conflict; availability conflict; prompt injection; biased recommendation test",
+        "full regression re-run and green (no working functionality broken)",
+        "never recommends inventory the live AvailabilityProvider check did not confirm AVAILABLE at ranking time; price ranking proven free of upsell bias",
+        "all gates pass: typecheck, lint, format, 541 unit + 205 integration + 79 security tests, 4 e2e, production build — see docs/PHASE-13.md §8"
+      ],
+      "dependsOn": [7],
+      "phaseDoc": "docs/PHASE-13.md"
+    },
+    {
+      "id": 9,
+      "name": "Quote / Pricing Engine (journey Step 8 — QUOTE_ISSUED)",
+      "status": "FROZEN",
+      "goal": "Given a conversation's already-resolved Step 3 vehicle and Step 2 dates, deterministically compute a complete, immutable, versioned, tamper-evident price quote — MASTER-PLAN.md journey Step 8 (`QUOTE_ISSUED`, \"SYS\" owner: base rate, duration tiers, extras, deposit, VAT 5%, quote expiry).",
+      "deliverables": [
+        "packages/domain/src/money.ts: Money (integer-minor-unit value object — fils, never floating-point arithmetic for financial totals), moneySchema (.nonnegative()), sumMoney",
+        "packages/domain/src/quote.ts: InsuranceTier, quoteSelectionsSchema (`.strict()`), QuoteLineItemCategory, quoteLineItemSchema/quoteTaxLineSchema/quoteFeeLineSchema/quoteDiscountLineSchema, QuoteStatus, QuoteErrorCode, quoteSnapshotSchema",
+        "packages/ai/src/step8: PricingRules + DEFAULT_PRICING_RULES (base rate/weekly-tier blending, extras, delivery, insurance, VAT, service fee, discount codes, default deposit, validity window, human-review threshold), calculatePricing (pure, deterministic, zero AI/LLM calls), detectPricingAnomalies (flags PENDING_REVIEW for a large discount, a seam-only manual override, or a zero total), QuoteValidator (HMAC-SHA256 tamper detection over the quote's own priced content, then expiry)",
+        "packages/db: QuoteStatus enum + Quote model (append-only, @@unique([tenantId, quoteId, version])) + relations + additive migrations, quoteRepository (acquireConversationQuoteLock via pg_advisory_xact_lock, createQuote, findLatestQuoteForConversation, toDomainQuoteSnapshot)",
+        "packages/contracts/src/quote.ts: request/response schemas for both endpoints",
+        "apps/api: quoteService.ts (createQuote re-validates Steps 2-3 staleness, tamper-aware duplicate-quote reuse, audited) + routes/v1/quote.ts, POST + GET /v1/enquiries/:conversationId/quote — customer/driver data never accepted as a money-bearing input",
+        "docs/PHASE-14.md"
+      ],
+      "acceptance": [
+        "every required test case passes: 4 days; fees; tax; discount; rounding; zero/negative values; currency mismatch; expired quote; duplicate quote; concurrent quote generation",
+        "full regression re-run and green (no working functionality broken)",
+        "security: price manipulation prevention, authorization, audit trail, and tamper detection each independently proven; human review: a large discount produces PENDING_REVIEW + reviewReasons",
+        "all gates pass: typecheck, lint, format, 599 unit + 232 integration + 91 security tests, 4 e2e, production build — see docs/PHASE-14.md §8"
+      ],
+      "dependsOn": [4],
+      "phaseDoc": "docs/PHASE-14.md"
+    },
+    {
+      "id": 10,
+      "name": "Security Engine & Zero Trust",
+      "status": "FROZEN",
+      "goal": "Zero-trust layering verified by tests (WAF -> AuthN -> AuthZ -> Tenant -> Sandbox -> Egress -> DB policy -> Encrypted data).",
+      "deliverables": [
+        "Edge: Redis-backed rate limiting (shared across instances) + a stricter dedicated limit on /v1/auth/*; known-scanner-user-agent WAF denylist",
+        "AuthN: real, working local email+password+TOTP-MFA staff auth (argon2id, <=15-min HS256 access tokens, rotating opaque refresh tokens with reuse detection incl. the concurrent-refresh race); IdentityProvider OIDC seam + NotConfiguredIdentityProvider — see docs/SECURITY-MODEL.md §3",
+        "AuthZ: RBAC role->permission matrix + ABAC tenant-match policy engine (authorize()), enforced as Fastify preHandlers (authenticate, requirePermission) on every admin route",
+        "Tenant isolation: Postgres RLS (ENABLE+FORCE ROW LEVEL SECURITY) on every tenant-scoped table, keyed on a per-transaction app.tenant_id session setting (withTenantContext()); real least-privilege ai_concierge_api/ai_concierge_worker DB roles (no DELETE/DDL/BYPASSRLS); cross-tenant negative tests proven against the real scoped role connection",
+        "AI sandbox: tool permission matrix seam (packages/ai/src/sandbox); egress allowlist unchanged from Phase 1 (ssrfSafeFetch, now also used by the Gemini adapter — id 11); injection defences unchanged from Phase 1-2; output DLP tripwire on outbound text — id 11's Gemini-generated replies are the first real free-text AI output this tripwire actually screens",
+        "Data: TLS at the edge; AES-256-GCM field-level encryption applied to the MFA TOTP seed; docs/SECURITY-MODEL.md's key rotation runbook",
+        "Detection & response: SecurityEvent append-only stream + five anomaly/detection rules with automatic response (session revocation via Redis family-revocation set) and manual response (POST /v1/users/:id/lock|unlock); GET /v1/security-events as the current T4 escalation surface",
+        "CI: pnpm audit + gitleaks + Semgrep; Trivy image scan and ZAP baseline explicitly deferred to the Infrastructure phase (no Dockerfile/deployed ephemeral environment exist yet)",
+        "docs/SECURITY-MODEL.md (full STRIDE table, zero-trust layer mapping, RBAC matrix, key rotation runbook) + apps/api/src/killChain.security.test.ts"
+      ],
+      "acceptance": [
+        "kill-chain test proves each layer contains a compromised account — AuthZ containment, tenant-isolation containment (RLS), and token-theft containment",
+        "authz matrix tests — full role x permission matrix incl. the 'ADMIN is always a superset' invariant",
+        "all scanners green with zero critical — pnpm audit/gitleaks/Semgrep green; Trivy/ZAP deferred with a documented reason, not silently skipped"
+      ],
+      "dependsOn": [4],
+      "phaseDoc": "docs/PHASE-6.md"
+    },
+    {
+      "id": 11,
+      "name": "Conversational AI Engine (Gemini)",
+      "status": "FROZEN",
+      "goal": "Give the WhatsApp channel a real, human-like conversational layer without weakening any existing guarantee: Steps 1-4 stay 100% deterministic and remain the only source of booking facts; a Gemini-backed AIProvider only phrases the reply around whatever those steps already verified, strictly grounded, with a deterministic-template fallback on any failure. Also fixed the conversation-memory gap the WhatsApp channel had (every inbound message starting an unrelated fresh conversation) — since merged with id 5's own independently-built, more complete conversation-continuity work (findOpenConversationForCustomer/continueEnquiry, short-reply and booking-continuation detection).",
+      "deliverables": [
+        "packages/ai: AIProvider interface evolved to a real structured-generation + health-check contract (systemInstruction/prompt/responseSchema in, unknown JSON + usage + modelId out — callers must Zod-validate, never trust AI output); ResilientAIProvider decorator (timeout + circuit breaker + rate limit), same pattern as Step 2's ResilientLocationProvider",
+        "apps/api/src/lib/geminiProvider.ts: GeminiProvider (direct REST call via ssrfSafeFetch against a single hardcoded host, API key sent via header never URL/logs) + createAIProvider factory (GEMINI_API_KEY alone gates CONFIGURED/NOT_CONFIGURED; GEMINI_MODEL_ID/TEMPERATURE/MAX_OUTPUT_TOKENS/TIMEOUT_MS configurable, safe defaults)",
+        "apps/api/src/services/conversationalReplyService.ts: generateConversationalReply — grounded strictly in Step 4's verified result and recent turns, schema-validated, a second code-level grounding check (rejects invented prices/availability/booking-confirmation language even from well-formed JSON), falls back to the deterministic template (buildWhatsAppReplyText, now in @ai-concierge/channels) on NOT_CONFIGURED / schema-invalid / grounding-violation / provider-error / open-circuit",
+        "apps/api/src/routes/webhooks/whatsapp.ts wired to the new reply service (on top of id 5's runFullEnquiryPipeline + claim-based idempotency); apps/api/src/server.ts boot-time Gemini health check so a bad model id/unreachable API surfaces in logs immediately instead of silently degrading",
+        "New AppError code AI_RESPONSE_INVALID (502) for a provider response that's empty, safety-blocked, malformed, or fails validation",
+        ".env.example / render.yaml updated with GEMINI_* vars; docs/MASTER-PLAN.md §9 decision #8 updated (Gemini adapter behind the existing AIProvider interface; Anthropic/OpenAI remain unbuilt future implementations of the same interface)",
+        "docs/phases/PHASE-06.md; merge reconciliation with id 5/id 10's independently-built conversation-continuity and Security Engine work (2026-09-25)"
+      ],
+      "acceptance": [
+        "every required scenario passes: provider NOT_CONFIGURED falls back to the exact pre-existing deterministic reply; a well-formed grounded AI reply is used; a schema-invalid AI response falls back; a reply inventing a price or claiming availability/booking-confirmation is rejected by the grounding check and falls back even though the JSON was well-formed; a prompt-injection attempt in a customer turn is sanitized before it reaches the model prompt and cannot force a fabricated price",
+        "full regression re-run and green (no working functionality broken) — verified against real Postgres/Redis in this sandbox (no Docker daemon here, same documented limitation as every prior phase)",
+        "all gates pass: typecheck, lint, format, unit + integration + security tests, 4 e2e, production build, /code-review findings addressed — see docs/phases/PHASE-06.md §8"
       ],
       "dependsOn": [5],
       "phaseDoc": "docs/phases/PHASE-06.md"
     },
     {
-      "id": 7,
+      "id": 12,
       "name": "Admin Dashboard (Web)",
-      "status": "PENDING",
+      "status": "IN_PROGRESS",
       "goal": "Dashboard wireframe, pixel-faithful to the design system.",
+      "progressNote": "Scoped deliberately to Steps 1-8 (this system's real, tested backend) per explicit request: a working staff dashboard now exists (apps/web/src/app/dashboard) with cookie-based auth (httpOnly access+refresh tokens, silent keep-alive refresh, `packages/db/src/bootstrapAdmin.ts` for the first account), a shared TopBar+nav shell, and five real screens — Escalation Queue (list/filter/assign/resolve, wired to the real EscalationCase workflow), Journeys (list + detail with full transition timeline), Customers (CRM list + detail with timeline), Fleet (read-only catalog), and Settings (live per-provider CONFIGURED/NOT_CONFIGURED status, never fake). All screens are Server Components reading real API data server-side; mutations are Server Actions. Deliberately NOT built: Bookings, Document review, Pricing, Payments/Invoices and Audit log screens — none of those have real backend functionality yet (id 5's Documents/Payments/delivery remain PENDING), so building UI for them would be exactly the fake-functionality CLAUDE.md forbids. Also not built: the Home screen's live JourneyStepper/StatTiles (no aggregate-count endpoint exists yet — Home currently links to each section instead of showing fabricated numbers), SSE real-time updates, per-role nav hiding (every staff role already has the same journey/escalation/customer read+act permissions — see packages/domain/src/auth.ts's own doc on this), and Playwright e2e/visual-regression coverage. Verified by hand against a real Postgres/Redis dev stack and a real browser (login -> every screen -> full escalation assign/resolve cycle -> sign-out -> auth-gate redirect), not just typecheck/lint/unit.",
       "deliverables": [
-        "Home: TopBar, JourneyStepper (live counts), StatTiles (Active Bookings, AI Automation %, Human Escalations, Revenue AED)",
-        "Bookings, Journeys (live state + timeline), Escalation queue (tiers, SLA), Document review, Customers, Fleet & availability, Pricing, Payments/Invoices, Audit log, Settings (provider status)",
-        "Real-time via SSE, role-aware navigation",
-        "Playwright e2e + visual regression against reference"
+        "Home: TopBar, nav [DONE]; JourneyStepper (live counts), StatTiles (Active Bookings, AI Automation %, Human Escalations, Revenue AED) [PENDING — no aggregate-count endpoint yet]",
+        "Journeys (live state + timeline) [DONE], Escalation queue (tiers, SLA, assign/resolve) [DONE], Customers [DONE], Fleet (read-only) [DONE], Settings (provider status) [DONE]",
+        "Bookings, Document review, Fleet availability editing, Pricing, Payments/Invoices, Audit log [PENDING — no real backend yet]",
+        "Real-time via SSE [PENDING], role-aware navigation [N/A — every staff role shares the same dashboard permissions by design]",
+        "Playwright e2e + visual regression against reference [PENDING]"
       ],
       "acceptance": [
-        "screens match DESIGN-SYSTEM.md contracts",
-        "visual regression green against docs/design/reference",
-        "role-aware nav enforced"
+        "screens match DESIGN-SYSTEM.md contracts — done for the 5 screens built (Emerald&Copper tokens, GlassCard/CopperCard/PillButton/StatusChip)",
+        "visual regression green against docs/design/reference [PENDING — no Playwright visual-regression suite yet]",
+        "role-aware nav enforced [N/A — see progressNote]"
       ],
-      "dependsOn": [6],
+      "dependsOn": [10],
       "phaseDoc": "docs/phases/PHASE-07.md"
     },
     {
-      "id": 8,
+      "id": 13,
       "name": "Customer Mobile App (PWA)",
       "status": "PENDING",
       "goal": "Mobile wireframe + reference image, pixel-faithful.",
@@ -204,11 +315,11 @@
         "installable PWA + offline shell",
         "visual regression green"
       ],
-      "dependsOn": [7],
+      "dependsOn": [12],
       "phaseDoc": "docs/phases/PHASE-08.md"
     },
     {
-      "id": 9,
+      "id": 14,
       "name": "Observability, AI Evaluation & Automatic QA",
       "status": "PENDING",
       "goal": "Measurable, self-checking system; Automatic QA PASS/FAIL gate.",
@@ -224,11 +335,11 @@
         "Automatic QA gate blocks release on FAIL",
         "eval + security regression thresholds enforced in CI"
       ],
-      "dependsOn": [8],
+      "dependsOn": [13],
       "phaseDoc": "docs/phases/PHASE-09.md"
     },
     {
-      "id": 10,
+      "id": 15,
       "name": "Infrastructure, CI/CD & Release",
       "status": "PENDING",
       "goal": "Production-ready delivery.",
@@ -243,7 +354,7 @@
         "prod deploy gated by all checks + manual approval",
         "DR drill documented and rehearsed"
       ],
-      "dependsOn": [9],
+      "dependsOn": [14],
       "phaseDoc": "docs/phases/PHASE-10.md"
     }
   ]

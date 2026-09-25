@@ -1,0 +1,2 @@
+-- AlterEnum
+ALTER TYPE "SecurityEventType" ADD VALUE 'DLP_OUTBOUND_PII_DETECTED';

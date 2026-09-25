@@ -17,6 +17,16 @@ export const INTENT_KEYWORDS: Record<Exclude<IntentTypeValue, 'UNKNOWN'>, string
     'i need a car',
     'i want a car',
   ],
+  [IntentType.CANCEL_REQUEST]: [
+    'cancel',
+    'never mind',
+    'nevermind',
+    'forget it',
+    "don't want it anymore",
+    'do not want it anymore',
+    'no longer need',
+    'no longer want',
+  ],
   [IntentType.AVAILABILITY_REQUEST]: [
     'available',
     'availability',

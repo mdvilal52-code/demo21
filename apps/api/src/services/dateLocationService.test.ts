@@ -2,13 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError } from '@ai-concierge/domain';
 
 const mocks = vi.hoisted(() => ({
-  findLatestMessageForConversation: vi.fn(),
+  findMessagesForConversation: vi.fn(),
   createDateLocationExtraction: vi.fn(),
   auditRecord: vi.fn(),
 }));
 
 vi.mock('@ai-concierge/db', () => ({
-  findLatestMessageForConversation: mocks.findLatestMessageForConversation,
+  findMessagesForConversation: mocks.findMessagesForConversation,
   createDateLocationExtraction: mocks.createDateLocationExtraction,
   PrismaAuditWriter: class {
     record = mocks.auditRecord;
@@ -47,7 +47,7 @@ describe('extractDatesAndLocation', () => {
   });
 
   it('throws NOT_FOUND when the conversation has no message', async () => {
-    mocks.findLatestMessageForConversation.mockResolvedValue(null);
+    mocks.findMessagesForConversation.mockResolvedValue([]);
     await expect(
       extractDatesAndLocation(makeDeps(), {
         tenantId: TENANT_ID,
@@ -58,10 +58,9 @@ describe('extractDatesAndLocation', () => {
   });
 
   it('runs the orchestrator on the latest message content and persists the result', async () => {
-    mocks.findLatestMessageForConversation.mockResolvedValue({
-      id: 'msg-1',
-      content: 'pickup 15 Oct',
-    });
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', content: 'pickup 15 Oct' },
+    ]);
     const deps = makeDeps();
 
     const result = await extractDatesAndLocation(deps, {
@@ -83,5 +82,28 @@ describe('extractDatesAndLocation', () => {
     expect(result.conversationId).toBe('conv-1');
     expect(result.messageId).toBe('msg-1');
     expect(result.extraction).toEqual(fakeExtraction);
+  });
+
+  it('extracts from every message in the conversation, joined oldest first, but persists against the latest message', async () => {
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', content: 'I want a Lamborghini Urus' },
+      { id: 'msg-2', content: '15 to 19 Oct' },
+    ]);
+    const deps = makeDeps();
+
+    const result = await extractDatesAndLocation(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      requestId: 'req-1',
+    });
+
+    expect(
+      (deps as { orchestrator: { extract: ReturnType<typeof vi.fn> } }).orchestrator.extract,
+    ).toHaveBeenCalledWith('I want a Lamborghini Urus\n15 to 19 Oct');
+    expect(mocks.createDateLocationExtraction).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ tenantId: TENANT_ID, messageId: 'msg-2' }),
+    );
+    expect(result.messageId).toBe('msg-2');
   });
 });

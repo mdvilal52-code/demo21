@@ -13,6 +13,8 @@ export const ErrorCode = {
   PAYLOAD_TOO_LARGE: 'PAYLOAD_TOO_LARGE',
   UPSTREAM_UNAVAILABLE: 'UPSTREAM_UNAVAILABLE',
   NOT_CONFIGURED: 'NOT_CONFIGURED',
+  /** An AI provider responded, but its output was empty, safety-blocked, malformed, or failed grounding/schema validation — never trusted past this point. */
+  AI_RESPONSE_INVALID: 'AI_RESPONSE_INVALID',
   INTERNAL: 'INTERNAL',
 } as const;
 
@@ -28,6 +30,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   PAYLOAD_TOO_LARGE: 413,
   UPSTREAM_UNAVAILABLE: 502,
   NOT_CONFIGURED: 501,
+  AI_RESPONSE_INVALID: 502,
   INTERNAL: 500,
 };
 
