@@ -34,6 +34,7 @@ export interface AppContext {
   pricingRules: PricingRules;
   quoteValidator: QuoteValidator;
   whatsappProvider: WhatsAppProvider;
+  whatsappProviderStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
   emailProvider: EmailProvider;
   emailProviderStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
   notificationProvider: NotificationProvider;

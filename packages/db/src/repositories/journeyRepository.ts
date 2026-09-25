@@ -78,6 +78,24 @@ export async function findJourneyById(
   return row ? toDomainJourney(row) : null;
 }
 
+export interface ListJourneysParams {
+  tenantId: TenantId;
+  state?: JourneyStateValue;
+  limit: number;
+  offset: number;
+}
+
+/** The admin dashboard's Journeys screen list — most-recently-updated first, so an ops agent sees active conversations at the top. */
+export async function listJourneys(db: Executor, params: ListJourneysParams): Promise<Journey[]> {
+  const rows = await db.journey.findMany({
+    where: { tenantId: params.tenantId, ...(params.state ? { state: params.state } : {}) },
+    orderBy: { updatedAt: 'desc' },
+    take: params.limit,
+    skip: params.offset,
+  });
+  return rows.map(toDomainJourney);
+}
+
 export interface CreateJourneyParams {
   tenantId: TenantId;
   conversationId: string;

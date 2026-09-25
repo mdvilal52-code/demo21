@@ -126,6 +126,7 @@ export async function buildTestApp(
     pricingRules: ctxOverrides.pricingRules ?? new PricingRules(),
     quoteValidator: new QuoteValidator(config.WEBHOOK_SIGNING_SECRET),
     whatsappProvider: ctxOverrides.whatsappProvider ?? new NotConfiguredWhatsAppProvider(),
+    whatsappProviderStatus: ctxOverrides.whatsappProvider ? 'CONFIGURED' : 'NOT_CONFIGURED',
     emailProvider: ctxOverrides.emailProvider ?? new NotConfiguredEmailProvider(),
     emailProviderStatus: ctxOverrides.emailProvider ? 'CONFIGURED' : 'NOT_CONFIGURED',
     notificationProvider:

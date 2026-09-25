@@ -13,3 +13,4 @@ export * from './alternatives.js';
 export * from './quote.js';
 export * from './journey.js';
 export * from './email.js';
+export * from './admin.js';

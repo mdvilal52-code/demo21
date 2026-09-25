@@ -53,14 +53,19 @@ async function main(): Promise<void> {
   });
   const missingInfoOrchestrator = new MissingInfoOrchestrator();
   const eligibilityOrchestrator = new EligibilityOrchestrator();
-  const whatsappProvider =
-    config.WHATSAPP_ACCESS_TOKEN && config.WHATSAPP_PHONE_NUMBER_ID
-      ? new MetaWhatsAppProvider({
-          accessToken: config.WHATSAPP_ACCESS_TOKEN,
-          phoneNumberId: config.WHATSAPP_PHONE_NUMBER_ID,
-          apiVersion: config.WHATSAPP_API_VERSION,
-        })
-      : new NotConfiguredWhatsAppProvider();
+  const whatsappConfigured = Boolean(
+    config.WHATSAPP_ACCESS_TOKEN && config.WHATSAPP_PHONE_NUMBER_ID,
+  );
+  const whatsappProvider = whatsappConfigured
+    ? new MetaWhatsAppProvider({
+        accessToken: config.WHATSAPP_ACCESS_TOKEN!,
+        phoneNumberId: config.WHATSAPP_PHONE_NUMBER_ID!,
+        apiVersion: config.WHATSAPP_API_VERSION,
+      })
+    : new NotConfiguredWhatsAppProvider();
+  const whatsappProviderStatus: 'CONFIGURED' | 'NOT_CONFIGURED' = whatsappConfigured
+    ? 'CONFIGURED'
+    : 'NOT_CONFIGURED';
   const { provider: emailProvider, status: emailProviderStatus } = createEmailProvider(config);
   const { provider: notificationProvider, status: notificationProviderStatus } =
     createNotificationProvider(config);
@@ -110,6 +115,7 @@ async function main(): Promise<void> {
     pricingRules,
     quoteValidator,
     whatsappProvider,
+    whatsappProviderStatus,
     emailProvider,
     emailProviderStatus,
     notificationProvider,
