@@ -8,7 +8,7 @@ import {
   PrismaAuditWriter,
   type Channel,
 } from '@ai-concierge/db';
-import { AppError } from '@ai-concierge/domain';
+import { AppError, CustomerTimelineEventType } from '@ai-concierge/domain';
 import {
   whatsappInboundAckResponseSchema,
   whatsappVerifyQuerySchema,
@@ -26,6 +26,7 @@ import {
   type FullEnquiryPipelineResult,
 } from '../../services/enquiryPipelineService.js';
 import { syncJourneyAfterMissingInfo } from '../../services/journeyService.js';
+import { syncCustomerFromJourney } from '../../services/crmService.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -130,7 +131,7 @@ async function processInboundMessage(
     // for a failure that has nothing to do with whether the customer's
     // message was actually handled correctly.
     try {
-      await syncJourneyAfterMissingInfo(
+      const journey = await syncJourneyAfterMissingInfo(
         { prisma: ctx.prisma, notificationProvider: ctx.notificationProvider },
         {
           tenantId: ctx.config.DEFAULT_TENANT_ID,
@@ -141,8 +142,21 @@ async function processInboundMessage(
           requestId,
         },
       );
+      await syncCustomerFromJourney(
+        { prisma: ctx.prisma },
+        {
+          tenantId: ctx.config.DEFAULT_TENANT_ID,
+          conversationId: pipeline.enquiry.conversationId,
+          journeyId: journey.id,
+          eventType: CustomerTimelineEventType.JOURNEY_STARTED,
+          eventSummary: `Journey started on WhatsApp (${pipeline.missingInfo.missingInfo.status})`,
+          vehicleId: pipeline.vehicle.determination.resolvedVehicle?.id ?? null,
+          quoteId: null,
+          bookingCompleted: false,
+        },
+      );
     } catch (error) {
-      ctx.logger.error({ err: error }, 'journey sync failed after WhatsApp pipeline');
+      ctx.logger.error({ err: error }, 'journey/CRM sync failed after WhatsApp pipeline');
     }
 
     const conversationMessages = await findMessagesForConversation(

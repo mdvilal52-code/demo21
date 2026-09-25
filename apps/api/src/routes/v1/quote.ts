@@ -5,9 +5,12 @@ import {
   getQuoteParamsSchema,
   getQuoteResponseSchema,
 } from '@ai-concierge/contracts';
+import { findJourneyByConversationId } from '@ai-concierge/db';
+import { CustomerTimelineEventType, QuoteStatus } from '@ai-concierge/domain';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { createQuote, getQuote } from '../../services/quoteService.js';
 import { recordQuoteOutcome } from '../../services/journeyService.js';
+import { syncCustomerFromJourney } from '../../services/crmService.js';
 
 /**
  * Step 8 — Quote. Input is a Phase 1-3 conversation (already validated,
@@ -52,8 +55,29 @@ export const quoteRoutes: FastifyPluginAsyncZod = async (app) => {
             requestId: request.id,
           },
         );
+
+        const journey = await findJourneyByConversationId(
+          app.ctx.prisma,
+          app.ctx.config.DEFAULT_TENANT_ID,
+          request.params.conversationId,
+        );
+        if (journey && response.quote.status === QuoteStatus.ISSUED) {
+          await syncCustomerFromJourney(
+            { prisma: app.ctx.prisma },
+            {
+              tenantId: app.ctx.config.DEFAULT_TENANT_ID,
+              conversationId: request.params.conversationId,
+              journeyId: journey.id,
+              eventType: CustomerTimelineEventType.QUOTE_ISSUED,
+              eventSummary: `Quote issued: ${response.quote.total.minorUnits / 100} ${response.quote.currency}`,
+              vehicleId: journey.context.resolvedVehicleId,
+              quoteId: response.quote.quoteId,
+              bookingCompleted: true,
+            },
+          );
+        }
       } catch (error) {
-        app.log.error({ err: error }, 'journey sync failed after quote creation');
+        app.log.error({ err: error }, 'journey/CRM sync failed after quote creation');
       }
 
       reply.status(201).send(response);
