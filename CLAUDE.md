@@ -31,6 +31,7 @@ This is a **production system** built phase by phase. Do not improvise outside t
 | `docs/DESIGN-SYSTEM.md`            | emerald & copper tokens, components, screen contracts          |
 | `docs/phases/PHASE-TEMPLATE.md`    | copy to `PHASE-NN.md` when running a phase                     |
 | `docs/design/reference/`           | reference images the UI must match                             |
+| `docs/PILOT-READINESS-REPORT.md`   | point-in-time audit of phases 1-8 vs. the real code (what's actually built vs. only planned); re-verify before trusting, don't assume it still matches after further work |
 
 ## Workflow
 
