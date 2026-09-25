@@ -23,6 +23,13 @@ const TRANSITIONS: Record<JourneyStateValue, readonly JourneyStateValue[]> = {
   [JourneyState.EXTRACTING_REQUIREMENTS]: [JourneyState.VEHICLE_SELECTION, JourneyState.CANCELLED],
   [JourneyState.VEHICLE_SELECTION]: [JourneyState.COLLECTING_MISSING_INFO, JourneyState.CANCELLED],
   [JourneyState.COLLECTING_MISSING_INFO]: [
+    // Self-loop: MASTER-PLAN.md §4 Step 4 — "loop until complete or
+    // timeout". Every subsequent customer reply that still leaves a
+    // required field missing re-asks rather than transitions; the loop
+    // is a real, logged event (a new JourneyTransition row each time,
+    // driving the stall-escalation attempt counter — see
+    // decideMissingInfoEscalation), never silently dropped.
+    JourneyState.COLLECTING_MISSING_INFO,
     JourneyState.ELIGIBILITY_CHECK,
     JourneyState.ESCALATED,
     JourneyState.EXPIRED,

@@ -33,6 +33,23 @@ describe('state machine — the happy path (Steps 1-8)', () => {
   });
 });
 
+describe('state machine — the missing-info loop', () => {
+  it('allows COLLECTING_MISSING_INFO to loop to itself (another incomplete reply)', () => {
+    expect(
+      canTransition(JourneyState.COLLECTING_MISSING_INFO, JourneyState.COLLECTING_MISSING_INFO),
+    ).toBe(true);
+  });
+
+  it('no other state allows looping to itself', () => {
+    for (const state of Object.values(JourneyState)) {
+      if (state === JourneyState.COLLECTING_MISSING_INFO || state === JourneyState.ESCALATED) {
+        continue; // COLLECTING_MISSING_INFO's loop is asserted above; ESCALATED's non-self-loop is asserted separately below.
+      }
+      expect(canTransition(state, state)).toBe(false);
+    }
+  });
+});
+
 describe('state machine — illegal transitions', () => {
   it('rejects skipping a step (Enquiry straight to Quote)', () => {
     expect(canTransition(JourneyState.ENQUIRY_RECEIVED, JourneyState.QUOTE_ISSUED)).toBe(false);

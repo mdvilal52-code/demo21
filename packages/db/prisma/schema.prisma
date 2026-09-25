@@ -74,6 +74,9 @@ model User {
   tenantId            String
   tenant              Tenant     @relation(fields: [tenantId], references: [id])
   email               String
+  /// E.164 phone number for staff SMS escalation alerts (notificationProvider.ts) — optional;
+  /// a worker with none set is simply skipped when paging a tier, never a fake send.
+  phone               String?
   passwordHash        String
   role                UserRole
   status              UserStatus @default(ACTIVE)

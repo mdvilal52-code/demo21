@@ -81,6 +81,24 @@ export const apiEnvSchema = baseEnvSchema.extend({
   GEMINI_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.6),
   GEMINI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(512),
   GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+
+  // Twilio — staff SMS notification only (EscalationCase alerts), never a
+  // customer-facing channel. All optional; unset means NOT_CONFIGURED, same
+  // convention as every other provider above (see lib/notificationProvider.ts).
+  TWILIO_ACCOUNT_SID: z.string().trim().min(1).optional(),
+  TWILIO_AUTH_TOKEN: z.string().trim().min(1).optional(),
+  TWILIO_FROM_NUMBER: z.string().trim().min(1).optional(),
+
+  // Mailgun — the Email channel (customer-facing, mirrors WhatsApp: real
+  // inbound webhook with signature verification + real outbound send). All
+  // optional; unset means NOT_CONFIGURED (see packages/channels/src/email).
+  MAILGUN_API_KEY: z.string().trim().min(1).optional(),
+  MAILGUN_DOMAIN: z.string().trim().min(1).optional(),
+  // The signing key Mailgun's dashboard shows under Sending > Webhooks —
+  // verifies the timestamp/token/signature triple on every inbound webhook,
+  // the same role WHATSAPP_APP_SECRET plays for Meta's X-Hub-Signature-256.
+  MAILGUN_WEBHOOK_SIGNING_KEY: z.string().trim().min(1).optional(),
+  MAILGUN_FROM_ADDRESS: z.string().trim().email().optional(),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
