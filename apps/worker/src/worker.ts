@@ -8,6 +8,7 @@ import {
   createLogger,
 } from '@ai-concierge/observability';
 import { loadWorkerEnv } from './env.js';
+import { startHoldExpirationSweep } from './jobs/holdExpirationSweep.js';
 import { processPostEnquiryJob } from './processors/postEnquiryProcessor.js';
 
 async function main(): Promise<void> {
@@ -40,10 +41,17 @@ async function main(): Promise<void> {
   worker.on('completed', (job) => logger.info({ jobId: job.id }, 'job completed'));
   worker.on('failed', (job, error) => logger.error({ jobId: job?.id, err: error }, 'job failed'));
 
+  const stopHoldExpirationSweep = startHoldExpirationSweep({
+    prisma,
+    logger,
+    intervalMs: config.HOLD_EXPIRATION_SWEEP_INTERVAL_MS,
+  });
+
   logger.info({ concurrency: config.WORKER_CONCURRENCY }, 'worker started');
 
   const shutdown = async (signal: string): Promise<void> => {
     logger.info({ signal }, 'shutting down');
+    stopHoldExpirationSweep();
     await worker.close();
     await Promise.allSettled([prisma.$disconnect(), connection.quit(), observability.shutdown()]);
     process.exit(0);

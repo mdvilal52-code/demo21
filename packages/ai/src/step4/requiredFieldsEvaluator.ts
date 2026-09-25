@@ -104,6 +104,36 @@ function evaluatePickupLocation(dateLocation: DateLocationSnapshot | null): Miss
   return { field: RequiredField.PICKUP_LOCATION, reason: MissingFieldReason.NOT_PROVIDED };
 }
 
+/**
+ * True once real progress exists for this conversation — a resolved
+ * vehicle, or a resolved pickup/return date, or a resolved pickup location
+ * — regardless of what *this specific* message classified as. Steps 2-3
+ * re-run against the whole accumulated transcript every turn (see
+ * `vehicleService.ts`/`dateLocationService.ts`), so this reflects the
+ * conversation's cumulative progress, not just the latest message.
+ *
+ * Without this, a side question mid-booking (e.g. "what documents do I
+ * need?", classified DOCUMENT_REQUEST — a real classification this system
+ * has no dedicated reply for) would hit the `intentType !== BOOKING_REQUEST`
+ * gate below, discard everything already collected, and reply with the
+ * generic "let us know if you'd like to book" text as if no booking were
+ * underway — exactly the "moves to an unrelated next step" / "loses
+ * already-provided data" failure this evaluator exists to prevent. Once
+ * real progress exists, evaluation proceeds and (per the fields still
+ * outstanding) re-asks the same pending question instead.
+ */
+function hasExistingProgress(
+  dateLocation: DateLocationSnapshot | null,
+  vehicle: VehicleSnapshot | null,
+): boolean {
+  return Boolean(
+    dateLocation?.pickupDate ||
+    dateLocation?.returnDate ||
+    dateLocation?.pickupLocation ||
+    (vehicle?.status === 'RESOLVED' && vehicle.resolvedVehicle),
+  );
+}
+
 function evaluateVehicle(vehicle: VehicleSnapshot | null): MissingField | null {
   if (vehicle?.status === 'RESOLVED' && vehicle.resolvedVehicle) return null;
   if (vehicle?.status === 'UNSUPPORTED') {
@@ -147,7 +177,23 @@ export class RequiredFieldsEvaluator {
       vehicle: input.vehicle?.resolvedVehicle ?? null,
     };
 
-    if (input.intent?.intentType !== 'BOOKING_REQUEST') {
+    const isBookingRequest = input.intent?.intentType === 'BOOKING_REQUEST';
+    const hasProgress = hasExistingProgress(input.dateLocation, input.vehicle);
+
+    // Cancelling only means something once there's a booking in progress to
+    // cancel; checked ahead of the COMPLETE/NEEDS_INFO evaluation below so a
+    // cancellation always wins over whatever was already collected, even a
+    // fully COMPLETE booking.
+    if (input.intent?.intentType === 'CANCEL_REQUEST' && hasProgress) {
+      return {
+        status: MissingInfoStatus.CANCELLED,
+        collected,
+        missingFields: [],
+        promptInjectionDetectedAnywhere,
+      };
+    }
+
+    if (!isBookingRequest && !hasProgress) {
       return {
         status: MissingInfoStatus.NOT_APPLICABLE,
         collected,

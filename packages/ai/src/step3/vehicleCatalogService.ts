@@ -1,6 +1,10 @@
 import type { Vehicle } from '@ai-concierge/domain';
 import type { VehicleIntentProposal } from './vehicleIntentService.js';
-import type { VehicleCatalogProvider, VehicleLexiconEntry } from './vehicleCatalogProvider.js';
+import {
+  findAlternativesWithFallback,
+  type VehicleCatalogProvider,
+  type VehicleLexiconEntry,
+} from './vehicleCatalogProvider.js';
 
 export interface VehicleCatalogLookup {
   /** Full records for the proposal's candidate ids that still exist (never soft-deleted). */
@@ -34,21 +38,15 @@ export class VehicleCatalogService {
     const matchedVehicles = ids.length > 0 ? await this.provider.findByIds(tenantId, ids) : [];
 
     const category = proposal.candidates[0]?.category;
-    let fallbackAlternatives = await this.provider.findAlternatives(tenantId, {
-      category,
-      excludeIds: ids,
-      limit: FALLBACK_ALTERNATIVES_LIMIT,
-    });
     // A category-scoped search can legitimately come up empty (e.g. the only
     // vehicle in that category is the inactive one just asked about) — widen
     // to the general active fleet rather than leaving the customer with
     // nothing to choose from.
-    if (fallbackAlternatives.length === 0 && category !== undefined) {
-      fallbackAlternatives = await this.provider.findAlternatives(tenantId, {
-        excludeIds: ids,
-        limit: FALLBACK_ALTERNATIVES_LIMIT,
-      });
-    }
+    const fallbackAlternatives = await findAlternativesWithFallback(this.provider, tenantId, {
+      category,
+      excludeIds: ids,
+      limit: FALLBACK_ALTERNATIVES_LIMIT,
+    });
 
     return { matchedVehicles, fallbackAlternatives };
   }

@@ -41,6 +41,9 @@ export default defineConfig({
         WEBHOOK_SIGNING_SECRET: 'e2e-test-secret-value-1234567890',
         DEFAULT_TENANT_ID: '00000000-0000-0000-0000-000000000001',
         OUTBOUND_ALLOWED_HOSTS: 'localhost,127.0.0.1',
+        // Phase 6 — required, no NOT_CONFIGURED state for staff auth.
+        JWT_SIGNING_SECRET: 'e2e-jwt-signing-secret-at-least-32-bytes-long',
+        MFA_ENCRYPTION_KEY: 'zsqFPLXxhE2jMyWnSscCoupYiPB3Mi1V7cuiAh0FR4I=',
       },
     },
     {

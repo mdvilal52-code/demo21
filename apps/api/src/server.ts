@@ -1,9 +1,14 @@
 import {
+  AlternativeRecommendationOrchestrator,
   DateLocationExtractionOrchestrator,
+  EligibilityOrchestrator,
   MissingInfoOrchestrator,
+  PricingRules,
+  QuoteValidator,
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
+import { MetaWhatsAppProvider, NotConfiguredWhatsAppProvider } from '@ai-concierge/channels';
 import { createPrismaClient } from '@ai-concierge/db';
 import {
   createLogger,
@@ -16,7 +21,9 @@ import { loadApiEnv } from './env.js';
 import { createAIProvider } from './lib/geminiProvider.js';
 import { createPostEnquiryQueue } from './lib/queue.js';
 import { createRedisClient } from './lib/redis.js';
-import { createWhatsAppClient } from './lib/whatsappClient.js';
+import { createFleetProvider } from './services/createFleetProvider.js';
+import { PrismaAvailabilityProvider } from './services/availabilityProvider.js';
+import { ReservationLockService } from './services/reservationLockService.js';
 import { PrismaVehicleCatalogProvider } from './services/vehicleCatalogProvider.js';
 
 async function main(): Promise<void> {
@@ -43,9 +50,31 @@ async function main(): Promise<void> {
     catalogProvider: new PrismaVehicleCatalogProvider(prisma),
   });
   const missingInfoOrchestrator = new MissingInfoOrchestrator();
-  const { client: whatsappClient, status: whatsappStatus } = createWhatsAppClient(config);
-  const { provider: aiProvider, status: aiProviderStatus } = createAIProvider(config);
+  const eligibilityOrchestrator = new EligibilityOrchestrator();
+  const whatsappProvider =
+    config.WHATSAPP_ACCESS_TOKEN && config.WHATSAPP_PHONE_NUMBER_ID
+      ? new MetaWhatsAppProvider({
+          accessToken: config.WHATSAPP_ACCESS_TOKEN,
+          phoneNumberId: config.WHATSAPP_PHONE_NUMBER_ID,
+          apiVersion: config.WHATSAPP_API_VERSION,
+        })
+      : new NotConfiguredWhatsAppProvider();
 
+  const fleetProvider = createFleetProvider(config, prisma, redis);
+  const reservationLockService = new ReservationLockService(prisma, fleetProvider, {
+    ttlSeconds: config.AVAILABILITY_HOLD_TTL_SECONDS,
+    bufferMinutes: config.AVAILABILITY_TURNAROUND_BUFFER_MINUTES,
+  });
+  const alternativeRecommendationOrchestrator = new AlternativeRecommendationOrchestrator({
+    catalogProvider: new PrismaVehicleCatalogProvider(prisma),
+    availabilityProvider: new PrismaAvailabilityProvider(prisma, fleetProvider, {
+      bufferMinutes: config.AVAILABILITY_TURNAROUND_BUFFER_MINUTES,
+    }),
+  });
+  const pricingRules = new PricingRules();
+  const quoteValidator = new QuoteValidator(config.WEBHOOK_SIGNING_SECRET);
+
+  const { provider: aiProvider, status: aiProviderStatus } = createAIProvider(config);
   if (aiProviderStatus === 'CONFIGURED') {
     // Catches a bad GEMINI_MODEL_ID (or an unreachable API) at deploy time
     // instead of discovering it silently later, one degraded-to-fallback
@@ -71,13 +100,18 @@ async function main(): Promise<void> {
     dateLocationOrchestrator,
     vehicleOrchestrator,
     missingInfoOrchestrator,
+    eligibilityOrchestrator,
+    alternativeRecommendationOrchestrator,
+    pricingRules,
+    quoteValidator,
+    whatsappProvider,
+    fleetProvider,
+    reservationLockService,
     observabilityStatus: observability.status,
-    whatsappClient,
-    whatsappStatus,
     aiProvider,
     aiProviderStatus,
   };
-  logger.info({ whatsappStatus, aiProviderStatus }, 'WhatsApp adapter / AI provider status');
+  logger.info({ aiProviderStatus }, 'AI provider status');
 
   const app = await buildApp(ctx, logger);
 

@@ -1,13 +1,13 @@
 import { DateLocationExtractionOrchestrator } from '@ai-concierge/ai';
 import {
   createDateLocationExtraction,
-  findLatestMessageForConversation,
+  findMessagesForConversation,
   PrismaAuditWriter,
   type PrismaClient,
 } from '@ai-concierge/db';
 import { AppError, type TenantId } from '@ai-concierge/domain';
 import type { ExtractDatesLocationResponse } from '@ai-concierge/contracts';
-import { buildConversationTranscript } from './conversationTranscript.js';
+import { buildAccumulatedTranscript } from '../lib/conversationTranscript.js';
 
 export interface DateLocationServiceDeps {
   prisma: PrismaClient;
@@ -18,43 +18,35 @@ export interface ExtractDatesLocationInput {
   tenantId: TenantId;
   conversationId: string;
   requestId: string;
-  /**
-   * Reuse a transcript the caller already fetched (e.g. the WhatsApp channel
-   * fetches it once and shares it across Steps 2-3 plus the reply generator)
-   * instead of querying the same message history again. REST callers omit
-   * this and get a freshly-fetched transcript, same as before.
-   */
-  precomputedTranscript?: string;
 }
 
 /**
- * Step 2 — Extract Dates & Location. Input is the conversation's accumulated
- * transcript up to and including its latest message (already validated at
- * ingestion), not raw customer text passed directly — so a follow-up turn
- * that doesn't restate an earlier date/location still resolves against what
- * was already said. AI proposes (the orchestrator's Date/Location
- * extraction services); deterministic domain logic verifies
- * (TemporalValidationService, inside the orchestrator) before anything is
- * persisted or returned. The result is still recorded against the latest
- * message, matching Step 4's lookup convention.
+ * Step 2 — Extract Dates & Location. Input is a Phase 1 conversation's
+ * accumulated transcript (already validated at ingestion, message by
+ * message); this never accepts raw customer text directly. Extracting from
+ * every message so far — not just the latest — means a date range given in
+ * an earlier turn is still picked up when a later turn only adds a
+ * location, or vice versa; for a single-message conversation this is
+ * identical to extracting from that one message. AI proposes (the
+ * orchestrator's Date/Location extraction services); deterministic domain
+ * logic verifies (TemporalValidationService, inside the orchestrator)
+ * before anything is persisted or returned.
  */
 export async function extractDatesAndLocation(
   deps: DateLocationServiceDeps,
   input: ExtractDatesLocationInput,
 ): Promise<ExtractDatesLocationResponse> {
-  const message = await findLatestMessageForConversation(
+  const messages = await findMessagesForConversation(
     deps.prisma,
     input.tenantId,
     input.conversationId,
   );
+  const message = messages[messages.length - 1];
   if (!message) {
     throw new AppError('NOT_FOUND', 'Conversation not found');
   }
 
-  const transcript =
-    input.precomputedTranscript ??
-    (await buildConversationTranscript(deps.prisma, input.tenantId, input.conversationId));
-  const extraction = await deps.orchestrator.extract(transcript);
+  const extraction = await deps.orchestrator.extract(buildAccumulatedTranscript(messages));
 
   await deps.prisma.$transaction(async (tx) => {
     await createDateLocationExtraction(tx, {

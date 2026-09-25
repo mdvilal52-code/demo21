@@ -1,9 +1,15 @@
 import {
+  AlternativeRecommendationOrchestrator,
   DateLocationExtractionOrchestrator,
+  EligibilityOrchestrator,
   MissingInfoOrchestrator,
+  PricingRules,
+  QuoteValidator,
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
+  type FleetProvider,
 } from '@ai-concierge/ai';
+import { NotConfiguredWhatsAppProvider, type WhatsAppProvider } from '@ai-concierge/channels';
 import {
   createTestPrismaClient,
   createTestRedisClient,
@@ -16,7 +22,9 @@ import { buildApp } from '../app.js';
 import type { AppContext } from '../context.js';
 import type { ApiEnv } from '../env.js';
 import { createAIProvider } from '../lib/geminiProvider.js';
-import { createWhatsAppClient } from '../lib/whatsappClient.js';
+import { DatabaseFleetProvider } from '../services/fleetProvider.js';
+import { PrismaAvailabilityProvider } from '../services/availabilityProvider.js';
+import { ReservationLockService } from '../services/reservationLockService.js';
 import { PrismaVehicleCatalogProvider } from '../services/vehicleCatalogProvider.js';
 
 export interface TestApp {
@@ -25,7 +33,19 @@ export interface TestApp {
   close: () => Promise<void>;
 }
 
-export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<TestApp> {
+export interface TestAppCtxOverrides {
+  whatsappProvider?: WhatsAppProvider;
+  fleetProvider?: FleetProvider;
+  /** Overridable clock for `ReservationLockService`, used by expiry tests. */
+  now?: () => Date;
+  /** Overridable pricing config — used by tests exercising a specific discount/threshold/validity rule. */
+  pricingRules?: PricingRules;
+}
+
+export async function buildTestApp(
+  overrides: Partial<ApiEnv> = {},
+  ctxOverrides: TestAppCtxOverrides = {},
+): Promise<TestApp> {
   const config: ApiEnv = {
     NODE_ENV: 'test',
     LOG_LEVEL: 'silent',
@@ -51,6 +71,16 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
     GEMINI_TEMPERATURE: 0.6,
     GEMINI_MAX_OUTPUT_TOKENS: 512,
     GEMINI_TIMEOUT_MS: 8000,
+    JWT_SIGNING_SECRET: 'test-jwt-signing-secret-at-least-32-bytes-long',
+    MFA_ENCRYPTION_KEY: 'hEPpdv0I3rPvipYa674EeHgK51Zb+BwciFTcTSAch60=',
+    AUTH_TOKEN_ISSUER: 'AI Concierge Test',
+    AUTH_RATE_LIMIT_MAX: 1000,
+    AUTH_RATE_LIMIT_WINDOW_MS: 60_000,
+    WHATSAPP_API_VERSION: 'v21.0',
+    FLEET_PROVIDER: 'database',
+    FLEET_API_TIMEOUT_MS: 3000,
+    AVAILABILITY_HOLD_TTL_SECONDS: 900,
+    AVAILABILITY_TURNAROUND_BUFFER_MINUTES: 120,
     ...overrides,
   };
 
@@ -60,8 +90,8 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
     connection: redis.duplicate(),
   });
 
-  const { client: whatsappClient, status: whatsappStatus } = createWhatsAppClient(config);
   const { provider: aiProvider, status: aiProviderStatus } = createAIProvider(config);
+  const fleetProvider = ctxOverrides.fleetProvider ?? new DatabaseFleetProvider(prisma);
 
   const ctx: AppContext = {
     config,
@@ -75,9 +105,23 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
       catalogProvider: new PrismaVehicleCatalogProvider(prisma),
     }),
     missingInfoOrchestrator: new MissingInfoOrchestrator(),
+    eligibilityOrchestrator: new EligibilityOrchestrator(),
+    alternativeRecommendationOrchestrator: new AlternativeRecommendationOrchestrator({
+      catalogProvider: new PrismaVehicleCatalogProvider(prisma),
+      availabilityProvider: new PrismaAvailabilityProvider(prisma, fleetProvider, {
+        bufferMinutes: config.AVAILABILITY_TURNAROUND_BUFFER_MINUTES,
+      }),
+    }),
+    pricingRules: ctxOverrides.pricingRules ?? new PricingRules(),
+    quoteValidator: new QuoteValidator(config.WEBHOOK_SIGNING_SECRET),
+    whatsappProvider: ctxOverrides.whatsappProvider ?? new NotConfiguredWhatsAppProvider(),
+    fleetProvider,
+    reservationLockService: new ReservationLockService(prisma, fleetProvider, {
+      ttlSeconds: config.AVAILABILITY_HOLD_TTL_SECONDS,
+      bufferMinutes: config.AVAILABILITY_TURNAROUND_BUFFER_MINUTES,
+      now: ctxOverrides.now,
+    }),
     observabilityStatus: 'NOT_CONFIGURED',
-    whatsappClient,
-    whatsappStatus,
     aiProvider,
     aiProviderStatus,
   };

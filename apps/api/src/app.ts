@@ -10,11 +10,20 @@ import { observabilityPlugin } from './plugins/observability.js';
 import { registerSwagger } from './plugins/swagger.js';
 import { registerErrorHandler } from './plugins/errorHandler.js';
 import { healthRoutes } from './routes/health.js';
+import { privacyRoutes } from './routes/privacy.js';
 import { enquiryRoutes } from './routes/v1/enquiries.js';
 import { temporalRoutes } from './routes/v1/temporal.js';
 import { vehicleRoutes } from './routes/v1/vehicle.js';
 import { missingInfoRoutes } from './routes/v1/missingInfo.js';
+import { eligibilityRoutes } from './routes/v1/eligibility.js';
+import { availabilityRoutes } from './routes/v1/availability.js';
+import { alternativesRoutes } from './routes/v1/alternatives.js';
+import { quoteRoutes } from './routes/v1/quote.js';
 import { whatsappWebhookRoutes } from './routes/webhooks/whatsapp.js';
+import { authRoutes } from './routes/v1/auth.js';
+import { auditRoutes } from './routes/v1/audit.js';
+import { securityEventRoutes } from './routes/v1/securityEvents.js';
+import { userRoutes } from './routes/v1/users.js';
 
 export async function buildApp(
   ctx: AppContext,
@@ -32,17 +41,26 @@ export async function buildApp(
 
   app.decorate('ctx', ctx);
 
-  await registerSecurityPlugins(app, ctx.config);
+  await registerSecurityPlugins(app, ctx.config, ctx.redis);
   await app.register(observabilityPlugin);
   await registerSwagger(app, ctx.config);
   registerErrorHandler(app);
 
   await app.register(healthRoutes);
+  await app.register(privacyRoutes);
   await app.register(enquiryRoutes);
   await app.register(temporalRoutes);
   await app.register(vehicleRoutes);
   await app.register(missingInfoRoutes);
+  await app.register(eligibilityRoutes);
+  await app.register(availabilityRoutes);
+  await app.register(alternativesRoutes);
+  await app.register(quoteRoutes);
   await app.register(whatsappWebhookRoutes);
+  await app.register(authRoutes);
+  await app.register(auditRoutes);
+  await app.register(securityEventRoutes);
+  await app.register(userRoutes);
 
   return app;
 }

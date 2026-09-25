@@ -1,34 +1,32 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppError, IntentStatus, IntentType } from '@ai-concierge/domain';
-import type { EnquiryServiceDeps } from './enquiryService.js';
+import type { ContinueEnquiryDeps, EnquiryServiceDeps } from './enquiryService.js';
 
 const mocks = vi.hoisted(() => ({
   createConversationWithMessage: vi.fn(),
-  appendMessageToConversation: vi.fn(),
   createIntentRecord: vi.fn(),
   findIdempotencyKey: vi.fn(),
-  findLatestMessageForConversation: vi.fn(),
-  findLatestMissingInfoCheckForMessage: vi.fn(),
-  findMostRecentConversationForCustomer: vi.fn(),
   saveIdempotencyKey: vi.fn(),
   auditRecord: vi.fn(),
+  appendMessageToConversation: vi.fn(),
+  findMessagesForConversation: vi.fn(),
+  hasBookingRequestIntentInConversation: vi.fn(),
 }));
 
 vi.mock('@ai-concierge/db', () => ({
   createConversationWithMessage: mocks.createConversationWithMessage,
-  appendMessageToConversation: mocks.appendMessageToConversation,
   createIntentRecord: mocks.createIntentRecord,
   findIdempotencyKey: mocks.findIdempotencyKey,
-  findLatestMessageForConversation: mocks.findLatestMessageForConversation,
-  findLatestMissingInfoCheckForMessage: mocks.findLatestMissingInfoCheckForMessage,
-  findMostRecentConversationForCustomer: mocks.findMostRecentConversationForCustomer,
   saveIdempotencyKey: mocks.saveIdempotencyKey,
+  appendMessageToConversation: mocks.appendMessageToConversation,
+  findMessagesForConversation: mocks.findMessagesForConversation,
+  hasBookingRequestIntentInConversation: mocks.hasBookingRequestIntentInConversation,
   PrismaAuditWriter: class {
     record = mocks.auditRecord;
   },
 }));
 
-const { submitEnquiry } = await import('./enquiryService.js');
+const { submitEnquiry, continueEnquiry } = await import('./enquiryService.js');
 
 const fakeIntent = {
   intentType: IntentType.ENQUIRY,
@@ -59,9 +57,6 @@ describe('submitEnquiry', () => {
       message: { id: 'msg-1' },
     });
     mocks.findIdempotencyKey.mockResolvedValue(null);
-    // Default: no reopenable conversation, so existing tests take the
-    // fresh-conversation path exactly as before this behavior existed.
-    mocks.findMostRecentConversationForCustomer.mockResolvedValue(null);
   });
 
   it('creates a conversation, records the intent, writes an audit event, and enqueues a job', async () => {
@@ -142,119 +137,363 @@ describe('submitEnquiry', () => {
     expect(mocks.createConversationWithMessage).toHaveBeenCalled();
   });
 
-  describe('conversation continuity', () => {
-    const recentCandidate = {
-      id: 'conv-existing',
-      tenantId: TENANT_ID,
-      channel: 'WEB',
-      customerRef: 'session-1',
-      createdAt: new Date(),
-      processedAt: null,
+  it('corrects a first message that is already booking-shaped (e.g. a bare vehicle name) to BOOKING_REQUEST', async () => {
+    const deps = makeDeps();
+    const vehicleOnlyIntent = {
+      ...fakeIntent,
+      intentType: IntentType.UNKNOWN,
+      entities: { ...fakeIntent.entities, vehicleIntent: 'lamborghini' },
     };
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(vehicleOnlyIntent);
 
-    beforeEach(() => {
-      mocks.appendMessageToConversation.mockResolvedValue({
-        conversation: { id: 'conv-existing' },
-        message: { id: 'msg-2' },
-      });
-      mocks.findLatestMessageForConversation.mockResolvedValue({ id: 'msg-1' });
+    const result = await submitEnquiry(deps, {
+      tenantId: TENANT_ID,
+      channel: 'WHATSAPP',
+      customerRef: '971500000000',
+      message: 'Lamborghini Urus',
+      requestId: 'req-first-vehicle',
     });
 
-    it('reopens the existing conversation when it still needs info within the window', async () => {
-      mocks.findMostRecentConversationForCustomer.mockResolvedValue(recentCandidate);
-      mocks.findLatestMissingInfoCheckForMessage.mockResolvedValue({ status: 'NEEDS_INFO' });
+    expect(result.intent.intentType).toBe(IntentType.BOOKING_REQUEST);
+    expect(result.intent.missingFields).toEqual(['pickupDate', 'returnDate', 'location']);
+  });
 
-      const deps = makeDeps();
-      const result = await submitEnquiry(deps, {
+  it('leaves a first message with no booking-shaped entities as UNKNOWN (no prior conversation to be sticky about)', async () => {
+    const deps = makeDeps();
+    const unknownIntent = { ...fakeIntent, intentType: IntentType.UNKNOWN };
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(unknownIntent);
+
+    const result = await submitEnquiry(deps, {
+      tenantId: TENANT_ID,
+      channel: 'WHATSAPP',
+      customerRef: '971500000000',
+      message: 'Hi',
+      requestId: 'req-first-hi',
+    });
+
+    expect(result.intent.intentType).toBe(IntentType.UNKNOWN);
+  });
+});
+
+function makeContinueDeps() {
+  const prisma = {
+    $transaction: vi.fn(async (fn: (tx: unknown) => unknown) => fn({})),
+  };
+  const intentEngine = { recognize: vi.fn().mockReturnValue(fakeIntent) };
+  return { prisma, intentEngine } as unknown as ContinueEnquiryDeps;
+}
+
+describe('continueEnquiry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.findIdempotencyKey.mockResolvedValue(null);
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', conversationId: 'conv-1', content: 'I want a Lamborghini Urus' },
+    ]);
+    mocks.appendMessageToConversation.mockResolvedValue({
+      id: 'msg-2',
+      conversationId: 'conv-1',
+      content: '15 to 19 Oct',
+    });
+    mocks.hasBookingRequestIntentInConversation.mockResolvedValue(false);
+  });
+
+  it('appends the message, recognizes intent from the accumulated transcript, and records the intent against the new message', async () => {
+    const deps = makeContinueDeps();
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: '15 to 19 Oct',
+      requestId: 'req-1',
+    });
+
+    expect(mocks.appendMessageToConversation).toHaveBeenCalledWith(
+      {},
+      TENANT_ID,
+      'conv-1',
+      '15 to 19 Oct',
+    );
+    expect(deps.intentEngine.recognize).toHaveBeenCalledWith(
+      'I want a Lamborghini Urus\n15 to 19 Oct',
+    );
+    expect(mocks.createIntentRecord).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ tenantId: TENANT_ID, messageId: 'msg-2' }),
+    );
+    expect(mocks.auditRecord).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'enquiry.continued', entityId: 'conv-1' }),
+    );
+    expect(result).toEqual({ conversationId: 'conv-1', messageId: 'msg-2', intent: fakeIntent });
+  });
+
+  it('corrects a bare "Yes" to BOOKING_REQUEST when nothing booking-shaped has been recognized yet', async () => {
+    const unrecognizedIntent = {
+      ...fakeIntent,
+      intentType: IntentType.UNKNOWN,
+      status: IntentStatus.RECOGNIZED,
+    };
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', conversationId: 'conv-1', content: 'Hiii' },
+    ]);
+    mocks.appendMessageToConversation.mockResolvedValue({
+      id: 'msg-2',
+      conversationId: 'conv-1',
+      content: 'Yes',
+    });
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(unrecognizedIntent);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: 'Yes',
+      requestId: 'req-yes',
+    });
+
+    expect(result.intent.intentType).toBe(IntentType.BOOKING_REQUEST);
+    // No vehicle/dates/location were ever mentioned, so this stays
+    // NEEDS_CLARIFICATION with all four fields listed — internally
+    // consistent with the corrected intentType, not the stale UNKNOWN
+    // classification's (always-empty) missingFields.
+    expect(result.intent.status).toBe(IntentStatus.NEEDS_CLARIFICATION);
+    expect(result.intent.missingFields).toEqual([
+      'vehicleIntent',
+      'pickupDate',
+      'returnDate',
+      'location',
+    ]);
+    expect(result.intent.clarificationPrompt).toContain('vehicleIntent');
+    // The correction is auditable/distinguishable from a real keyword match.
+    expect(result.intent.modelMetadata.engine).toBe('short-reply-confirmation-v1');
+    expect(mocks.createIntentRecord).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({
+        intentResult: expect.objectContaining({ intentType: IntentType.BOOKING_REQUEST }),
+      }),
+    );
+  });
+
+  it('does not overwrite a different, already-recognized intent (e.g. a complaint) just because the reply is affirmative', async () => {
+    const complaintIntent = { ...fakeIntent, intentType: IntentType.COMPLAINT };
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', conversationId: 'conv-1', content: 'I have a complaint about my rental' },
+    ]);
+    mocks.appendMessageToConversation.mockResolvedValue({
+      id: 'msg-2',
+      conversationId: 'conv-1',
+      content: 'Yes',
+    });
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(complaintIntent);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: 'Yes',
+      requestId: 'req-complaint-yes',
+    });
+
+    // A "Yes" answering a complaint-related question is not a booking
+    // confirmation — only an UNKNOWN classification is ambiguous enough to
+    // correct.
+    expect(result.intent).toEqual(complaintIntent);
+  });
+
+  it('does not correct a bare "Yes" when the transcript already recognized a booking request', async () => {
+    const alreadyBooking = { ...fakeIntent, intentType: IntentType.BOOKING_REQUEST };
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', conversationId: 'conv-1', content: 'I want to rent a car' },
+    ]);
+    mocks.appendMessageToConversation.mockResolvedValue({
+      id: 'msg-2',
+      conversationId: 'conv-1',
+      content: 'Yes',
+    });
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(alreadyBooking);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: 'Yes',
+      requestId: 'req-yes-2',
+    });
+
+    // Unchanged: the engine's own metadata is preserved, nothing overridden.
+    expect(result.intent).toEqual(alreadyBooking);
+  });
+
+  it('does not correct a message that is not a short affirmative reply', async () => {
+    const unrecognizedIntent = { ...fakeIntent, intentType: IntentType.UNKNOWN };
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', conversationId: 'conv-1', content: 'Hiii' },
+    ]);
+    mocks.appendMessageToConversation.mockResolvedValue({
+      id: 'msg-2',
+      conversationId: 'conv-1',
+      content: 'What cars do you have?',
+    });
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(unrecognizedIntent);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: 'What cars do you have?',
+      requestId: 'req-other',
+    });
+
+    expect(result.intent.intentType).toBe(IntentType.UNKNOWN);
+  });
+
+  it('corrects a bare vehicle-name reply to BOOKING_REQUEST via entities, even with no booking keyword', async () => {
+    const vehicleOnlyIntent = {
+      ...fakeIntent,
+      intentType: IntentType.UNKNOWN,
+      entities: { ...fakeIntent.entities, vehicleIntent: 'lamborghini' },
+    };
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', conversationId: 'conv-1', content: 'Hi' },
+      { id: 'msg-2', conversationId: 'conv-1', content: 'Yes' },
+    ]);
+    mocks.appendMessageToConversation.mockResolvedValue({
+      id: 'msg-3',
+      conversationId: 'conv-1',
+      content: 'Lamborghini Urus',
+    });
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(vehicleOnlyIntent);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: 'Lamborghini Urus',
+      requestId: 'req-vehicle-only',
+    });
+
+    expect(result.intent.intentType).toBe(IntentType.BOOKING_REQUEST);
+    expect(result.intent.missingFields).toEqual(['pickupDate', 'returnDate', 'location']);
+    // The cheap in-memory entities check is decisive; the durable sticky
+    // fallback query is never reached.
+    expect(mocks.hasBookingRequestIntentInConversation).not.toHaveBeenCalled();
+  });
+
+  it('corrects a dates-only reply to BOOKING_REQUEST via entities', async () => {
+    const datesOnlyIntent = {
+      ...fakeIntent,
+      intentType: IntentType.UNKNOWN,
+      entities: {
+        ...fakeIntent.entities,
+        pickupDate: '2026-09-25T00:00:00.000Z',
+        returnDate: '2026-09-28T00:00:00.000Z',
+      },
+    };
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(datesOnlyIntent);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: '25 September to 28 September',
+      requestId: 'req-dates-only',
+    });
+
+    expect(result.intent.intentType).toBe(IntentType.BOOKING_REQUEST);
+    expect(result.intent.missingFields).toEqual(['vehicleIntent', 'location']);
+  });
+
+  it('falls back to the durable sticky check when this turn has no entities and is unclear, and corrects when the conversation already had a booking request', async () => {
+    const unclearIntent = { ...fakeIntent, intentType: IntentType.UNKNOWN };
+    mocks.hasBookingRequestIntentInConversation.mockResolvedValue(true);
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(unclearIntent);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: 'hmm not sure what you mean',
+      requestId: 'req-unclear-sticky',
+    });
+
+    expect(mocks.hasBookingRequestIntentInConversation).toHaveBeenCalledWith(
+      {},
+      TENANT_ID,
+      'conv-1',
+    );
+    expect(result.intent.intentType).toBe(IntentType.BOOKING_REQUEST);
+  });
+
+  it('leaves an unclear reply as UNKNOWN when the sticky check also finds no prior booking request', async () => {
+    const unclearIntent = { ...fakeIntent, intentType: IntentType.UNKNOWN };
+    mocks.hasBookingRequestIntentInConversation.mockResolvedValue(false);
+    const deps = makeContinueDeps();
+    (deps.intentEngine.recognize as ReturnType<typeof vi.fn>).mockReturnValue(unclearIntent);
+
+    const result = await continueEnquiry(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: 'hmm not sure what you mean',
+      requestId: 'req-unclear-no-sticky',
+    });
+
+    expect(result.intent.intentType).toBe(IntentType.UNKNOWN);
+  });
+
+  it('throws NOT_FOUND when the conversation does not belong to this tenant', async () => {
+    mocks.appendMessageToConversation.mockResolvedValue(null);
+
+    await expect(
+      continueEnquiry(makeContinueDeps(), {
         tenantId: TENANT_ID,
-        channel: 'WEB',
-        customerRef: 'session-1',
-        message: 'actually, make it 5 days',
-        requestId: 'req-5',
-      });
+        conversationId: 'conv-missing',
+        channel: 'WHATSAPP',
+        message: 'hello',
+        requestId: 'req-2',
+      }),
+    ).rejects.toBeInstanceOf(AppError);
+  });
 
-      expect(mocks.appendMessageToConversation).toHaveBeenCalledWith(
-        {},
-        TENANT_ID,
-        'conv-existing',
-        'actually, make it 5 days',
-      );
-      expect(mocks.createConversationWithMessage).not.toHaveBeenCalled();
-      expect(result.conversationId).toBe('conv-existing');
-      expect(mocks.auditRecord).toHaveBeenCalledWith(
-        expect.objectContaining({ action: 'enquiry.continued' }),
-      );
+  it('replays a stored response when the idempotency key was already used', async () => {
+    mocks.findIdempotencyKey.mockResolvedValue({
+      responseStatus: 201,
+      responseBody: { conversationId: 'conv-1', messageId: 'msg-old', intent: fakeIntent },
     });
 
-    it('starts fresh when the previous conversation already completed', async () => {
-      mocks.findMostRecentConversationForCustomer.mockResolvedValue(recentCandidate);
-      mocks.findLatestMissingInfoCheckForMessage.mockResolvedValue({ status: 'COMPLETE' });
-
-      const deps = makeDeps();
-      await submitEnquiry(deps, {
-        tenantId: TENANT_ID,
-        channel: 'WEB',
-        customerRef: 'session-1',
-        message: 'I need another car',
-        requestId: 'req-6',
-      });
-
-      expect(mocks.appendMessageToConversation).not.toHaveBeenCalled();
-      expect(mocks.createConversationWithMessage).toHaveBeenCalled();
+    const result = await continueEnquiry(makeContinueDeps(), {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: '15 to 19 Oct',
+      requestId: 'req-3',
+      idempotencyKey: 'wamid.DUP',
     });
 
-    it('starts fresh when the previous conversation already expired', async () => {
-      mocks.findMostRecentConversationForCustomer.mockResolvedValue(recentCandidate);
-      mocks.findLatestMissingInfoCheckForMessage.mockResolvedValue({ status: 'EXPIRED' });
+    expect(result.messageId).toBe('msg-old');
+    expect(mocks.appendMessageToConversation).not.toHaveBeenCalled();
+  });
 
-      const deps = makeDeps();
-      await submitEnquiry(deps, {
-        tenantId: TENANT_ID,
-        channel: 'WEB',
-        customerRef: 'session-1',
-        message: 'hi again',
-        requestId: 'req-7',
-      });
-
-      expect(mocks.appendMessageToConversation).not.toHaveBeenCalled();
-      expect(mocks.createConversationWithMessage).toHaveBeenCalled();
+  it('saves the idempotency key when one is provided on a fresh request', async () => {
+    await continueEnquiry(makeContinueDeps(), {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      channel: 'WHATSAPP',
+      message: '15 to 19 Oct',
+      requestId: 'req-4',
+      idempotencyKey: 'wamid.NEW',
     });
 
-    it('starts fresh when the previous conversation is outside the reopen window', async () => {
-      mocks.findMostRecentConversationForCustomer.mockResolvedValue({
-        ...recentCandidate,
-        createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
-      });
-
-      const deps = makeDeps();
-      await submitEnquiry(deps, {
-        tenantId: TENANT_ID,
-        channel: 'WEB',
-        customerRef: 'session-1',
-        message: 'hi again',
-        requestId: 'req-8',
-      });
-
-      expect(mocks.findLatestMessageForConversation).not.toHaveBeenCalled();
-      expect(mocks.appendMessageToConversation).not.toHaveBeenCalled();
-      expect(mocks.createConversationWithMessage).toHaveBeenCalled();
-    });
-
-    it('starts fresh when no check has run yet but treats an in-flight conversation as reopenable', async () => {
-      mocks.findMostRecentConversationForCustomer.mockResolvedValue(recentCandidate);
-      mocks.findLatestMissingInfoCheckForMessage.mockResolvedValue(null);
-
-      const deps = makeDeps();
-      await submitEnquiry(deps, {
-        tenantId: TENANT_ID,
-        channel: 'WEB',
-        customerRef: 'session-1',
-        message: 'still deciding',
-        requestId: 'req-9',
-      });
-
-      expect(mocks.appendMessageToConversation).toHaveBeenCalled();
-      expect(mocks.createConversationWithMessage).not.toHaveBeenCalled();
-    });
+    expect(mocks.saveIdempotencyKey).toHaveBeenCalledWith(
+      {},
+      expect.objectContaining({ key: 'wamid.NEW', tenantId: TENANT_ID }),
+    );
   });
 });

@@ -2,15 +2,25 @@
 
 Status: **FROZEN**
 
-## 0. Scope note — reconciling this phase's name and its place in the sequence
+## 0. Scope note — reconciling this phase's name, and the 2026-09-25 branch merge
 
-`PHASE-CONTRACTS.json`'s original phase-id-6 entry, inherited from the pre-journey-step 10-phase
-plan, was "Security Engine & Zero Trust". This phase is not that — it was explicitly requested
-ahead of Security (and ahead of journey Step 5, Eligibility) as a conversational-engine upgrade:
-give the WhatsApp channel a real, human-like reply layer using Gemini, without weakening the
-"AI proposes, deterministic code verifies" discipline Phases 1-5 already established. Security
-Engine & Zero Trust and everything after it shifted to ids 7-11 (see the top-level
-`phaseNumbering` note).
+This phase was originally built as id 6 on a branch that had only Phases 1-5 (the official
+WhatsApp channel adapter) — it was explicitly requested ahead of Security and ahead of journey
+Step 5 (Eligibility) as a conversational-engine upgrade: give the WhatsApp channel a real,
+human-like reply layer using Gemini, without weakening the "AI proposes, deterministic code
+verifies" discipline Phases 1-5 already established.
+
+On 2026-09-25 that branch was merged with a second, independently-developed branch that had built
+much further past Phase 4: a real Security Engine, Eligibility, Availability, Alternatives, and a
+Quote/Pricing engine (see the top-level `phaseNumbering` note in `PHASE-CONTRACTS.json` for the
+full history). The two branches' conversation-continuity work — this phase's own reopen-or-create
+logic and the other branch's more complete `findOpenConversationForCustomer`/`continueEnquiry`
+(bare "Yes" replies, booking-shaped-entity detection, claim-based idempotency) — solved the same
+problem independently; the merge adopted the other branch's version wholesale as strictly more
+capable, and this phase's Gemini reply generation was re-wired onto it (see §3's "Merge
+reconciliation" note below). Every phase was then renumbered into one clean sequential list; this
+phase is now id 11, not id 6 — see `PHASE-CONTRACTS.json`'s `phaseNumbering` field for the
+authoritative id history.
 
 **Why it was judged safe to build this ahead of Security.** MASTER-PLAN.md's own Phase 6 goal is
 the zero-trust layering that makes it safe to call a live model — egress allowlisting, an AI
@@ -171,17 +181,44 @@ not discovered silently later. (2) `generateConversationalReply` distinguishes a
 
 **Backward compatibility.** Every failure mode in `generateConversationalReply` — not configured,
 schema-invalid, grounding violation, provider error, open circuit — falls back to the exact
-pre-existing `buildWhatsAppReplyText` output. A customer's experience today (Gemini not
-configured, the default) is byte-for-byte what Phase 5 shipped; nothing regresses.
+pre-existing `buildWhatsAppReplyText` output (now re-exported from `@ai-concierge/channels` after
+the merge below, same behavior). A customer's experience today (Gemini not configured, the
+default) is byte-for-byte what Phase 5 shipped; nothing regresses.
+
+**Merge reconciliation (2026-09-25).** This phase's own conversation-continuity fix
+(`findMostRecentConversationForCustomer`/`appendMessageToConversation`-based reopen logic in
+`enquiryService.ts`, and `apps/api/src/services/conversationTranscript.ts`'s
+`buildConversationTranscript`) solved the same "every message starts a fresh conversation" problem
+the other merged branch had already solved independently, with a more capable implementation
+(`findOpenConversationForCustomer`/`continueEnquiry`, handling bare "Yes" replies and
+booking-shaped-entity detection across turns, plus claim-based idempotency safe against Meta's
+redelivery). The merge adopted the other branch's version wholesale; this phase's own
+`conversationTranscript.ts`/`enquiryService.ts` reopen logic and `whatsappService.ts` (the whole
+file, superseded by the other branch's `enquiryPipelineService.ts` + `routes/webhooks/whatsapp.ts`)
+were deleted rather than kept as parallel implementations. What survived and was re-wired onto the
+other branch's pipeline: the `AIProvider`/`ResilientAIProvider`/`GeminiProvider` adapter stack
+unchanged, and `generateConversationalReply` itself — its one-line dependency on
+`buildWhatsAppReplyText` was repointed from the (now-deleted) local `whatsappReply.ts` to
+`@ai-concierge/channels`'s equivalent (same signature, now also handles a `CANCELLED` status the
+other branch added). See `packages/db/src/repositories/conversationRepository.ts` for the merged
+repository (their `findOpenConversationForCustomer`/`appendMessageToConversation`/
+`findMessagesForConversation`, this phase's `findConversationById`/`findLatestMessageForConversation`
+/`markConversationProcessed` unchanged) and `apps/api/src/routes/webhooks/whatsapp.ts` for where
+`generateConversationalReply` now plugs into the other branch's `processInboundMessage`, replacing
+its direct `buildWhatsAppReplyText(...)` call.
 
 ## 4. What was built
 
-New files:
+New files (as originally delivered on this phase's own branch; see the merge reconciliation note
+above for what was superseded during the 2026-09-25 merge):
 
 - `packages/ai/src/resilientAIProvider.ts` (+ `.security.test.ts`)
 - `apps/api/src/lib/geminiProvider.ts` (+ `.test.ts`)
-- `apps/api/src/services/conversationalReplyService.ts` (+ `.test.ts`, `.security.test.ts`)
-- `apps/api/src/services/conversationTranscript.ts` (+ `.test.ts`)
+- `apps/api/src/services/conversationalReplyService.ts` (+ `.test.ts`, `.security.test.ts`) —
+  survived the merge; its `buildWhatsAppReplyText` import was repointed to `@ai-concierge/channels`
+- ~~`apps/api/src/services/conversationTranscript.ts` (+ `.test.ts`)~~ — deleted in the merge,
+  superseded by the other branch's `apps/api/src/lib/conversationTranscript.ts`
+  (`buildAccumulatedTranscript`)
 
 Modified:
 

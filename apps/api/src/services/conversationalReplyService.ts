@@ -7,8 +7,8 @@ import {
   type MissingInfoResult,
 } from '@ai-concierge/domain';
 import { CircuitBreakerOpenError } from '@ai-concierge/security';
+import { buildWhatsAppReplyText } from '@ai-concierge/channels';
 import { z } from 'zod';
-import { buildWhatsAppReplyText } from './whatsappReply.js';
 
 const replySchema = z.object({
   reply: z.string().min(1).max(1000),

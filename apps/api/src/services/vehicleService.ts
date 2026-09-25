@@ -1,13 +1,13 @@
 import type { VehicleDeterminationOrchestrator } from '@ai-concierge/ai';
 import {
   createVehicleDetermination,
-  findLatestMessageForConversation,
+  findMessagesForConversation,
   PrismaAuditWriter,
   type PrismaClient,
 } from '@ai-concierge/db';
 import { AppError, type TenantId } from '@ai-concierge/domain';
 import type { DetermineVehicleResponse } from '@ai-concierge/contracts';
-import { buildConversationTranscript } from './conversationTranscript.js';
+import { buildAccumulatedTranscript } from '../lib/conversationTranscript.js';
 
 export interface VehicleServiceDeps {
   prisma: PrismaClient;
@@ -18,43 +18,35 @@ export interface DetermineVehicleInput {
   tenantId: TenantId;
   conversationId: string;
   requestId: string;
-  /**
-   * Reuse a transcript the caller already fetched (e.g. the WhatsApp channel
-   * fetches it once and shares it across Steps 2-3 plus the reply generator)
-   * instead of querying the same message history again. REST callers omit
-   * this and get a freshly-fetched transcript, same as before.
-   */
-  precomputedTranscript?: string;
 }
 
 /**
- * Step 3 — Determine Vehicle. Input is the conversation's accumulated
- * transcript up to and including its latest message (already validated at
- * ingestion), not raw customer text passed directly — so "the same car" or a
- * follow-up that doesn't restate the vehicle still resolves against what was
- * already said. AI proposes (`VehicleIntentService`, inside the
- * orchestrator); deterministic domain logic verifies against the real fleet
+ * Step 3 — Determine Vehicle. Input is a Phase 1 conversation's accumulated
+ * transcript (already validated at ingestion, message by message); this
+ * never accepts raw customer text directly. Extracting from every message
+ * so far — not just the latest — means a vehicle named in an earlier turn
+ * is still picked up when a later turn only adds dates or a location; for a
+ * single-message conversation this is identical to extracting from that one
+ * message. AI proposes (`VehicleIntentService`, inside the orchestrator);
+ * deterministic domain logic verifies against the real fleet
  * (`VehicleCatalogService` + `VehicleValidationService`) before anything is
- * persisted or returned. The result is still recorded against the latest
- * message, matching Step 4's lookup convention.
+ * persisted or returned.
  */
 export async function determineVehicle(
   deps: VehicleServiceDeps,
   input: DetermineVehicleInput,
 ): Promise<DetermineVehicleResponse> {
-  const message = await findLatestMessageForConversation(
+  const messages = await findMessagesForConversation(
     deps.prisma,
     input.tenantId,
     input.conversationId,
   );
+  const message = messages[messages.length - 1];
   if (!message) {
     throw new AppError('NOT_FOUND', 'Conversation not found');
   }
 
-  const transcript =
-    input.precomputedTranscript ??
-    (await buildConversationTranscript(deps.prisma, input.tenantId, input.conversationId));
-  const determination = await deps.orchestrator.determine(transcript, {
+  const determination = await deps.orchestrator.determine(buildAccumulatedTranscript(messages), {
     tenantId: input.tenantId,
   });
 

@@ -28,6 +28,25 @@ describe('RuleBasedIntentEngine — normal cases', () => {
     expect(result.intentType).toBe(IntentType.PRICE_REQUEST);
   });
 
+  it('recognizes a bare cancel request', () => {
+    const result = engine.recognize('cancel', { referenceDate: REFERENCE_DATE });
+    expect(result.intentType).toBe(IntentType.CANCEL_REQUEST);
+  });
+
+  it('recognizes "cancel my booking" as a cancel request, not a booking request', () => {
+    const result = engine.recognize('cancel my booking please', {
+      referenceDate: REFERENCE_DATE,
+    });
+    expect(result.intentType).toBe(IntentType.CANCEL_REQUEST);
+  });
+
+  it('recognizes "cancel my reservation" as a cancel request (same book/booking-shaped keyword overlap as reserve/reservation)', () => {
+    const result = engine.recognize('I want to cancel my reservation', {
+      referenceDate: REFERENCE_DATE,
+    });
+    expect(result.intentType).toBe(IntentType.CANCEL_REQUEST);
+  });
+
   it('recognizes a complaint', () => {
     const result = engine.recognize('This is a terrible experience, I am very unhappy and angry', {
       referenceDate: REFERENCE_DATE,
