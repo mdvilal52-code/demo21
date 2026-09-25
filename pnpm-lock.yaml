@@ -120,6 +120,9 @@ importers:
       '@ai-concierge/contracts':
         specifier: workspace:*
         version: link:../../packages/contracts
+      '@ai-concierge/domain':
+        specifier: workspace:*
+        version: link:../../packages/domain
       '@ai-concierge/security':
         specifier: workspace:*
         version: link:../../packages/security

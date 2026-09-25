@@ -13,6 +13,7 @@
     "migrate:dev": "prisma migrate dev",
     "migrate:deploy": "prisma migrate deploy",
     "seed": "node dist/seed.js",
+    "bootstrap-admin": "node dist/bootstrapAdmin.js",
     "build": "prisma generate && tsc",
     "typecheck": "prisma generate && tsc",
     "test:unit": "echo \"no pure-unit tests in @ai-concierge/db (see test:integration)\"",
@@ -21,10 +22,10 @@
   },
   "dependencies": {
     "@ai-concierge/domain": "workspace:*",
+    "@ai-concierge/security": "workspace:*",
     "@prisma/client": "^6.19.0"
   },
   "devDependencies": {
-    "@ai-concierge/security": "workspace:*",
     "@ai-concierge/testing": "workspace:*",
     "prisma": "^6.19.0",
     "typescript": "^5.6.3",

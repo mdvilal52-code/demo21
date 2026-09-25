@@ -37,7 +37,7 @@ services:
     # reference yet, and every write that references it (a WhatsApp webhook
     # creating a Conversation, POST /v1/enquiries, ...) fails its foreign
     # key constraint until this has run at least once.
-    startCommand: pnpm --filter @ai-concierge/db exec prisma migrate deploy && pnpm --filter @ai-concierge/db run seed && node apps/api/dist/server.js
+    startCommand: pnpm --filter @ai-concierge/db exec prisma migrate deploy && pnpm --filter @ai-concierge/db run seed && pnpm --filter @ai-concierge/db run bootstrap-admin && node apps/api/dist/server.js
     healthCheckPath: /health
     envVars:
       - key: NODE_ENV
@@ -133,6 +133,16 @@ services:
       # https://aistudio.google.com/apikey. GEMINI_MODEL_ID/TEMPERATURE/etc.
       # have safe defaults in code and don't need to be set here.
       - key: GEMINI_API_KEY
+        sync: false
+      # First Admin Dashboard account — packages/db/src/bootstrapAdmin.ts.
+      # Idempotent (skips once this account exists) and a no-op if either
+      # is left unset, but without them a fresh deploy has no account to
+      # sign into the dashboard with. Set both in the Render dashboard,
+      # then sign in and change the password from there (no self-serve
+      # password change yet — see docs/phases/PHASE-07.md).
+      - key: BOOTSTRAP_ADMIN_EMAIL
+        sync: false
+      - key: BOOTSTRAP_ADMIN_PASSWORD
         sync: false
 
   # Disabled: Render's free plan does not offer the "worker" service type
