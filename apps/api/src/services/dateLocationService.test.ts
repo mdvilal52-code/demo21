@@ -3,12 +3,14 @@ import { AppError } from '@ai-concierge/domain';
 
 const mocks = vi.hoisted(() => ({
   findLatestMessageForConversation: vi.fn(),
+  findMessagesForConversation: vi.fn(),
   createDateLocationExtraction: vi.fn(),
   auditRecord: vi.fn(),
 }));
 
 vi.mock('@ai-concierge/db', () => ({
   findLatestMessageForConversation: mocks.findLatestMessageForConversation,
+  findMessagesForConversation: mocks.findMessagesForConversation,
   createDateLocationExtraction: mocks.createDateLocationExtraction,
   PrismaAuditWriter: class {
     record = mocks.auditRecord;
@@ -57,11 +59,14 @@ describe('extractDatesAndLocation', () => {
     ).rejects.toBeInstanceOf(AppError);
   });
 
-  it('runs the orchestrator on the latest message content and persists the result', async () => {
+  it('runs the orchestrator on the accumulated transcript and persists the result', async () => {
     mocks.findLatestMessageForConversation.mockResolvedValue({
       id: 'msg-1',
       content: 'pickup 15 Oct',
     });
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', content: 'pickup 15 Oct' },
+    ]);
     const deps = makeDeps();
 
     const result = await extractDatesAndLocation(deps, {
@@ -83,5 +88,29 @@ describe('extractDatesAndLocation', () => {
     expect(result.conversationId).toBe('conv-1');
     expect(result.messageId).toBe('msg-1');
     expect(result.extraction).toEqual(fakeExtraction);
+  });
+
+  it('feeds the orchestrator the whole accumulated transcript, not just the newest turn', async () => {
+    mocks.findLatestMessageForConversation.mockResolvedValue({
+      id: 'msg-2',
+      content: 'actually, make it 5 days',
+    });
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-1', content: 'I need a Urus pickup 15 Oct from Dubai Marina' },
+      { id: 'msg-2', content: 'actually, make it 5 days' },
+    ]);
+    const deps = makeDeps();
+
+    await extractDatesAndLocation(deps, {
+      tenantId: TENANT_ID,
+      conversationId: 'conv-1',
+      requestId: 'req-2',
+    });
+
+    expect(
+      (deps as { orchestrator: { extract: ReturnType<typeof vi.fn> } }).orchestrator.extract,
+    ).toHaveBeenCalledWith(
+      'I need a Urus pickup 15 Oct from Dubai Marina\nactually, make it 5 days',
+    );
   });
 });

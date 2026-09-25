@@ -8,9 +8,12 @@ import {
 import type { PrismaClient } from '@prisma/client';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  appendMessageToConversation,
   createConversationWithMessage,
   findConversationById,
   findLatestMessageForConversation,
+  findMessagesForConversation,
+  findMostRecentConversationForCustomer,
   markConversationProcessed,
 } from './conversationRepository.js';
 
@@ -122,5 +125,89 @@ describe('conversationRepository', () => {
       '00000000-0000-0000-0000-000000009999',
     );
     expect(found).toBeNull();
+  });
+
+  describe('conversation continuity', () => {
+    it('appends a message to an existing conversation instead of creating a new one', async () => {
+      const { conversation } = await createConversationWithMessage(prisma, {
+        tenantId: TEST_TENANT_ID,
+        channel: 'WHATSAPP',
+        customerRef: '971501111111',
+        content: 'I need a Urus next month',
+      });
+
+      const { message } = await appendMessageToConversation(
+        prisma,
+        TEST_TENANT_ID,
+        conversation.id,
+        'actually, make it 5 days',
+      );
+
+      expect(message.conversationId).toBe(conversation.id);
+      const found = await findConversationById(prisma, TEST_TENANT_ID, conversation.id);
+      expect(found?.messages).toHaveLength(2);
+      expect(found?.messages.map((m) => m.content)).toEqual([
+        'I need a Urus next month',
+        'actually, make it 5 days',
+      ]);
+    });
+
+    it('refuses to append to a conversation belonging to a different tenant', async () => {
+      const { conversation } = await createConversationWithMessage(prisma, {
+        tenantId: TEST_TENANT_ID,
+        channel: 'WHATSAPP',
+        customerRef: '971502222222',
+        content: 'hello',
+      });
+
+      await expect(
+        appendMessageToConversation(prisma, OTHER_TENANT_ID, conversation.id, 'cross-tenant'),
+      ).rejects.toThrow();
+    });
+
+    it('finds the customer’s most recent conversation on the same channel', async () => {
+      const { conversation: first } = await createConversationWithMessage(prisma, {
+        tenantId: TEST_TENANT_ID,
+        channel: 'WHATSAPP',
+        customerRef: '971503333333',
+        content: 'first message',
+      });
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      const { conversation: second } = await createConversationWithMessage(prisma, {
+        tenantId: TEST_TENANT_ID,
+        channel: 'WHATSAPP',
+        customerRef: '971503333333',
+        content: 'second, separate conversation',
+      });
+
+      const found = await findMostRecentConversationForCustomer(
+        prisma,
+        TEST_TENANT_ID,
+        'WHATSAPP',
+        '971503333333',
+      );
+      expect(found?.id).toBe(second.id);
+      expect(found?.id).not.toBe(first.id);
+    });
+
+    it('returns messages oldest-first, capped at the requested limit', async () => {
+      const { conversation, message: first } = await createConversationWithMessage(prisma, {
+        tenantId: TEST_TENANT_ID,
+        channel: 'WEB',
+        customerRef: 'web-session-transcript',
+        content: 'turn 1',
+      });
+      await appendMessageToConversation(prisma, TEST_TENANT_ID, conversation.id, 'turn 2');
+      await appendMessageToConversation(prisma, TEST_TENANT_ID, conversation.id, 'turn 3');
+
+      const all = await findMessagesForConversation(prisma, TEST_TENANT_ID, conversation.id);
+      expect(all.map((m) => m.content)).toEqual(['turn 1', 'turn 2', 'turn 3']);
+      expect(all[0]?.id).toBe(first.id);
+
+      const capped = await findMessagesForConversation(prisma, TEST_TENANT_ID, conversation.id, {
+        limit: 2,
+      });
+      expect(capped.map((m) => m.content)).toEqual(['turn 2', 'turn 3']);
+    });
   });
 });

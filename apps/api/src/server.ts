@@ -13,6 +13,7 @@ import {
 import { buildApp } from './app.js';
 import type { AppContext } from './context.js';
 import { loadApiEnv } from './env.js';
+import { createAIProvider } from './lib/geminiProvider.js';
 import { createPostEnquiryQueue } from './lib/queue.js';
 import { createRedisClient } from './lib/redis.js';
 import { createWhatsAppClient } from './lib/whatsappClient.js';
@@ -43,6 +44,22 @@ async function main(): Promise<void> {
   });
   const missingInfoOrchestrator = new MissingInfoOrchestrator();
   const { client: whatsappClient, status: whatsappStatus } = createWhatsAppClient(config);
+  const { provider: aiProvider, status: aiProviderStatus } = createAIProvider(config);
+
+  if (aiProviderStatus === 'CONFIGURED') {
+    // Catches a bad GEMINI_MODEL_ID (or an unreachable API) at deploy time
+    // instead of discovering it silently later, one degraded-to-fallback
+    // reply at a time — see docs/phases/PHASE-06.md §7.
+    const health = await aiProvider.healthCheck();
+    if (health === 'CONFIGURED') {
+      logger.info({ modelId: config.GEMINI_MODEL_ID }, 'Gemini provider reachable');
+    } else {
+      logger.error(
+        { modelId: config.GEMINI_MODEL_ID, health },
+        'GEMINI_API_KEY is set but the configured model is not reachable — conversational replies will fall back to deterministic templates until this is fixed',
+      );
+    }
+  }
 
   const ctx: AppContext = {
     config,
@@ -57,8 +74,10 @@ async function main(): Promise<void> {
     observabilityStatus: observability.status,
     whatsappClient,
     whatsappStatus,
+    aiProvider,
+    aiProviderStatus,
   };
-  logger.info({ whatsappStatus }, 'WhatsApp adapter status');
+  logger.info({ whatsappStatus, aiProviderStatus }, 'WhatsApp adapter / AI provider status');
 
   const app = await buildApp(ctx, logger);
 

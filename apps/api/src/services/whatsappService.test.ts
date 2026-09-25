@@ -2,20 +2,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   findIdempotencyKey: vi.fn(),
+  findMessagesForConversation: vi.fn(),
   submitEnquiry: vi.fn(),
   extractDatesAndLocation: vi.fn(),
   determineVehicle: vi.fn(),
   checkMissingInfo: vi.fn(),
+  generateConversationalReply: vi.fn(),
   sendTextMessage: vi.fn(),
 }));
 
-vi.mock('@ai-concierge/db', () => ({ findIdempotencyKey: mocks.findIdempotencyKey }));
+vi.mock('@ai-concierge/db', () => ({
+  findIdempotencyKey: mocks.findIdempotencyKey,
+  findMessagesForConversation: mocks.findMessagesForConversation,
+}));
 vi.mock('./enquiryService.js', () => ({ submitEnquiry: mocks.submitEnquiry }));
 vi.mock('./dateLocationService.js', () => ({
   extractDatesAndLocation: mocks.extractDatesAndLocation,
 }));
 vi.mock('./vehicleService.js', () => ({ determineVehicle: mocks.determineVehicle }));
 vi.mock('./missingInfoService.js', () => ({ checkMissingInfo: mocks.checkMissingInfo }));
+vi.mock('./conversationalReplyService.js', () => ({
+  generateConversationalReply: mocks.generateConversationalReply,
+  MAX_RECENT_TURNS_FOR_REPLY: 12,
+}));
 
 const { handleInboundWhatsAppMessage } = await import('./whatsappService.js');
 
@@ -30,6 +39,7 @@ function makeDeps() {
     vehicleOrchestrator: {},
     missingInfoOrchestrator: {},
     whatsappClient: { sendTextMessage: mocks.sendTextMessage },
+    aiProvider: {},
     logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
   } as never;
 }
@@ -61,6 +71,12 @@ describe('handleInboundWhatsAppMessage', () => {
     mocks.extractDatesAndLocation.mockResolvedValue({});
     mocks.determineVehicle.mockResolvedValue({});
     mocks.checkMissingInfo.mockResolvedValue({ missingInfo: fakeMissingInfo });
+    mocks.findMessagesForConversation.mockResolvedValue([]);
+    mocks.generateConversationalReply.mockResolvedValue({
+      text: fakeMissingInfo.clarificationPrompt,
+      source: 'DETERMINISTIC_FALLBACK',
+      fallbackReason: 'NOT_CONFIGURED',
+    });
   });
 
   it('skips processing entirely for a duplicate message id', async () => {
@@ -108,8 +124,12 @@ describe('handleInboundWhatsAppMessage', () => {
     );
   });
 
-  it('runs the full Steps 1-4 pipeline and sends the Step 4 reply for a valid text message', async () => {
+  it('runs the full Steps 1-4 pipeline and sends the generated reply for a valid text message', async () => {
     mocks.findIdempotencyKey.mockResolvedValue(null);
+    mocks.findMessagesForConversation.mockResolvedValue([
+      { id: 'msg-0', conversationId: 'conv-1', content: 'I want a Urus', createdAt: new Date() },
+      { id: 'msg-1', conversationId: 'conv-1', content: 'I want a car', createdAt: new Date() },
+    ]);
 
     await handleInboundWhatsAppMessage(makeDeps(), {
       tenantId: TENANT_ID,
@@ -138,6 +158,16 @@ describe('handleInboundWhatsAppMessage', () => {
     expect(mocks.checkMissingInfo).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ conversationId: 'conv-1' }),
+    );
+    expect(mocks.generateConversationalReply).toHaveBeenCalledWith(
+      expect.objectContaining({ aiProvider: expect.anything() }),
+      {
+        missingInfo: fakeMissingInfo,
+        recentTurns: [
+          { role: 'customer', content: 'I want a Urus' },
+          { role: 'customer', content: 'I want a car' },
+        ],
+      },
     );
     expect(mocks.sendTextMessage).toHaveBeenCalledWith(
       '971501234567',

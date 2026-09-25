@@ -1,10 +1,10 @@
 {
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
-  "version": "0.5.0",
-  "updatedAt": "2026-09-20",
+  "version": "0.6.0",
+  "updatedAt": "2026-09-25",
   "statusLegend": ["PENDING", "IN_PROGRESS", "FROZEN"],
-  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase ids 6-10 below are still the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be reconciled with the real journey-step sequence (Steps 5-19) as work reaches them, same as phases 1-4 already turned out to differ from this document's original phase 1-4 grouping. Phase id 5 has now been reconciled too, but NOT to journey Step 5 (Eligibility, per MASTER-PLAN.md §4) — it was explicitly requested and built ahead of Eligibility as just the WhatsApp slice of the original phase-5 grouping (see docs/PHASE-5.md §0). Two pieces of the original plan are therefore still open and unnumbered: journey Step 5 (Eligibility) itself, and the rest of the original phase-5 grouping (documents, payments, CRM, fulfilment, Web-chat/Email channels) — both remain PENDING in spirit, without an id yet, until picked up.",
+  "phaseNumbering": "Phases 1-4 were each scoped and delivered as a single journey step from docs/MASTER-PLAN.md §4 (1=Enquiry/Intent, 2=Extract Dates & Location, 3=Determine Vehicle, 4=Ask Missing Information), not the original 10-phase infra grouping below. Phase id 5 was reconciled to the WhatsApp slice of the original phase-5 grouping, explicitly requested ahead of journey Step 5/Eligibility (see docs/PHASE-5.md §0) — Eligibility itself and the rest of that original grouping (documents, payments, CRM, fulfilment, Web-chat/Email channels) remain PENDING in spirit, without an id yet. Phase id 6 has now been reconciled the same way: it was originally 'Security Engine & Zero Trust' in the pre-journey-step 10-phase plan, but was explicitly requested and built ahead of Security as 'Conversational AI Engine (Gemini)' instead (see docs/phases/PHASE-06.md §0) — the guardrails a live model call needs (egress allowlist, timeout/circuit-breaker, injection defenses, output grounding) were built as part of this phase rather than deferred entirely to the still-PENDING Security phase, which is why it was judged safe to reorder. Security Engine & Zero Trust and everything after it shifted to ids 7-11 (each still the original, pre-journey-step-granularity plan, kept for reference — their scope/ids will be further reconciled with the real journey-step sequence, Steps 5 and 9-19, as work reaches them, same as every phase above already turned out to differ from this document's original 10-phase grouping).",
   "rules": {
     "protocol": "docs/PHASE-EXECUTION-PROTOCOL.md",
     "masterPlan": "docs/MASTER-PLAN.md",
@@ -147,6 +147,30 @@
     },
     {
       "id": 6,
+      "name": "Conversational AI Engine (Gemini)",
+      "status": "FROZEN",
+      "goal": "Give the WhatsApp channel a real, human-like conversational layer without weakening any existing guarantee: Steps 1-4 stay 100% deterministic and remain the only source of booking facts; a Gemini-backed AIProvider only phrases the reply around whatever those steps already verified, strictly grounded, with a deterministic-template fallback on any failure. Also fixes the conversation-memory gap the WhatsApp channel had carried since Phase 5 (every inbound message started an unrelated fresh conversation) so multi-turn corrections and follow-ups actually work. Explicitly requested and built ahead of journey Step 5 (Eligibility) and Security Engine & Zero Trust — see docs/phases/PHASE-06.md §0 for the reconciliation note and the safety reasoning for reordering ahead of Security.",
+      "deliverables": [
+        "packages/ai: AIProvider interface evolved to a real structured-generation + health-check contract (systemInstruction/prompt/responseSchema in, unknown JSON + usage + modelId out — callers must Zod-validate, never trust AI output); ResilientAIProvider decorator (timeout + circuit breaker + rate limit), same pattern as Step 2's ResilientLocationProvider",
+        "apps/api/src/lib/geminiProvider.ts: GeminiProvider (direct REST call via ssrfSafeFetch against a single hardcoded host, API key sent via header never URL/logs) + createAIProvider factory (GEMINI_API_KEY alone gates CONFIGURED/NOT_CONFIGURED; GEMINI_MODEL_ID/TEMPERATURE/MAX_OUTPUT_TOKENS/TIMEOUT_MS configurable, safe defaults)",
+        "apps/api/src/services/conversationalReplyService.ts: generateConversationalReply — grounded strictly in Step 4's verified result and recent turns, schema-validated, a second code-level grounding check (rejects invented prices/availability/booking-confirmation language even from well-formed JSON), falls back to the pre-existing deterministic template (buildWhatsAppReplyText, unchanged) on NOT_CONFIGURED / schema-invalid / grounding-violation / provider-error / open-circuit",
+        "Conversation continuity: packages/db conversationRepository additions (findMostRecentConversationForCustomer, appendMessageToConversation, findMessagesForConversation); enquiryService.submitEnquiry now reopens the customer's in-progress conversation (within Step 4's own 24h window, not yet COMPLETE/EXPIRED) instead of always starting a new one",
+        "Steps 2-3 (dateLocationService, vehicleService) now run against the conversation's accumulated transcript (capped at 200 messages) instead of only the latest message, via an optional precomputedTranscript so the WhatsApp channel fetches the message history once and reuses it for Steps 2-3 and the reply generator instead of three redundant queries",
+        "apps/api/src/services/whatsappService.ts wired to the new reply service; apps/api/src/server.ts boot-time Gemini health check so a bad model id/unreachable API surfaces in logs immediately instead of silently degrading every reply to the fallback",
+        "New AppError code AI_RESPONSE_INVALID (502) for a provider response that's empty, safety-blocked, malformed, or fails validation",
+        ".env.example / render.yaml updated with GEMINI_* vars; docs/MASTER-PLAN.md §9 decision #8 updated (Gemini adapter behind the existing AIProvider interface; Anthropic/OpenAI remain unbuilt future implementations of the same interface)",
+        "docs/phases/PHASE-06.md"
+      ],
+      "acceptance": [
+        "every required scenario passes: provider NOT_CONFIGURED falls back to the exact pre-existing deterministic reply; a well-formed grounded AI reply is used; a schema-invalid AI response falls back; a reply inventing a price or claiming availability/booking-confirmation is rejected by the grounding check and falls back even though the JSON was well-formed; a prompt-injection attempt in a customer turn is sanitized before it reaches the model prompt and cannot force a fabricated price; a follow-up message reopens the same conversation instead of starting fresh, and Steps 2-3 resolve against the accumulated transcript instead of losing an earlier turn's facts",
+        "full Phase 1-5 regression re-run and green (no working functionality broken) — verified against real Postgres/Redis in this sandbox (no Docker daemon here, same documented limitation as Phases 1-5)",
+        "all gates pass: typecheck, lint, format, 361 unit + 73 integration + 57 security tests, 4 e2e, production build, /code-review findings addressed — see docs/phases/PHASE-06.md §8"
+      ],
+      "dependsOn": [5],
+      "phaseDoc": "docs/phases/PHASE-06.md"
+    },
+    {
+      "id": 7,
       "name": "Security Engine & Zero Trust",
       "status": "PENDING",
       "goal": "Zero-trust layering verified by tests (WAF -> AuthN -> AuthZ -> Tenant -> Sandbox -> Egress -> DB policy -> Encrypted data).",
@@ -166,11 +190,11 @@
         "authz matrix tests",
         "all scanners green with zero critical"
       ],
-      "dependsOn": [5],
-      "phaseDoc": "docs/phases/PHASE-06.md"
+      "dependsOn": [6],
+      "phaseDoc": "docs/phases/PHASE-07.md"
     },
     {
-      "id": 7,
+      "id": 8,
       "name": "Admin Dashboard (Web)",
       "status": "PENDING",
       "goal": "Dashboard wireframe, pixel-faithful to the design system.",
@@ -185,11 +209,11 @@
         "visual regression green against docs/design/reference",
         "role-aware nav enforced"
       ],
-      "dependsOn": [6],
-      "phaseDoc": "docs/phases/PHASE-07.md"
+      "dependsOn": [7],
+      "phaseDoc": "docs/phases/PHASE-08.md"
     },
     {
-      "id": 8,
+      "id": 9,
       "name": "Customer Mobile App (PWA)",
       "status": "PENDING",
       "goal": "Mobile wireframe + reference image, pixel-faithful.",
@@ -204,11 +228,11 @@
         "installable PWA + offline shell",
         "visual regression green"
       ],
-      "dependsOn": [7],
-      "phaseDoc": "docs/phases/PHASE-08.md"
+      "dependsOn": [8],
+      "phaseDoc": "docs/phases/PHASE-09.md"
     },
     {
-      "id": 9,
+      "id": 10,
       "name": "Observability, AI Evaluation & Automatic QA",
       "status": "PENDING",
       "goal": "Measurable, self-checking system; Automatic QA PASS/FAIL gate.",
@@ -224,11 +248,11 @@
         "Automatic QA gate blocks release on FAIL",
         "eval + security regression thresholds enforced in CI"
       ],
-      "dependsOn": [8],
-      "phaseDoc": "docs/phases/PHASE-09.md"
+      "dependsOn": [9],
+      "phaseDoc": "docs/phases/PHASE-10.md"
     },
     {
-      "id": 10,
+      "id": 11,
       "name": "Infrastructure, CI/CD & Release",
       "status": "PENDING",
       "goal": "Production-ready delivery.",
@@ -243,8 +267,8 @@
         "prod deploy gated by all checks + manual approval",
         "DR drill documented and rehearsed"
       ],
-      "dependsOn": [9],
-      "phaseDoc": "docs/phases/PHASE-10.md"
+      "dependsOn": [10],
+      "phaseDoc": "docs/phases/PHASE-11.md"
     }
   ]
 }

@@ -15,6 +15,7 @@ import { Queue } from 'bullmq';
 import { buildApp } from '../app.js';
 import type { AppContext } from '../context.js';
 import type { ApiEnv } from '../env.js';
+import { createAIProvider } from '../lib/geminiProvider.js';
 import { createWhatsAppClient } from '../lib/whatsappClient.js';
 import { PrismaVehicleCatalogProvider } from '../services/vehicleCatalogProvider.js';
 
@@ -46,6 +47,10 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
     // override this with their own low value on a dedicated app instance.
     RATE_LIMIT_MAX: 1000,
     RATE_LIMIT_WINDOW_MS: 60_000,
+    GEMINI_MODEL_ID: 'gemini-3.8-flash',
+    GEMINI_TEMPERATURE: 0.6,
+    GEMINI_MAX_OUTPUT_TOKENS: 512,
+    GEMINI_TIMEOUT_MS: 8000,
     ...overrides,
   };
 
@@ -56,6 +61,7 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
   });
 
   const { client: whatsappClient, status: whatsappStatus } = createWhatsAppClient(config);
+  const { provider: aiProvider, status: aiProviderStatus } = createAIProvider(config);
 
   const ctx: AppContext = {
     config,
@@ -72,6 +78,8 @@ export async function buildTestApp(overrides: Partial<ApiEnv> = {}): Promise<Tes
     observabilityStatus: 'NOT_CONFIGURED',
     whatsappClient,
     whatsappStatus,
+    aiProvider,
+    aiProviderStatus,
   };
 
   const app = await buildApp(ctx, ctx.logger);

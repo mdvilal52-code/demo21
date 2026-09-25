@@ -7,6 +7,7 @@ import {
 } from '@ai-concierge/db';
 import { AppError, type TenantId } from '@ai-concierge/domain';
 import type { DetermineVehicleResponse } from '@ai-concierge/contracts';
+import { buildConversationTranscript } from './conversationTranscript.js';
 
 export interface VehicleServiceDeps {
   prisma: PrismaClient;
@@ -17,15 +18,25 @@ export interface DetermineVehicleInput {
   tenantId: TenantId;
   conversationId: string;
   requestId: string;
+  /**
+   * Reuse a transcript the caller already fetched (e.g. the WhatsApp channel
+   * fetches it once and shares it across Steps 2-3 plus the reply generator)
+   * instead of querying the same message history again. REST callers omit
+   * this and get a freshly-fetched transcript, same as before.
+   */
+  precomputedTranscript?: string;
 }
 
 /**
- * Step 3 — Determine Vehicle. Input is a Phase 1 conversation's latest
- * message (already validated at ingestion); this never accepts raw
- * customer text directly. AI proposes (`VehicleIntentService`, inside the
+ * Step 3 — Determine Vehicle. Input is the conversation's accumulated
+ * transcript up to and including its latest message (already validated at
+ * ingestion), not raw customer text passed directly — so "the same car" or a
+ * follow-up that doesn't restate the vehicle still resolves against what was
+ * already said. AI proposes (`VehicleIntentService`, inside the
  * orchestrator); deterministic domain logic verifies against the real fleet
  * (`VehicleCatalogService` + `VehicleValidationService`) before anything is
- * persisted or returned.
+ * persisted or returned. The result is still recorded against the latest
+ * message, matching Step 4's lookup convention.
  */
 export async function determineVehicle(
   deps: VehicleServiceDeps,
@@ -40,7 +51,10 @@ export async function determineVehicle(
     throw new AppError('NOT_FOUND', 'Conversation not found');
   }
 
-  const determination = await deps.orchestrator.determine(message.content, {
+  const transcript =
+    input.precomputedTranscript ??
+    (await buildConversationTranscript(deps.prisma, input.tenantId, input.conversationId));
+  const determination = await deps.orchestrator.determine(transcript, {
     tenantId: input.tenantId,
   });
 

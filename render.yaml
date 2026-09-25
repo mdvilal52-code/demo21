@@ -86,6 +86,12 @@ services:
         sync: false
       - key: WHATSAPP_APP_SECRET
         sync: false
+      # Gemini — conversational reply generation only; leave unset to keep
+      # the adapter NOT_CONFIGURED (see .env.example). Get a key at
+      # https://aistudio.google.com/apikey. GEMINI_MODEL_ID/TEMPERATURE/etc.
+      # have safe defaults in code and don't need to be set here.
+      - key: GEMINI_API_KEY
+        sync: false
 
   - type: worker
     name: ai-concierge-worker

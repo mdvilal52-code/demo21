@@ -1,6 +1,10 @@
-import type { IntentEngine, DateLocationExtractionOrchestrator } from '@ai-concierge/ai';
+import type {
+  AIProvider,
+  IntentEngine,
+  DateLocationExtractionOrchestrator,
+} from '@ai-concierge/ai';
 import type { VehicleDeterminationOrchestrator, MissingInfoOrchestrator } from '@ai-concierge/ai';
-import { findIdempotencyKey, type PrismaClient } from '@ai-concierge/db';
+import { findIdempotencyKey, findMessagesForConversation, type PrismaClient } from '@ai-concierge/db';
 import { messageContentSchema, type TenantId } from '@ai-concierge/domain';
 import type { Queue } from 'bullmq';
 import type { FastifyBaseLogger } from 'fastify';
@@ -9,7 +13,12 @@ import { extractDatesAndLocation } from './dateLocationService.js';
 import { determineVehicle } from './vehicleService.js';
 import { checkMissingInfo } from './missingInfoService.js';
 import {
-  buildWhatsAppReplyText,
+  generateConversationalReply,
+  MAX_RECENT_TURNS_FOR_REPLY,
+  type RecentTurn,
+} from './conversationalReplyService.js';
+import { joinTranscript, MAX_TRANSCRIPT_MESSAGES } from './conversationTranscript.js';
+import {
   WHATSAPP_MESSAGE_TOO_LONG_REPLY,
   WHATSAPP_UNSUPPORTED_MESSAGE_TYPE_REPLY,
 } from './whatsappReply.js';
@@ -24,6 +33,7 @@ export interface WhatsAppServiceDeps {
   vehicleOrchestrator: VehicleDeterminationOrchestrator;
   missingInfoOrchestrator: MissingInfoOrchestrator;
   whatsappClient: WhatsAppClient;
+  aiProvider: AIProvider;
   logger: FastifyBaseLogger;
 }
 
@@ -44,16 +54,15 @@ async function safeReply(deps: WhatsAppServiceDeps, to: string, body: string): P
 /**
  * Runs one inbound WhatsApp text message through the exact same Steps 1-4
  * pipeline a REST client drives via four separate calls (submitEnquiry ->
- * extractDatesAndLocation -> determineVehicle -> checkMissingInfo), then
- * replies with whatever Step 4 decided. No new business logic: this is a
- * channel adapter over already-frozen, already-tested pipeline logic.
- *
- * Each inbound message starts a fresh conversation (matching submitEnquiry's
- * own contract exactly) — there's no cross-message thread memory yet. A
- * customer's follow-up reply to a clarification question is processed as an
- * independent new enquiry, not merged with what an earlier message resolved.
- * That conversational loop is explicitly later-phase scope (PHASE-4.md §13 /
- * MASTER-PLAN.md's Event/Workflow Engine), not a channel-adapter concern.
+ * extractDatesAndLocation -> determineVehicle -> checkMissingInfo). Business
+ * facts are still 100% deterministic — Steps 1-4 never changed. What's new
+ * (PHASE-06.md): `submitEnquiry` now reopens the customer's existing
+ * in-progress conversation instead of always starting fresh, Steps 2-3 read
+ * the accumulated transcript instead of only the latest message, and the
+ * reply is phrased by `generateConversationalReply` — a real LLM call
+ * grounded strictly in Step 4's verified result, falling back to the
+ * original deterministic template whenever the provider isn't configured or
+ * its output can't be trusted.
  */
 export async function handleInboundWhatsAppMessage(
   deps: WhatsAppServiceDeps,
@@ -103,12 +112,24 @@ export async function handleInboundWhatsAppMessage(
       },
     );
 
+    // Fetched once and reused for Steps 2-3 and the reply generator below —
+    // three separate re-fetches of the same conversation's message history
+    // per inbound message was real, avoidable DB load.
+    const conversationMessages = await findMessagesForConversation(
+      deps.prisma,
+      input.tenantId,
+      enquiry.conversationId,
+      { limit: MAX_TRANSCRIPT_MESSAGES },
+    );
+    const transcript = joinTranscript(conversationMessages);
+
     await extractDatesAndLocation(
       { prisma: deps.prisma, orchestrator: deps.dateLocationOrchestrator },
       {
         tenantId: input.tenantId,
         conversationId: enquiry.conversationId,
         requestId: input.requestId,
+        precomputedTranscript: transcript,
       },
     );
 
@@ -118,6 +139,7 @@ export async function handleInboundWhatsAppMessage(
         tenantId: input.tenantId,
         conversationId: enquiry.conversationId,
         requestId: input.requestId,
+        precomputedTranscript: transcript,
       },
     );
 
@@ -130,10 +152,16 @@ export async function handleInboundWhatsAppMessage(
       },
     );
 
-    await deps.whatsappClient.sendTextMessage(
-      message.from,
-      buildWhatsAppReplyText(missingInfo.missingInfo),
+    const recentTurns: RecentTurn[] = conversationMessages
+      .slice(-MAX_RECENT_TURNS_FOR_REPLY)
+      .map((row) => ({ role: 'customer', content: row.content }));
+
+    const reply = await generateConversationalReply(
+      { aiProvider: deps.aiProvider, logger: deps.logger },
+      { missingInfo: missingInfo.missingInfo, recentTurns },
     );
+
+    await deps.whatsappClient.sendTextMessage(message.from, reply.text);
   } catch (error) {
     deps.logger.error(
       { err: error, whatsappMessageId: message.id },

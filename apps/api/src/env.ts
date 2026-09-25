@@ -26,6 +26,19 @@ export const apiEnvSchema = baseEnvSchema.extend({
   WHATSAPP_PHONE_NUMBER_ID: z.string().min(1).optional(),
   WHATSAPP_VERIFY_TOKEN: z.string().min(1).optional(),
   WHATSAPP_APP_SECRET: z.string().min(1).optional(),
+
+  // Gemini — conversational reply generation only (Steps 1-4's business
+  // facts stay deterministic regardless). Only the API key gates
+  // CONFIGURED/NOT_CONFIGURED; the rest are tuning knobs with safe defaults,
+  // not credentials (see lib/geminiProvider.ts).
+  GEMINI_API_KEY: z.string().min(1).optional(),
+  // No plain "gemini-3.1-flash" GA id exists as of this writing — see
+  // docs/phases/PHASE-06.md §2. Override freely once you've confirmed what
+  // your own API key/tier has access to; nothing else in the code changes.
+  GEMINI_MODEL_ID: z.string().min(1).default('gemini-3.8-flash'),
+  GEMINI_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.6),
+  GEMINI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(512),
+  GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
 });
 
 export type ApiEnv = z.infer<typeof apiEnvSchema>;

@@ -342,6 +342,6 @@ Deliverables: Terraform (network, Postgres, Redis, object storage, container run
 | 5   | Currency / tax       | AED, VAT 5 %, integer fils.                                                                                                               |
 | 6   | WhatsApp             | Meta Cloud API adapter first; Twilio adapter possible behind the same interface.                                                          |
 | 7   | Payments             | `PaymentProvider` interface; first adapter chosen at Phase 5 (Stripe / Network International / Tap).                                      |
-| 8   | AI providers         | Anthropic and OpenAI adapters; no provider is required to boot — `NOT_CONFIGURED` is a valid state.                                       |
+| 8   | AI providers         | `AIProvider` interface with a real Gemini adapter (Phase 6, `docs/phases/PHASE-06.md`) for conversational reply phrasing only — Steps 1-4's business facts stay deterministic regardless of provider. Anthropic/OpenAI adapters remain plausible future implementations of the same interface but are not built; no provider is required to boot — `NOT_CONFIGURED` is a valid state. |
 | 9   | Workflow engine      | Custom typed state machine in `packages/workflow` (XState v5 acceptable alternative; decided at Phase 3 start).                           |
 | 10  | Package manager      | pnpm + Turborepo; Node LTS.                                                                                                               |

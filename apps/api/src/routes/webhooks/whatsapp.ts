@@ -91,6 +91,7 @@ export const whatsappWebhookRoutes: FastifyPluginAsyncZod = async (app) => {
           vehicleOrchestrator: app.ctx.vehicleOrchestrator,
           missingInfoOrchestrator: app.ctx.missingInfoOrchestrator,
           whatsappClient: app.ctx.whatsappClient,
+          aiProvider: app.ctx.aiProvider,
           logger: request.log,
         },
         { tenantId: app.ctx.config.DEFAULT_TENANT_ID, requestId: request.id, message },

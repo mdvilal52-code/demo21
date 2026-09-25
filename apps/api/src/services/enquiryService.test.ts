@@ -4,16 +4,24 @@ import type { EnquiryServiceDeps } from './enquiryService.js';
 
 const mocks = vi.hoisted(() => ({
   createConversationWithMessage: vi.fn(),
+  appendMessageToConversation: vi.fn(),
   createIntentRecord: vi.fn(),
   findIdempotencyKey: vi.fn(),
+  findLatestMessageForConversation: vi.fn(),
+  findLatestMissingInfoCheckForMessage: vi.fn(),
+  findMostRecentConversationForCustomer: vi.fn(),
   saveIdempotencyKey: vi.fn(),
   auditRecord: vi.fn(),
 }));
 
 vi.mock('@ai-concierge/db', () => ({
   createConversationWithMessage: mocks.createConversationWithMessage,
+  appendMessageToConversation: mocks.appendMessageToConversation,
   createIntentRecord: mocks.createIntentRecord,
   findIdempotencyKey: mocks.findIdempotencyKey,
+  findLatestMessageForConversation: mocks.findLatestMessageForConversation,
+  findLatestMissingInfoCheckForMessage: mocks.findLatestMissingInfoCheckForMessage,
+  findMostRecentConversationForCustomer: mocks.findMostRecentConversationForCustomer,
   saveIdempotencyKey: mocks.saveIdempotencyKey,
   PrismaAuditWriter: class {
     record = mocks.auditRecord;
@@ -51,6 +59,9 @@ describe('submitEnquiry', () => {
       message: { id: 'msg-1' },
     });
     mocks.findIdempotencyKey.mockResolvedValue(null);
+    // Default: no reopenable conversation, so existing tests take the
+    // fresh-conversation path exactly as before this behavior existed.
+    mocks.findMostRecentConversationForCustomer.mockResolvedValue(null);
   });
 
   it('creates a conversation, records the intent, writes an audit event, and enqueues a job', async () => {
@@ -129,5 +140,121 @@ describe('submitEnquiry', () => {
     ).rejects.toBeInstanceOf(AppError);
 
     expect(mocks.createConversationWithMessage).toHaveBeenCalled();
+  });
+
+  describe('conversation continuity', () => {
+    const recentCandidate = {
+      id: 'conv-existing',
+      tenantId: TENANT_ID,
+      channel: 'WEB',
+      customerRef: 'session-1',
+      createdAt: new Date(),
+      processedAt: null,
+    };
+
+    beforeEach(() => {
+      mocks.appendMessageToConversation.mockResolvedValue({
+        conversation: { id: 'conv-existing' },
+        message: { id: 'msg-2' },
+      });
+      mocks.findLatestMessageForConversation.mockResolvedValue({ id: 'msg-1' });
+    });
+
+    it('reopens the existing conversation when it still needs info within the window', async () => {
+      mocks.findMostRecentConversationForCustomer.mockResolvedValue(recentCandidate);
+      mocks.findLatestMissingInfoCheckForMessage.mockResolvedValue({ status: 'NEEDS_INFO' });
+
+      const deps = makeDeps();
+      const result = await submitEnquiry(deps, {
+        tenantId: TENANT_ID,
+        channel: 'WEB',
+        customerRef: 'session-1',
+        message: 'actually, make it 5 days',
+        requestId: 'req-5',
+      });
+
+      expect(mocks.appendMessageToConversation).toHaveBeenCalledWith(
+        {},
+        TENANT_ID,
+        'conv-existing',
+        'actually, make it 5 days',
+      );
+      expect(mocks.createConversationWithMessage).not.toHaveBeenCalled();
+      expect(result.conversationId).toBe('conv-existing');
+      expect(mocks.auditRecord).toHaveBeenCalledWith(
+        expect.objectContaining({ action: 'enquiry.continued' }),
+      );
+    });
+
+    it('starts fresh when the previous conversation already completed', async () => {
+      mocks.findMostRecentConversationForCustomer.mockResolvedValue(recentCandidate);
+      mocks.findLatestMissingInfoCheckForMessage.mockResolvedValue({ status: 'COMPLETE' });
+
+      const deps = makeDeps();
+      await submitEnquiry(deps, {
+        tenantId: TENANT_ID,
+        channel: 'WEB',
+        customerRef: 'session-1',
+        message: 'I need another car',
+        requestId: 'req-6',
+      });
+
+      expect(mocks.appendMessageToConversation).not.toHaveBeenCalled();
+      expect(mocks.createConversationWithMessage).toHaveBeenCalled();
+    });
+
+    it('starts fresh when the previous conversation already expired', async () => {
+      mocks.findMostRecentConversationForCustomer.mockResolvedValue(recentCandidate);
+      mocks.findLatestMissingInfoCheckForMessage.mockResolvedValue({ status: 'EXPIRED' });
+
+      const deps = makeDeps();
+      await submitEnquiry(deps, {
+        tenantId: TENANT_ID,
+        channel: 'WEB',
+        customerRef: 'session-1',
+        message: 'hi again',
+        requestId: 'req-7',
+      });
+
+      expect(mocks.appendMessageToConversation).not.toHaveBeenCalled();
+      expect(mocks.createConversationWithMessage).toHaveBeenCalled();
+    });
+
+    it('starts fresh when the previous conversation is outside the reopen window', async () => {
+      mocks.findMostRecentConversationForCustomer.mockResolvedValue({
+        ...recentCandidate,
+        createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+      });
+
+      const deps = makeDeps();
+      await submitEnquiry(deps, {
+        tenantId: TENANT_ID,
+        channel: 'WEB',
+        customerRef: 'session-1',
+        message: 'hi again',
+        requestId: 'req-8',
+      });
+
+      expect(mocks.findLatestMessageForConversation).not.toHaveBeenCalled();
+      expect(mocks.appendMessageToConversation).not.toHaveBeenCalled();
+      expect(mocks.createConversationWithMessage).toHaveBeenCalled();
+    });
+
+    it('starts fresh when no check has run yet but treats an in-flight conversation as reopenable', async () => {
+      mocks.findMostRecentConversationForCustomer.mockResolvedValue(recentCandidate);
+      mocks.findLatestMissingInfoCheckForMessage.mockResolvedValue(null);
+
+      const deps = makeDeps();
+      await submitEnquiry(deps, {
+        tenantId: TENANT_ID,
+        channel: 'WEB',
+        customerRef: 'session-1',
+        message: 'still deciding',
+        requestId: 'req-9',
+      });
+
+      expect(mocks.appendMessageToConversation).toHaveBeenCalled();
+      expect(mocks.createConversationWithMessage).not.toHaveBeenCalled();
+    });
   });
 });

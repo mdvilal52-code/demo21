@@ -1,4 +1,5 @@
 import type {
+  AIProvider,
   DateLocationExtractionOrchestrator,
   IntentEngine,
   MissingInfoOrchestrator,
@@ -24,6 +25,8 @@ export interface AppContext {
   observabilityStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
   whatsappClient: WhatsAppClient;
   whatsappStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
+  aiProvider: AIProvider;
+  aiProviderStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
 }
 
 declare module 'fastify' {
