@@ -10,12 +10,13 @@ import type {
   QuoteValidator,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
-import type { WhatsAppProvider } from '@ai-concierge/channels';
+import type { EmailProvider, WhatsAppProvider } from '@ai-concierge/channels';
 import type { PrismaClient } from '@ai-concierge/db';
 import type { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 import type { ApiEnv } from './env.js';
+import type { NotificationProvider } from './lib/notificationProvider.js';
 import type { ReservationLockService } from './services/reservationLockService.js';
 
 export interface AppContext {
@@ -33,6 +34,10 @@ export interface AppContext {
   pricingRules: PricingRules;
   quoteValidator: QuoteValidator;
   whatsappProvider: WhatsAppProvider;
+  emailProvider: EmailProvider;
+  emailProviderStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
+  notificationProvider: NotificationProvider;
+  notificationProviderStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
   /** Exposed for future admin-Settings visibility (matches `whatsappProvider`'s role) — consumed directly by `reservationLockService`, not read elsewhere yet. */
   fleetProvider: FleetProvider;
   reservationLockService: ReservationLockService;

@@ -4,6 +4,7 @@ import {
 } from '@ai-concierge/contracts';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { checkAvailability } from '../../services/availabilityService.js';
+import { recordAvailabilityOutcome } from '../../services/journeyService.js';
 
 /**
  * Step 6 — Availability. Input is a Phase 1-3 conversation (already
@@ -29,6 +30,25 @@ export const availabilityRoutes: FastifyPluginAsyncZod = async (app) => {
           requestId: request.id,
         },
       );
+
+      // Best-effort journey tracking/escalation — never fails the already-computed,
+      // already-persisted availability result above (see journeyService.ts's module doc).
+      try {
+        await recordAvailabilityOutcome(
+          { prisma: app.ctx.prisma, notificationProvider: app.ctx.notificationProvider },
+          {
+            tenantId: app.ctx.config.DEFAULT_TENANT_ID,
+            conversationId: request.params.conversationId,
+            status: response.availability.status,
+            retryable: response.availability.retryable,
+            reason: response.availability.reason ?? null,
+            requestId: request.id,
+          },
+        );
+      } catch (error) {
+        app.log.error({ err: error }, 'journey sync failed after availability check');
+      }
+
       reply.status(201).send(response);
     },
   );

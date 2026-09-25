@@ -5,6 +5,7 @@ import {
 } from '@ai-concierge/contracts';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { checkEligibility } from '../../services/eligibilityService.js';
+import { recordEligibilityOutcome } from '../../services/journeyService.js';
 
 /**
  * Step 5 — Eligibility. Customer/driver data is new at this step (never
@@ -34,6 +35,22 @@ export const eligibilityRoutes: FastifyPluginAsyncZod = async (app) => {
           body: request.body,
         },
       );
+
+      try {
+        await recordEligibilityOutcome(
+          { prisma: app.ctx.prisma, notificationProvider: app.ctx.notificationProvider },
+          {
+            tenantId: app.ctx.config.DEFAULT_TENANT_ID,
+            conversationId: request.params.conversationId,
+            status: response.decision.status,
+            reason: response.decision.reason,
+            requestId: request.id,
+          },
+        );
+      } catch (error) {
+        app.log.error({ err: error }, 'journey sync failed after eligibility check');
+      }
+
       reply.status(201).send(response);
     },
   );

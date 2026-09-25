@@ -7,6 +7,7 @@ import {
 } from '@ai-concierge/contracts';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { createQuote, getQuote } from '../../services/quoteService.js';
+import { recordQuoteOutcome } from '../../services/journeyService.js';
 
 /**
  * Step 8 — Quote. Input is a Phase 1-3 conversation (already validated,
@@ -39,6 +40,22 @@ export const quoteRoutes: FastifyPluginAsyncZod = async (app) => {
           selections: request.body,
         },
       );
+
+      try {
+        await recordQuoteOutcome(
+          { prisma: app.ctx.prisma, notificationProvider: app.ctx.notificationProvider },
+          {
+            tenantId: app.ctx.config.DEFAULT_TENANT_ID,
+            conversationId: request.params.conversationId,
+            status: response.quote.status,
+            reviewReasons: response.quote.reviewReasons,
+            requestId: request.id,
+          },
+        );
+      } catch (error) {
+        app.log.error({ err: error }, 'journey sync failed after quote creation');
+      }
+
       reply.status(201).send(response);
     },
   );

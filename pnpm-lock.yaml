@@ -56,6 +56,9 @@ importers:
       '@ai-concierge/security':
         specifier: workspace:*
         version: link:../../packages/security
+      '@ai-concierge/workflow':
+        specifier: workspace:*
+        version: link:../../packages/workflow
       '@fastify/cors':
         specifier: ^11.0.0
         version: 11.3.0

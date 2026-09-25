@@ -25,6 +25,7 @@ import {
   runFullEnquiryPipeline,
   type FullEnquiryPipelineResult,
 } from '../../services/enquiryPipelineService.js';
+import { syncJourneyAfterMissingInfo } from '../../services/journeyService.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -121,6 +122,28 @@ async function processInboundMessage(
     );
 
     logPipelineDecision(ctx, requestId, pipeline);
+
+    // Best-effort journey tracking/escalation — deliberately caught locally,
+    // never allowed to reach the outer catch below: that catch releases the
+    // idempotency claim and rethrows, which would make Meta redeliver this
+    // webhook and re-run the pipeline (and re-send the reply) a second time
+    // for a failure that has nothing to do with whether the customer's
+    // message was actually handled correctly.
+    try {
+      await syncJourneyAfterMissingInfo(
+        { prisma: ctx.prisma, notificationProvider: ctx.notificationProvider },
+        {
+          tenantId: ctx.config.DEFAULT_TENANT_ID,
+          conversationId: pipeline.enquiry.conversationId,
+          messageId: pipeline.enquiry.messageId,
+          resolvedVehicleId: pipeline.vehicle.determination.resolvedVehicle?.id ?? null,
+          missingInfoStatus: pipeline.missingInfo.missingInfo.status,
+          requestId,
+        },
+      );
+    } catch (error) {
+      ctx.logger.error({ err: error }, 'journey sync failed after WhatsApp pipeline');
+    }
 
     const conversationMessages = await findMessagesForConversation(
       ctx.prisma,

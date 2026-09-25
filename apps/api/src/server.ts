@@ -19,6 +19,8 @@ import { buildApp } from './app.js';
 import type { AppContext } from './context.js';
 import { loadApiEnv } from './env.js';
 import { createAIProvider } from './lib/geminiProvider.js';
+import { createEmailProvider } from './lib/createEmailProvider.js';
+import { createNotificationProvider } from './lib/notificationProvider.js';
 import { createPostEnquiryQueue } from './lib/queue.js';
 import { createRedisClient } from './lib/redis.js';
 import { createFleetProvider } from './services/createFleetProvider.js';
@@ -59,6 +61,9 @@ async function main(): Promise<void> {
           apiVersion: config.WHATSAPP_API_VERSION,
         })
       : new NotConfiguredWhatsAppProvider();
+  const { provider: emailProvider, status: emailProviderStatus } = createEmailProvider(config);
+  const { provider: notificationProvider, status: notificationProviderStatus } =
+    createNotificationProvider(config);
 
   const fleetProvider = createFleetProvider(config, prisma, redis);
   const reservationLockService = new ReservationLockService(prisma, fleetProvider, {
@@ -105,6 +110,10 @@ async function main(): Promise<void> {
     pricingRules,
     quoteValidator,
     whatsappProvider,
+    emailProvider,
+    emailProviderStatus,
+    notificationProvider,
+    notificationProviderStatus,
     fleetProvider,
     reservationLockService,
     observabilityStatus: observability.status,

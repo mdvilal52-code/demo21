@@ -32,6 +32,19 @@ export async function findUserById(db: Executor, tenantId: string, id: string) {
   return db.user.findFirst({ where: { id, tenantId } });
 }
 
+/**
+ * Escalation paging (escalationService.ts): every ACTIVE staff member of a
+ * tier, so a case fans out to whoever is on rather than one fixed person —
+ * more realistic for a pilot than a single hardcoded on-call assignee, and
+ * cheap to replace with a real on-call directory later without touching
+ * the caller. A worker with no `phone` set is still returned (they still
+ * see the case on the dashboard) — `notificationService` is what decides
+ * who actually gets paged by SMS.
+ */
+export async function findActiveUsersByRole(db: Executor, tenantId: string, role: UserRoleValue) {
+  return db.user.findMany({ where: { tenantId, role, status: 'ACTIVE' } });
+}
+
 export async function recordLoginFailure(db: Executor, userId: string) {
   const user = await db.user.update({
     where: { id: userId },

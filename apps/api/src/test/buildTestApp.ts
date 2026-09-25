@@ -9,7 +9,12 @@ import {
   VehicleDeterminationOrchestrator,
   type FleetProvider,
 } from '@ai-concierge/ai';
-import { NotConfiguredWhatsAppProvider, type WhatsAppProvider } from '@ai-concierge/channels';
+import {
+  NotConfiguredEmailProvider,
+  NotConfiguredWhatsAppProvider,
+  type EmailProvider,
+  type WhatsAppProvider,
+} from '@ai-concierge/channels';
 import {
   createTestPrismaClient,
   createTestRedisClient,
@@ -22,6 +27,10 @@ import { buildApp } from '../app.js';
 import type { AppContext } from '../context.js';
 import type { ApiEnv } from '../env.js';
 import { createAIProvider } from '../lib/geminiProvider.js';
+import {
+  NotConfiguredNotificationProvider,
+  type NotificationProvider,
+} from '../lib/notificationProvider.js';
 import { DatabaseFleetProvider } from '../services/fleetProvider.js';
 import { PrismaAvailabilityProvider } from '../services/availabilityProvider.js';
 import { ReservationLockService } from '../services/reservationLockService.js';
@@ -35,6 +44,8 @@ export interface TestApp {
 
 export interface TestAppCtxOverrides {
   whatsappProvider?: WhatsAppProvider;
+  emailProvider?: EmailProvider;
+  notificationProvider?: NotificationProvider;
   fleetProvider?: FleetProvider;
   /** Overridable clock for `ReservationLockService`, used by expiry tests. */
   now?: () => Date;
@@ -115,6 +126,11 @@ export async function buildTestApp(
     pricingRules: ctxOverrides.pricingRules ?? new PricingRules(),
     quoteValidator: new QuoteValidator(config.WEBHOOK_SIGNING_SECRET),
     whatsappProvider: ctxOverrides.whatsappProvider ?? new NotConfiguredWhatsAppProvider(),
+    emailProvider: ctxOverrides.emailProvider ?? new NotConfiguredEmailProvider(),
+    emailProviderStatus: ctxOverrides.emailProvider ? 'CONFIGURED' : 'NOT_CONFIGURED',
+    notificationProvider:
+      ctxOverrides.notificationProvider ?? new NotConfiguredNotificationProvider(),
+    notificationProviderStatus: ctxOverrides.notificationProvider ? 'CONFIGURED' : 'NOT_CONFIGURED',
     fleetProvider,
     reservationLockService: new ReservationLockService(prisma, fleetProvider, {
       ttlSeconds: config.AVAILABILITY_HOLD_TTL_SECONDS,
