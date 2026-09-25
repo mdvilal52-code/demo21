@@ -35,6 +35,11 @@ export function createScopedRoleTestPrismaClient(
 }
 
 const TABLES = [
+  'customer_timeline_events',
+  'customers',
+  'escalation_cases',
+  'journey_transitions',
+  'journeys',
   'security_events',
   'refresh_tokens',
   'users',

@@ -19,3 +19,6 @@ export * from './repositories/availabilityHoldRepository.js';
 export * from './repositories/availabilityCheckRepository.js';
 export * from './repositories/alternativeRecommendationRepository.js';
 export * from './repositories/quoteRepository.js';
+export * from './repositories/journeyRepository.js';
+export * from './repositories/escalationCaseRepository.js';
+export * from './repositories/customerRepository.js';

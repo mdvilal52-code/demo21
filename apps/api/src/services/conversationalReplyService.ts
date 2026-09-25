@@ -1,11 +1,6 @@
 import { sanitizeForProcessing } from '@ai-concierge/ai';
 import type { AIProvider } from '@ai-concierge/ai';
-import {
-  classifyPII,
-  isAppError,
-  redactPII,
-  type MissingInfoResult,
-} from '@ai-concierge/domain';
+import { classifyPII, isAppError, redactPII, type MissingInfoResult } from '@ai-concierge/domain';
 import { CircuitBreakerOpenError } from '@ai-concierge/security';
 import { buildWhatsAppReplyText } from '@ai-concierge/channels';
 import { z } from 'zod';
@@ -186,7 +181,10 @@ export async function generateConversationalReply(
     if (!isGrounded(parsed.data.reply)) {
       const { containsPii } = classifyPII(parsed.data.reply);
       deps.logger.warn(
-        { reply: containsPii ? redactPII(parsed.data.reply) : parsed.data.reply, modelId: result.modelId },
+        {
+          reply: containsPii ? redactPII(parsed.data.reply) : parsed.data.reply,
+          modelId: result.modelId,
+        },
         'Gemini reply failed grounding check, using deterministic fallback',
       );
       return fallback('GROUNDING_VIOLATION');
@@ -212,7 +210,10 @@ export async function generateConversationalReply(
       );
       return fallback('PROVIDER_UNAVAILABLE');
     }
-    deps.logger.warn({ err: error }, 'Gemini reply generation failed, using deterministic fallback');
+    deps.logger.warn(
+      { err: error },
+      'Gemini reply generation failed, using deterministic fallback',
+    );
     return fallback('PROVIDER_ERROR');
   }
 }

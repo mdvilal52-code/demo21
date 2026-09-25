@@ -5,9 +5,8 @@ import { vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ ssrfSafeFetch: vi.fn() }));
 
 vi.mock('@ai-concierge/security', async () => {
-  const actual = await vi.importActual<typeof import('@ai-concierge/security')>(
-    '@ai-concierge/security',
-  );
+  const actual =
+    await vi.importActual<typeof import('@ai-concierge/security')>('@ai-concierge/security');
   return { ...actual, ssrfSafeFetch: mocks.ssrfSafeFetch };
 });
 

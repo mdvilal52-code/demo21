@@ -37,6 +37,11 @@ model Tenant {
   availabilityChecks         AvailabilityCheck[]
   alternativeRecommendations AlternativeRecommendation[]
   quotes                     Quote[]
+  journeys                   Journey[]
+  journeyTransitions         JourneyTransition[]
+  escalationCases            EscalationCase[]
+  customers                  Customer[]
+  customerTimelineEvents     CustomerTimelineEvent[]
 
   @@map("tenants")
 }
@@ -79,8 +84,9 @@ model User {
   createdAt           DateTime   @default(now())
   updatedAt           DateTime   @updatedAt
 
-  refreshTokens  RefreshToken[]
-  securityEvents SecurityEvent[]
+  refreshTokens   RefreshToken[]
+  securityEvents  SecurityEvent[]
+  escalationCases EscalationCase[]
 
   @@unique([tenantId, email])
   @@index([tenantId])
@@ -173,6 +179,7 @@ model Conversation {
 
   messages Message[]
   quotes   Quote[]
+  journey  Journey?
 
   @@index([tenantId])
   @@map("conversations")
@@ -747,4 +754,209 @@ model Quote {
   @@index([tenantId])
   @@index([tenantId, conversationId])
   @@map("quotes")
+}
+
+// ===========================================================================
+// Event / Workflow Engine — MASTER-PLAN.md §1's centerpiece, undelivered
+// until this phase. See packages/domain/src/journey.ts for the full state
+// list and rationale. `Journey` is the one persisted row per conversation
+// driving Steps 1-8 forward automatically; `JourneyTransition` is its
+// append-only timeline (same convention as AuditEvent, scoped to journey
+// state changes specifically so the admin dashboard can render a timeline
+// without filtering AuditEvent's much broader stream).
+// ===========================================================================
+
+enum JourneyState {
+  ENQUIRY_RECEIVED
+  EXTRACTING_REQUIREMENTS
+  VEHICLE_SELECTION
+  COLLECTING_MISSING_INFO
+  ELIGIBILITY_CHECK
+  AVAILABILITY_CHECK
+  OFFERING_ALTERNATIVES
+  QUOTE_ISSUED
+  DOCUMENTS_REQUESTED
+  DOCUMENTS_VERIFYING
+  PAYMENT_INSTRUCTED
+  CRM_UPDATED
+  AWAITING_HUMAN_APPROVAL
+  CONFIRMED
+  DELIVERY_SCHEDULED
+  ON_RENTAL
+  RETURN_SCHEDULED
+  RETURNED
+  FINAL_INVOICE_ISSUED
+  FOLLOW_UP_SENT
+  CLOSED
+  ESCALATED
+  CANCELLED
+  DECLINED
+  EXPIRED
+}
+
+/// One row per conversation — `version` backs optimistic concurrency on every
+/// transition (same pattern as AvailabilityHold), so two concurrent messages
+/// for the same conversation can never both advance the journey from the
+/// same stale state. `context` is the Zod-validated JourneyContext
+/// (packages/domain) — ids only, never a duplicate copy of another step's
+/// own persisted row.
+model Journey {
+  id             String       @id @default(uuid())
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [id])
+  conversationId String       @unique
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  state          JourneyState @default(ENQUIRY_RECEIVED)
+  context        Json
+  version        Int          @default(0)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  transitions     JourneyTransition[]
+  escalationCases EscalationCase[]
+  timelineEvents  CustomerTimelineEvent[]
+
+  @@index([tenantId])
+  @@index([tenantId, state])
+  @@map("journeys")
+}
+
+enum JourneyActor {
+  AI
+  SYSTEM
+  HUMAN
+}
+
+/// Append-only, one row per state change — never updated or deleted.
+model JourneyTransition {
+  id        String        @id @default(uuid())
+  tenantId  String
+  tenant    Tenant        @relation(fields: [tenantId], references: [id])
+  journeyId String
+  journey   Journey       @relation(fields: [journeyId], references: [id])
+  fromState JourneyState?
+  toState   JourneyState
+  actor     JourneyActor
+  reason    String
+  createdAt DateTime      @default(now())
+
+  @@index([tenantId])
+  @@index([journeyId])
+  @@map("journey_transitions")
+}
+
+enum EscalationTier {
+  T2
+  T3
+  T4
+}
+
+enum EscalationReason {
+  ELIGIBILITY_NEEDS_REVIEW
+  AVAILABILITY_PROVIDER_FAILURE
+  QUOTE_NEEDS_REVIEW
+  DOCUMENT_REJECTED_REPEATEDLY
+  PAYMENT_EXCEPTION
+  DAMAGE_OR_DISPUTE
+  CUSTOMER_COMPLAINT
+  MISSING_INFO_STALLED
+  AI_UNABLE_TO_PROCEED
+}
+
+enum EscalationStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  CANCELLED
+}
+
+enum EscalationResolution {
+  APPROVED
+  REJECTED
+}
+
+/// One human-escalation case per hand-off. `slaDueAt`/`slaBreached` back the
+/// worker SLA sweep (apps/worker/src/jobs/escalationSlaSweep.ts); a case is
+/// created inside the same transaction as the Journey's transition into
+/// ESCALATED (see escalationService.ts), so a case can never exist without
+/// its journey actually being in ESCALATED, and vice versa never silently.
+model EscalationCase {
+  id               String                @id @default(uuid())
+  tenantId         String
+  tenant           Tenant                @relation(fields: [tenantId], references: [id])
+  journeyId        String
+  journey          Journey               @relation(fields: [journeyId], references: [id])
+  tier             EscalationTier
+  reason           EscalationReason
+  status           EscalationStatus      @default(OPEN)
+  detail           String
+  assignedToUserId String?
+  assignedToUser   User?                 @relation(fields: [assignedToUserId], references: [id])
+  slaDueAt         DateTime
+  slaBreached      Boolean               @default(false)
+  resolution       EscalationResolution?
+  resolutionNote   String?
+  resolvedByUserId String?
+  resolvedAt       DateTime?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+
+  @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([journeyId])
+  @@map("escalation_cases")
+}
+
+/// CRM — internal adapter (MASTER-PLAN.md §5 Phase 5: "CRM adapter (internal
+/// default)"). One row per (tenantId, channel, customerRef), the same
+/// identity key `findOpenConversationForCustomer` already uses. Populated
+/// and kept current automatically by crmService.ts as a journey progresses
+/// — never hand-entered.
+model Customer {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id])
+  channel        Channel
+  customerRef    String
+  displayName    String?
+  lastVehicleId  String?
+  lastQuoteId    String?
+  bookingCount   Int      @default(0)
+  lastJourneyId  String?
+  lastActivityAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  timelineEvents CustomerTimelineEvent[]
+
+  @@unique([tenantId, channel, customerRef])
+  @@index([tenantId])
+  @@map("customers")
+}
+
+enum CustomerTimelineEventType {
+  JOURNEY_STARTED
+  VEHICLE_RESOLVED
+  QUOTE_ISSUED
+  ESCALATED
+  ESCALATION_RESOLVED
+}
+
+/// Append-only CRM activity feed shown on the admin dashboard's Customer
+/// detail screen. `summary` is deterministic/template-built, never AI text.
+model CustomerTimelineEvent {
+  id         String                    @id @default(uuid())
+  tenantId   String
+  tenant     Tenant                    @relation(fields: [tenantId], references: [id])
+  customerId String
+  customer   Customer                  @relation(fields: [customerId], references: [id])
+  journeyId  String?
+  journey    Journey?                  @relation(fields: [journeyId], references: [id])
+  type       CustomerTimelineEventType
+  summary    String
+  createdAt  DateTime                  @default(now())
+
+  @@index([tenantId])
+  @@index([customerId])
+  @@map("customer_timeline_events")
 }

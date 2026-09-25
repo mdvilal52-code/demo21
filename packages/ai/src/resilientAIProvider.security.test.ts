@@ -48,7 +48,9 @@ describe('ResilientAIProvider — security/resilience', () => {
 
     await expect(provider.generateStructured(INPUT)).rejects.toThrow('upstream model unreachable');
     await expect(provider.generateStructured(INPUT)).rejects.toThrow('upstream model unreachable');
-    await expect(provider.generateStructured(INPUT)).rejects.toBeInstanceOf(CircuitBreakerOpenError);
+    await expect(provider.generateStructured(INPUT)).rejects.toBeInstanceOf(
+      CircuitBreakerOpenError,
+    );
   });
 
   it('enforces a rate limit on calls to the model', async () => {

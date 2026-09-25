@@ -234,3 +234,232 @@ describe('Row Level Security — bearer-secret tables (refresh_tokens, idempoten
     expect(found?.tenantId).toBe(TEST_TENANT_ID);
   });
 });
+
+/**
+ * Proves the fix bundled into migration `..._add_workflow_engine_crm`:
+ * `quotes` (Step 8) was created before `..._add_security_engine` ran and,
+ * like `eligibility_*`/`vehicle_units`/`availability_*`/
+ * `alternative_recommendations`, silently had neither RLS nor an
+ * `ai_concierge_api` grant — invisible in every earlier test because they
+ * all ran as the admin/superuser connection. `quotes` stands in for the
+ * whole group here (same blanket `tenant_isolation` policy, same fix); a
+ * table-by-table repeat would just be this test eight times over.
+ */
+describe('Row Level Security — retroactive fix for tables predating the security migration', () => {
+  let admin: PrismaClient;
+  let scoped: PrismaClient;
+
+  beforeAll(async () => {
+    admin = createTestPrismaClient();
+    await admin.$connect();
+    scoped = createScopedRoleTestPrismaClient('ai_concierge_api');
+    await scoped.$connect();
+  });
+
+  afterAll(async () => {
+    await admin.$disconnect();
+    await scoped.$disconnect();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables(admin);
+    await seedTestTenants(admin);
+  });
+
+  it('the api role can now read/write quotes at all (previously had no GRANT whatsoever)', async () => {
+    const conversation = await admin.conversation.create({
+      data: { tenantId: TEST_TENANT_ID, channel: 'WEB', customerRef: 'quote-customer' },
+    });
+    const message = await admin.message.create({
+      data: { conversationId: conversation.id, content: 'quote please' },
+    });
+    const vehicle = await admin.vehicle.create({
+      data: {
+        tenantId: TEST_TENANT_ID,
+        make: 'Rolls-Royce',
+        model: 'Cullinan',
+        category: 'SUV',
+        luxuryTier: 'ULTRA_LUXURY',
+        seats: 5,
+        luggage: 3,
+        transmission: 'AUTOMATIC',
+        pricingProfile: { currency: 'AED', dailyRate: 700000 },
+      },
+    });
+
+    const created = await withTenantContext(scoped, TEST_TENANT_ID, (tx) =>
+      tx.quote.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          conversationId: conversation.id,
+          messageId: message.id,
+          vehicleId: vehicle.id,
+          quoteId: randomUUID(),
+          version: 1,
+          status: 'ISSUED',
+          currency: 'AED',
+          lineItems: [],
+          taxes: [],
+          fees: [],
+          discounts: [],
+          deposit: { minorUnits: 0, currency: 'AED' },
+          total: { minorUnits: 0, currency: 'AED' },
+          validUntil: new Date(Date.now() + 60_000),
+          pricingVersion: 'v1',
+          requiresHumanReview: false,
+          reviewReasons: [],
+          integrityHash: 'test',
+          modelMetadata: {},
+        },
+      }),
+    );
+    expect(created.tenantId).toBe(TEST_TENANT_ID);
+  });
+
+  it('quotes are tenant-isolated for the api role, exactly like every other table', async () => {
+    const conversation = await admin.conversation.create({
+      data: { tenantId: OTHER_TENANT_ID, channel: 'WEB', customerRef: 'other-tenant-customer' },
+    });
+    const message = await admin.message.create({
+      data: { conversationId: conversation.id, content: 'quote please' },
+    });
+    const vehicle = await admin.vehicle.create({
+      data: {
+        tenantId: OTHER_TENANT_ID,
+        make: 'Bentley',
+        model: 'Bentayga',
+        category: 'SUV',
+        luxuryTier: 'LUXURY',
+        seats: 5,
+        luggage: 3,
+        transmission: 'AUTOMATIC',
+        pricingProfile: { currency: 'AED', dailyRate: 400000 },
+      },
+    });
+    await admin.quote.create({
+      data: {
+        tenantId: OTHER_TENANT_ID,
+        conversationId: conversation.id,
+        messageId: message.id,
+        vehicleId: vehicle.id,
+        quoteId: randomUUID(),
+        version: 1,
+        status: 'ISSUED',
+        currency: 'AED',
+        lineItems: [],
+        taxes: [],
+        fees: [],
+        discounts: [],
+        deposit: { minorUnits: 0, currency: 'AED' },
+        total: { minorUnits: 0, currency: 'AED' },
+        validUntil: new Date(Date.now() + 60_000),
+        pricingVersion: 'v1',
+        requiresHumanReview: false,
+        reviewReasons: [],
+        integrityHash: 'test',
+        modelMetadata: {},
+      },
+    });
+
+    const rows = await withTenantContext(scoped, TEST_TENANT_ID, (tx) => tx.quote.findMany());
+    expect(rows).toHaveLength(0);
+  });
+});
+
+/**
+ * This migration's own new tables (journeys, escalation_cases, customers) —
+ * same RLS + least-privilege proof, so the gap the group above closes is
+ * never reintroduced by a future table that forgets it.
+ */
+describe('Row Level Security — journeys, escalation_cases, customers (this migration)', () => {
+  let admin: PrismaClient;
+  let scoped: PrismaClient;
+
+  beforeAll(async () => {
+    admin = createTestPrismaClient();
+    await admin.$connect();
+    scoped = createScopedRoleTestPrismaClient('ai_concierge_api');
+    await scoped.$connect();
+  });
+
+  afterAll(async () => {
+    await admin.$disconnect();
+    await scoped.$disconnect();
+  });
+
+  beforeEach(async () => {
+    await truncateAllTables(admin);
+    await seedTestTenants(admin);
+  });
+
+  it('journeys are tenant-isolated for the api role', async () => {
+    const conversationA = await admin.conversation.create({
+      data: { tenantId: TEST_TENANT_ID, channel: 'WEB', customerRef: 'a' },
+    });
+    const conversationB = await admin.conversation.create({
+      data: { tenantId: OTHER_TENANT_ID, channel: 'WEB', customerRef: 'b' },
+    });
+    await admin.journey.create({
+      data: { tenantId: TEST_TENANT_ID, conversationId: conversationA.id, context: {} },
+    });
+    await admin.journey.create({
+      data: { tenantId: OTHER_TENANT_ID, conversationId: conversationB.id, context: {} },
+    });
+
+    const rows = await withTenantContext(scoped, TEST_TENANT_ID, (tx) => tx.journey.findMany());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.tenantId).toBe(TEST_TENANT_ID);
+  });
+
+  it('escalation_cases are tenant-isolated for the api role', async () => {
+    const conversation = await admin.conversation.create({
+      data: { tenantId: OTHER_TENANT_ID, channel: 'WEB', customerRef: 'c' },
+    });
+    const journey = await admin.journey.create({
+      data: { tenantId: OTHER_TENANT_ID, conversationId: conversation.id, context: {} },
+    });
+    await admin.escalationCase.create({
+      data: {
+        tenantId: OTHER_TENANT_ID,
+        journeyId: journey.id,
+        tier: 'T2',
+        reason: 'MISSING_INFO_STALLED',
+        detail: 'x',
+        slaDueAt: new Date(Date.now() + 60_000),
+      },
+    });
+
+    const rows = await withTenantContext(scoped, TEST_TENANT_ID, (tx) =>
+      tx.escalationCase.findMany(),
+    );
+    expect(rows).toHaveLength(0);
+  });
+
+  it('customers are tenant-isolated for the api role even with the same customerRef', async () => {
+    await admin.customer.create({
+      data: { tenantId: TEST_TENANT_ID, channel: 'WHATSAPP', customerRef: '+15551234567' },
+    });
+    await admin.customer.create({
+      data: { tenantId: OTHER_TENANT_ID, channel: 'WHATSAPP', customerRef: '+15551234567' },
+    });
+
+    const rows = await withTenantContext(scoped, TEST_TENANT_ID, (tx) => tx.customer.findMany());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.tenantId).toBe(TEST_TENANT_ID);
+  });
+
+  it('the api role still has no DELETE on the new tables either', async () => {
+    const conversation = await admin.conversation.create({
+      data: { tenantId: TEST_TENANT_ID, channel: 'WEB', customerRef: 'd' },
+    });
+    const journey = await admin.journey.create({
+      data: { tenantId: TEST_TENANT_ID, conversationId: conversation.id, context: {} },
+    });
+
+    await expect(
+      withTenantContext(scoped, TEST_TENANT_ID, (tx) =>
+        tx.journey.delete({ where: { id: journey.id } }),
+      ),
+    ).rejects.toThrow(/permission denied/i);
+  });
+});

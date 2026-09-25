@@ -42,9 +42,11 @@ describe('generateConversationalReply', () => {
   it('falls back to the deterministic template when the provider is not configured', async () => {
     const provider: AIProvider = {
       name: 'not-configured',
-      generateStructured: vi.fn().mockRejectedValue(
-        new AppError('NOT_CONFIGURED', 'No AI provider is configured for this environment'),
-      ),
+      generateStructured: vi
+        .fn()
+        .mockRejectedValue(
+          new AppError('NOT_CONFIGURED', 'No AI provider is configured for this environment'),
+        ),
       healthCheck: async () => 'NOT_CONFIGURED',
     };
 

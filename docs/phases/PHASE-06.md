@@ -64,7 +64,7 @@ real, unstarted, PENDING work at id 7.
   still just the Phase 1 enquiry-form shell — no Worker Panel exists yet; that's id 8, which
   `dependsOn` the still-PENDING id 7).
 - Ran the existing suite as a baseline before changing anything: `pnpm install`, `pnpm
-  db:generate`, then typecheck/lint/unit all green (341 unit tests, matching Phase 5's §8 count).
+db:generate`, then typecheck/lint/unit all green (341 unit tests, matching Phase 5's §8 count).
   No Docker daemon in this sandbox (same documented limitation as every prior phase) — installed
   PostgreSQL 16 (already present, just stopped) and started Redis locally, exactly as Phase 5's
   doc describes, to get real integration/security/e2e coverage rather than skipping it.
@@ -95,13 +95,13 @@ Out of scope for this phase (deliberately, not by oversight):
 
 - Journey Step 5 (Eligibility), Availability/holds, Alternatives, Quote generation — none of these
   exist yet, so the reply generator has no pricing/availability facts to ground on even once those
-  steps ship; the grounding check treats *any* price or availability claim as fabricated today.
+  steps ship; the grounding check treats _any_ price or availability claim as fabricated today.
 - The Worker Panel and human escalation system (queue, assignment, SLA, takeover) — that's id 8,
   which depends on the still-PENDING id 7 (Security: RBAC/ABAC for a "who can see this
-  conversation" system). This phase does not build escalation *detection* either, to keep scope
+  conversation" system). This phase does not build escalation _detection_ either, to keep scope
   honest: there is nowhere for an escalation to go yet.
 - True "latest value wins" contradiction resolution when a correction conflicts with an earlier
-  turn (e.g. a date stated twice, differently) — Steps 2-3 now see the *whole* transcript instead
+  turn (e.g. a date stated twice, differently) — Steps 2-3 now see the _whole_ transcript instead
   of just the latest message, which already fixes the common case (a follow-up that doesn't
   restate an earlier fact), but two conflicting mentions in the same transcript can still resolve
   to either one, since the regex-based extractors have no concept of "later in time wins". Real
@@ -117,7 +117,7 @@ Out of scope for this phase (deliberately, not by oversight):
 ## 3. Design decisions
 
 **Gemini only for conversational reply generation, never for business facts.** Per explicit
-direction, Gemini is scoped to *how* something is said, never *what* is true. Concretely:
+direction, Gemini is scoped to _how_ something is said, never _what_ is true. Concretely:
 `generateConversationalReply` takes Step 4's already-verified `MissingInfoResult` (dates,
 location, vehicle — all independently validated by deterministic code) and recent transcript
 turns, and asks the model only to phrase a reply around them. The system instruction explicitly
@@ -275,18 +275,18 @@ All gates that can run without a Docker daemon in this sandbox were run for real
 and Redis started locally (same approach as Phase 5's own doc), migrations applied, then every
 gate run against real infrastructure, not mocked at the boundary being tested.
 
-| Gate                | Command                    | Result | Notes                                                    |
-| -------------------- | --------------------------- | ------ | --------------------------------------------------------- |
-| Typecheck            | `pnpm typecheck`            | ✅     | 11/11 workspace projects                                  |
-| Lint                 | `pnpm lint`                 | ✅     | 0 warnings (`--max-warnings=0`)                            |
-| Unit                 | `pnpm test:unit`            | ✅     | 361 tests (was 341 before this phase)                      |
-| Integration           | `pnpm test:integration`     | ✅     | 73 tests, real Postgres/Redis                              |
-| Security             | `pnpm test:security`        | ✅     | 57 tests, real Postgres/Redis                              |
-| E2E                  | `pnpm test:e2e`             | ✅     | 4/4 (Phase 1 UI shell — unaffected by this phase's scope)  |
-| Build                | `pnpm build`                | ✅     | all workspaces, incl. `apps/web` production build          |
-| Code review           | `/code-review` (medium)     | ✅     | 4 findings, all fixed and re-verified (see §3)             |
-| Architecture review   | checklist vs §1/§6          | ✅     | see §3 self-check notes                                    |
-| Regression            | full suite, final commit    | ✅     | same commands above, re-run clean after the review fixes   |
+| Gate                | Command                  | Result | Notes                                                     |
+| ------------------- | ------------------------ | ------ | --------------------------------------------------------- |
+| Typecheck           | `pnpm typecheck`         | ✅     | 11/11 workspace projects                                  |
+| Lint                | `pnpm lint`              | ✅     | 0 warnings (`--max-warnings=0`)                           |
+| Unit                | `pnpm test:unit`         | ✅     | 361 tests (was 341 before this phase)                     |
+| Integration         | `pnpm test:integration`  | ✅     | 73 tests, real Postgres/Redis                             |
+| Security            | `pnpm test:security`     | ✅     | 57 tests, real Postgres/Redis                             |
+| E2E                 | `pnpm test:e2e`          | ✅     | 4/4 (Phase 1 UI shell — unaffected by this phase's scope) |
+| Build               | `pnpm build`             | ✅     | all workspaces, incl. `apps/web` production build         |
+| Code review         | `/code-review` (medium)  | ✅     | 4 findings, all fixed and re-verified (see §3)            |
+| Architecture review | checklist vs §1/§6       | ✅     | see §3 self-check notes                                   |
+| Regression          | full suite, final commit | ✅     | same commands above, re-run clean after the review fixes  |
 
 Migrations: N/A this phase (no schema change) — up/down/re-up not applicable.
 
@@ -304,7 +304,7 @@ See §2 "Out of scope" for the deliberate exclusions. In addition:
   health check (§3) will surface a mismatch immediately rather than silently.
 - `RecentTurn.role` is always `'customer'` today (see §2) — the model only sees what the customer
   said, not the system's own prior phrasing, which limits how well it can avoid repeating itself
-  stylistically across turns (it does not repeat *questions*, since those come from Step 4's
+  stylistically across turns (it does not repeat _questions_, since those come from Step 4's
   deterministic `missingFields`, but it has no record of its own prior wording).
 - No conversation-quality evaluation harness (spec §18) exists yet — this phase's evaluation is
   the test suite in §8, not an automated conversational-quality scorer. That's Phase 10

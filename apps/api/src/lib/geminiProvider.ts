@@ -133,7 +133,11 @@ export class GeminiProvider implements AIProvider {
 
 export type GeminiConfig = Pick<
   ApiEnv,
-  'GEMINI_API_KEY' | 'GEMINI_MODEL_ID' | 'GEMINI_TEMPERATURE' | 'GEMINI_MAX_OUTPUT_TOKENS' | 'GEMINI_TIMEOUT_MS'
+  | 'GEMINI_API_KEY'
+  | 'GEMINI_MODEL_ID'
+  | 'GEMINI_TEMPERATURE'
+  | 'GEMINI_MAX_OUTPUT_TOKENS'
+  | 'GEMINI_TIMEOUT_MS'
 >;
 
 export interface AIProviderSetup {

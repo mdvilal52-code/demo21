@@ -89,6 +89,11 @@ export const Permission = {
   USER_READ: 'user:read',
   USER_LOCK: 'user:lock',
   USER_UNLOCK: 'user:unlock',
+  JOURNEY_READ: 'journey:read',
+  ESCALATION_READ: 'escalation:read',
+  ESCALATION_ASSIGN: 'escalation:assign',
+  ESCALATION_RESOLVE: 'escalation:resolve',
+  CUSTOMER_READ: 'customer:read',
 } as const;
 
 export const permissionSchema = z.enum([
@@ -98,6 +103,11 @@ export const permissionSchema = z.enum([
   Permission.USER_READ,
   Permission.USER_LOCK,
   Permission.USER_UNLOCK,
+  Permission.JOURNEY_READ,
+  Permission.ESCALATION_READ,
+  Permission.ESCALATION_ASSIGN,
+  Permission.ESCALATION_RESOLVE,
+  Permission.CUSTOMER_READ,
 ]);
 export type PermissionValue = z.infer<typeof permissionSchema>;
 
@@ -105,7 +115,21 @@ export type PermissionValue = z.infer<typeof permissionSchema>;
  * RBAC role -> permission matrix. ADMIN is a superset of every other role by
  * construction (spread, not duplicated by hand) so adding a permission to a
  * lower tier never has to be remembered for ADMIN separately.
+ *
+ * Journey/Escalation/Customer read+act permissions are granted to every
+ * staff tier (T2/T3/T4) — MASTER-PLAN.md §4's escalation tiers are about
+ * *which* cases a worker is expected to handle (routed by `EscalationCase.tier`,
+ * enforced in `escalationService.ts`, not by RBAC hiding the queue itself),
+ * the same "tier is a routing concern, not a visibility wall" posture
+ * `GET /v1/security-events` already established for T4.
  */
+const STAFF_JOURNEY_PERMISSIONS: PermissionValue[] = [
+  Permission.JOURNEY_READ,
+  Permission.ESCALATION_READ,
+  Permission.ESCALATION_ASSIGN,
+  Permission.ESCALATION_RESOLVE,
+  Permission.CUSTOMER_READ,
+];
 const SECURITY_PERMISSIONS: PermissionValue[] = [
   Permission.AUDIT_EVENT_READ,
   Permission.SECURITY_EVENT_READ,
@@ -113,13 +137,18 @@ const SECURITY_PERMISSIONS: PermissionValue[] = [
   Permission.USER_READ,
   Permission.USER_LOCK,
   Permission.USER_UNLOCK,
+  ...STAFF_JOURNEY_PERMISSIONS,
 ];
 const MANAGER_PERMISSIONS: PermissionValue[] = [
   Permission.AUDIT_EVENT_READ,
   Permission.SECURITY_EVENT_READ,
   Permission.USER_READ,
+  ...STAFF_JOURNEY_PERMISSIONS,
 ];
-const OPS_AGENT_PERMISSIONS: PermissionValue[] = [Permission.USER_READ];
+const OPS_AGENT_PERMISSIONS: PermissionValue[] = [
+  Permission.USER_READ,
+  ...STAFF_JOURNEY_PERMISSIONS,
+];
 
 export const ROLE_PERMISSIONS: Record<UserRoleValue, PermissionValue[]> = {
   [UserRole.SECURITY]: SECURITY_PERMISSIONS,
