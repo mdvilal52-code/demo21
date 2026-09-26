@@ -40,5 +40,6 @@ events. The UI states "not available yet" instead of pretending.
 Unit tests (all packages), API integration + security tests against a real Postgres/Redis, and
 Web e2e specs (`apps/web/e2e/concierge.spec.ts`, all 10 e2e specs green; `PW_CHROMIUM_PATH` / `PW_EXPECT_TIMEOUT` let them run on a workstation) and Playwright-driven browser flows (admin: 27 checks; customer PWA on a phone viewport: home,
 manifest, service worker, chat → driver details → quote → hand-over, staff reply appearing
-without reload, offline page). Known noise: a DLP *warning* can fire on replies containing
-amounts (digits resemble phone numbers) — log only, nothing blocked.
+without reload, offline page). Known noise: the outbound DLP tripwire occasionally logs a
+PHONE-shaped warning on a quote reply; the exact text that triggers it was not identified — it only
+logs and records a WARNING security event, nothing is blocked.
