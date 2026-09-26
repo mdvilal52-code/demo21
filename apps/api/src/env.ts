@@ -72,6 +72,10 @@ export const apiEnvSchema = baseEnvSchema.extend({
       message: 'PII_ENCRYPTION_KEY must be base64 for exactly 32 bytes (AES-256)',
     })
     .optional(),
+  // Public web chat limits (see lib/chatLimiter.ts): per browser session per 10 minutes,
+  // and for the whole chat per minute — the cap on AI spend if the chat is abused.
+  CHAT_SESSION_LIMIT_PER_10_MIN: z.coerce.number().int().positive().default(30),
+  CHAT_GLOBAL_LIMIT_PER_MIN: z.coerce.number().int().positive().default(120),
   AUTH_TOKEN_ISSUER: z.string().default('AI Concierge'),
   // Stricter than RATE_LIMIT_MAX/_WINDOW_MS above — brute-force protection
   // scoped to /v1/auth/login specifically (see plugins/security.ts).

@@ -86,6 +86,8 @@ export async function buildTestApp(
     GEMINI_MAX_OUTPUT_TOKENS: 512,
     GEMINI_TIMEOUT_MS: 8000,
     GEMINI_THINKING_LEVEL: 'low',
+    CHAT_SESSION_LIMIT_PER_10_MIN: 1000,
+    CHAT_GLOBAL_LIMIT_PER_MIN: 10000,
     JWT_SIGNING_SECRET: 'test-jwt-signing-secret-at-least-32-bytes-long',
     MFA_ENCRYPTION_KEY: 'hEPpdv0I3rPvipYa674EeHgK51Zb+BwciFTcTSAch60=',
     AUTH_TOKEN_ISSUER: 'AI Concierge Test',

@@ -1,7 +1,8 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { EscalationStatus, type EscalationStatusValue } from '@ai-concierge/domain';
-import { fetchEscalations, SessionExpiredError } from '../../../lib/adminApi';
+import { fetchEscalations, fetchJourneys, SessionExpiredError } from '../../../lib/adminApi';
+import { AutoRefresh } from '../../../components/dashboard/AutoRefresh';
 import { getCurrentUser } from '../../../lib/getCurrentUser';
 import { GlassCard } from '../../../components/ui/GlassCard';
 import { StatusChip } from '../../../components/ui/StatusChip';
@@ -23,6 +24,8 @@ function statusTone(status: EscalationStatusValue): 'success' | 'warning' | 'dan
   return 'neutral';
 }
 
+export const metadata = { title: 'Escalations · AI Concierge' };
+
 export default async function EscalationsPage({
   searchParams,
 }: {
@@ -33,6 +36,7 @@ export default async function EscalationsPage({
   if (!user) redirect('/login');
 
   let items;
+  const conversationByJourney = new Map<string, string>();
   try {
     const result = await fetchEscalations({
       ...(status ? { status } : {}),
@@ -40,6 +44,11 @@ export default async function EscalationsPage({
       offset: 0,
     });
     items = result.items;
+    // An escalation case knows its journey; the conversation (what staff open and answer) is
+    // one lookup away through the journeys list.
+    const journeys = await fetchJourneys({ limit: 100, offset: 0 });
+    for (const journey of journeys.items)
+      conversationByJourney.set(journey.id, journey.conversationId);
   } catch (error) {
     if (error instanceof SessionExpiredError) redirect('/login');
     throw error;
@@ -47,12 +56,17 @@ export default async function EscalationsPage({
 
   return (
     <div className="mx-auto max-w-3xl py-8">
-      <h1 className="font-display text-lg uppercase tracking-[0.14em] text-cream-50">
-        Escalation queue
-      </h1>
-      <p className="mt-2 text-sm text-cream-50/70">
-        Cases the AI could not resolve on its own — the human half of the automation.
-      </p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="font-display text-lg uppercase tracking-[0.14em] text-cream-50">
+            Escalation queue
+          </h1>
+          <p className="mt-2 text-sm text-cream-50/70">
+            Cases the AI could not resolve on its own — the human half of the automation.
+          </p>
+        </div>
+        <AutoRefresh />
+      </div>
 
       <div className="mt-6 flex flex-wrap gap-2">
         {STATUS_FILTERS.map((filter) => {
@@ -102,6 +116,14 @@ export default async function EscalationsPage({
                 {formatEnumLabel(escalationCase.reason)}
               </h2>
               <p className="mt-1 text-sm text-cream-50/70">{escalationCase.detail}</p>
+              {conversationByJourney.get(escalationCase.journeyId) && (
+                <Link
+                  href={`/dashboard/journeys/${conversationByJourney.get(escalationCase.journeyId)}`}
+                  className="mt-3 inline-block text-xs uppercase tracking-wide text-copper-300 underline"
+                >
+                  Open the conversation and reply →
+                </Link>
+              )}
 
               {escalationCase.status === EscalationStatus.RESOLVED && (
                 <div className="mt-3 rounded-2xl border border-white/10 bg-emerald-900/40 p-3 text-sm">

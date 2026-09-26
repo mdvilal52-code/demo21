@@ -24,3 +24,4 @@ export * from './repositories/escalationCaseRepository.js';
 export * from './repositories/customerRepository.js';
 export * from './repositories/eligibilityIntakeRepository.js';
 export * from './repositories/outboundMessageRepository.js';
+export * from './repositories/dashboardRepository.js';

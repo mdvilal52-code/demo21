@@ -3,21 +3,18 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-const LINKS = [
-  { href: '/dashboard', label: 'Home' },
-  { href: '/dashboard/escalations', label: 'Escalations' },
-  { href: '/dashboard/journeys', label: 'Journeys' },
-  { href: '/dashboard/customers', label: 'Customers' },
-  { href: '/dashboard/fleet', label: 'Fleet' },
-  { href: '/dashboard/settings', label: 'Settings' },
-] as const;
+export interface DashboardNavItem {
+  href: string;
+  label: string;
+}
 
-export function DashboardNav() {
+/** The sections the signed-in role may see (chosen on the server by `navItemsFor`). */
+export function DashboardNav({ items }: { items: DashboardNavItem[] }) {
   const pathname = usePathname();
 
   return (
     <nav className="flex flex-wrap gap-2 px-4 py-3 sm:px-8" aria-label="Dashboard sections">
-      {LINKS.map((link) => {
+      {items.map((link) => {
         const isActive =
           link.href === '/dashboard' ? pathname === link.href : pathname.startsWith(link.href);
         return (

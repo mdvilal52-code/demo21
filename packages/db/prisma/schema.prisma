@@ -1009,8 +1009,10 @@ model OutboundMessage {
   conversationId String
   conversation   Conversation @relation(fields: [conversationId], references: [id])
   content        String
-  /// AI_GENERATED | TEMPLATE
+  /// AI_GENERATED | TEMPLATE | HUMAN (a staff member wrote it from the dashboard)
   source         String
+  /// The staff user behind a HUMAN reply; null for AI/template replies.
+  authorUserId   String?
   /// The journey stage this reply was written for (e.g. QUOTE_ISSUED).
   stage          String
   createdAt      DateTime     @default(now())

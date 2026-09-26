@@ -73,7 +73,8 @@ const MAX_REPLY_CHARS = 1400;
 
 function formatMoney(minorUnits: number, currency: string): string {
   const major = minorUnits / 100;
-  return `${currency} ${major.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+  const digits = minorUnits % 100 === 0 ? 0 : 2;
+  return `${currency} ${major.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
 }
 
 const MONTH_ABBREVIATIONS = [

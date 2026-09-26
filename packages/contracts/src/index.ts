@@ -14,3 +14,5 @@ export * from './quote.js';
 export * from './journey.js';
 export * from './email.js';
 export * from './admin.js';
+export * from './dashboard.js';
+export * from './chat.js';

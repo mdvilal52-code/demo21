@@ -1,0 +1,23 @@
+{
+  "name": "AI Concierge",
+  "short_name": "Concierge",
+  "description": "Rent a luxury car in Dubai by chatting with our AI concierge.",
+  "id": "/concierge",
+  "start_url": "/concierge",
+  "scope": "/concierge",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#072B22",
+  "theme_color": "#072B22",
+  "lang": "en",
+  "categories": ["travel", "lifestyle"],
+  "icons": [
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Chat with the concierge", "url": "/concierge/chat" },
+    { "name": "My request", "url": "/concierge/requests" }
+  ]
+}

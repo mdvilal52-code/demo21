@@ -421,6 +421,27 @@
         12
       ],
       "phaseDoc": "docs/PHASE-16.md"
+    },
+    {
+      "id": 17,
+      "name": "Frontend completion: admin dashboard, human worker, customer web chat (PWA)",
+      "status": "IN_PROGRESS",
+      "goal": "Everything the backend does for Steps 1-8 is reachable from the deployed website: staff see and act on journeys, and customers chat and follow their request.",
+      "progressNote": "Implemented; see docs/PHASE-17.md. NOT frozen: Playwright e2e specs and an independent code review were not run; Bookings, documents, payments and Steps 9-19 are not built.",
+      "deliverables": [
+        "Dashboard summary, quotes, transcript and human reply endpoints [DONE]",
+        "Public web chat endpoints with idempotency and rate limits [DONE]",
+        "Admin dashboard pages: overview, journeys, escalations, quotes, audit, security [DONE]",
+        "Customer PWA: home, chat, requests, profile, manifest, service worker, offline page [DONE]",
+        "Playwright e2e + independent code review [PENDING]"
+      ],
+      "acceptance": [
+        "A customer can go from first message to an issued quote and hand-over in the web chat",
+        "A staff reply appears in the customer's chat without a reload",
+        "Nothing the backend cannot do is presented as available"
+      ],
+      "dependsOn": [16],
+      "phaseDoc": "docs/PHASE-17.md"
     }
   ]
 }

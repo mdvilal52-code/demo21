@@ -215,3 +215,19 @@ export async function findOpenConversationForCustomer(
 
   return { id: conversation.id };
 }
+
+/** A customer's most recent conversations on one channel, newest first — used to rebuild a web chat's history. */
+export async function listRecentConversationsForCustomer(
+  db: Executor,
+  tenantId: TenantId,
+  channel: Channel,
+  customerRef: string,
+  limit = 5,
+): Promise<Array<{ id: string; createdAt: Date }>> {
+  return db.conversation.findMany({
+    where: { tenantId, channel, customerRef },
+    orderBy: { createdAt: 'desc' },
+    take: limit,
+    select: { id: true, createdAt: true },
+  });
+}
