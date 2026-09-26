@@ -4,11 +4,10 @@ import {
   claimIdempotencyKey,
   completeIdempotencyKey,
   releaseIdempotencyKeyClaim,
-  findMessagesForConversation,
   PrismaAuditWriter,
   type Channel,
 } from '@ai-concierge/db';
-import { AppError, CustomerTimelineEventType } from '@ai-concierge/domain';
+import { AppError } from '@ai-concierge/domain';
 import {
   whatsappInboundAckResponseSchema,
   whatsappVerifyQuerySchema,
@@ -16,17 +15,7 @@ import {
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { AppContext } from '../../context.js';
 import { flagUnexpectedPiiInOutboundText } from '../../lib/dlp.js';
-import {
-  generateConversationalReply,
-  MAX_RECENT_TURNS_FOR_REPLY,
-  type RecentTurn,
-} from '../../services/conversationalReplyService.js';
-import {
-  runFullEnquiryPipeline,
-  type FullEnquiryPipelineResult,
-} from '../../services/enquiryPipelineService.js';
-import { syncJourneyAfterMissingInfo } from '../../services/journeyService.js';
-import { syncCustomerFromJourney } from '../../services/crmService.js';
+import { handleInboundTurn, recordOutboundReply } from '../../services/conversationTurnService.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -37,55 +26,19 @@ declare module 'fastify' {
 const WHATSAPP_CHANNEL: Channel = 'WHATSAPP';
 
 /**
- * One structured line per processed message: session id, intent, stage and
- * the fields still missing, plus which decision path Step 1 took (the raw
- * keyword engine, or one of `enquiryService.ts`'s corrections — see
- * `modelMetadata.engine`) — everything needed to debug *why* a given reply
- * was sent, without ever logging the message itself. Deliberately narrow
- * about what it includes: `conversationId`/`messageId` are opaque ids, never
- * the customer's phone number or message text, and each `missingFields`
- * entry keeps only `field`/`reason` — never `detail`, which can echo back a
- * fragment of the customer's own text (e.g. an unmatched vehicle name).
- * `ctx.logger`'s own redact paths (`packages/observability/src/logger.ts`)
- * are a second, independent backstop if a field named message/content ever
- * did end up here.
- */
-function logPipelineDecision(
-  ctx: AppContext,
-  requestId: string,
-  pipeline: FullEnquiryPipelineResult,
-): void {
-  const intent = pipeline.enquiry.intent;
-  const missingInfo = pipeline.missingInfo.missingInfo;
-  ctx.logger.info(
-    {
-      requestId,
-      conversationId: pipeline.enquiry.conversationId,
-      messageId: pipeline.enquiry.messageId,
-      intentType: intent.intentType,
-      intentStatus: intent.status,
-      decisionEngine: intent.modelMetadata.engine,
-      stage: missingInfo.status,
-      missingFields: missingInfo.missingFields.map((field) => ({
-        field: field.field,
-        reason: field.reason,
-      })),
-      promptInjectionDetected: missingInfo.flags.promptInjectionDetectedAnywhere,
-    },
-    'whatsapp pipeline decision',
-  );
-}
-
-/**
- * Steps 1-4, automatically, for one inbound WhatsApp text message, then
- * replies with whatever Step 4 actually determined. Keyed on Meta's own
- * message id, claimed *before* any work starts: the pipeline plus the
- * outbound send can take seconds, and Meta redelivers a webhook that hasn't
- * answered fast enough, so a find-then-save-at-the-end check would leave a
- * wide window for two concurrent deliveries to both run the pipeline and
- * both send a reply. Claiming atomically up front closes that window; on
- * failure the claim is released so a genuine future retry isn't stuck
- * behind a claim that will never complete.
+ * One inbound WhatsApp text message, end to end and automatically: Steps 1-4,
+ * then the automatic Steps 5-8 chain (driver details -> eligibility ->
+ * availability -> quote or alternatives, with a human hand-off whenever the
+ * concierge cannot or should not decide), then the reply — all inside
+ * `handleInboundTurn`, shared with the Email channel. What stays here is
+ * genuinely WhatsApp-specific: keyed on Meta's own message id and claimed
+ * *before* any work starts, because the pipeline plus the outbound send can
+ * take seconds and Meta redelivers a webhook that hasn't answered fast
+ * enough — a find-then-save-at-the-end check would leave a wide window for
+ * two concurrent deliveries to both run the pipeline and both send a reply.
+ * Claiming atomically up front closes that window; on failure the claim is
+ * released so a genuine future retry isn't stuck behind a claim that will
+ * never complete.
  */
 async function processInboundMessage(
   ctx: AppContext,
@@ -104,75 +57,13 @@ async function processInboundMessage(
   }
 
   try {
-    const pipeline = await runFullEnquiryPipeline(
-      {
-        prisma: ctx.prisma,
-        intentEngine: ctx.intentEngine,
-        postEnquiryQueue: ctx.postEnquiryQueue,
-        dateLocationOrchestrator: ctx.dateLocationOrchestrator,
-        vehicleOrchestrator: ctx.vehicleOrchestrator,
-        missingInfoOrchestrator: ctx.missingInfoOrchestrator,
-      },
-      {
-        tenantId: ctx.config.DEFAULT_TENANT_ID,
-        channel: WHATSAPP_CHANNEL,
-        customerRef: inbound.from,
-        message: inbound.body,
-        requestId,
-      },
-    );
-
-    logPipelineDecision(ctx, requestId, pipeline);
-
-    // Best-effort journey tracking/escalation — deliberately caught locally,
-    // never allowed to reach the outer catch below: that catch releases the
-    // idempotency claim and rethrows, which would make Meta redeliver this
-    // webhook and re-run the pipeline (and re-send the reply) a second time
-    // for a failure that has nothing to do with whether the customer's
-    // message was actually handled correctly.
-    try {
-      const journey = await syncJourneyAfterMissingInfo(
-        { prisma: ctx.prisma, notificationProvider: ctx.notificationProvider },
-        {
-          tenantId: ctx.config.DEFAULT_TENANT_ID,
-          conversationId: pipeline.enquiry.conversationId,
-          messageId: pipeline.enquiry.messageId,
-          resolvedVehicleId: pipeline.vehicle.determination.resolvedVehicle?.id ?? null,
-          missingInfoStatus: pipeline.missingInfo.missingInfo.status,
-          requestId,
-        },
-      );
-      await syncCustomerFromJourney(
-        { prisma: ctx.prisma },
-        {
-          tenantId: ctx.config.DEFAULT_TENANT_ID,
-          conversationId: pipeline.enquiry.conversationId,
-          journeyId: journey.id,
-          eventType: CustomerTimelineEventType.JOURNEY_STARTED,
-          eventSummary: `Journey started on WhatsApp (${pipeline.missingInfo.missingInfo.status})`,
-          vehicleId: pipeline.vehicle.determination.resolvedVehicle?.id ?? null,
-          quoteId: null,
-          bookingCompleted: false,
-        },
-      );
-    } catch (error) {
-      ctx.logger.error({ err: error }, 'journey/CRM sync failed after WhatsApp pipeline');
-    }
-
-    const conversationMessages = await findMessagesForConversation(
-      ctx.prisma,
-      ctx.config.DEFAULT_TENANT_ID,
-      pipeline.enquiry.conversationId,
-    );
-    const recentTurns: RecentTurn[] = conversationMessages
-      .slice(-MAX_RECENT_TURNS_FOR_REPLY)
-      .map((row) => ({ role: 'customer', content: row.content }));
-
-    const reply = await generateConversationalReply(
-      { aiProvider: ctx.aiProvider, logger: ctx.logger },
-      { missingInfo: pipeline.missingInfo.missingInfo, recentTurns },
-    );
-    const replyText = reply.text;
+    const turn = await handleInboundTurn(ctx, {
+      channel: WHATSAPP_CHANNEL,
+      customerRef: inbound.from,
+      body: inbound.body,
+      requestId,
+    });
+    const replyText = turn.reply.text;
 
     await flagUnexpectedPiiInOutboundText(
       { prisma: ctx.prisma, logger: ctx.logger },
@@ -180,6 +71,14 @@ async function processInboundMessage(
     );
 
     const sendResult = await ctx.whatsappProvider.sendTextMessage(inbound.from, replyText);
+    if (sendResult.status === 'SENT') {
+      await recordOutboundReply(ctx, {
+        conversationId: turn.conversationId,
+        text: replyText,
+        source: turn.reply.source === 'AI_GENERATED' ? 'AI_GENERATED' : 'TEMPLATE',
+        stage: turn.reply.stage,
+      });
+    }
 
     const auditWriter = new PrismaAuditWriter(ctx.prisma);
     await auditWriter.record({
@@ -187,16 +86,18 @@ async function processInboundMessage(
       actor: 'channel:whatsapp',
       action: 'whatsapp.reply_sent',
       entityType: 'Conversation',
-      entityId: pipeline.enquiry.conversationId,
+      entityId: turn.conversationId,
       after: {
         sendStatus: sendResult.status,
-        missingInfoStatus: pipeline.missingInfo.missingInfo.status,
+        missingInfoStatus: turn.missingInfoStatus,
+        journeyProgress: turn.progress.stage,
+        replySource: turn.reply.source,
       },
       requestId,
     });
 
     await completeIdempotencyKey(ctx.prisma, idempotencyKey, 200, {
-      conversationId: pipeline.enquiry.conversationId,
+      conversationId: turn.conversationId,
       replyText,
       sendStatus: sendResult.status,
     });

@@ -22,3 +22,5 @@ export * from './repositories/quoteRepository.js';
 export * from './repositories/journeyRepository.js';
 export * from './repositories/escalationCaseRepository.js';
 export * from './repositories/customerRepository.js';
+export * from './repositories/eligibilityIntakeRepository.js';
+export * from './repositories/outboundMessageRepository.js';

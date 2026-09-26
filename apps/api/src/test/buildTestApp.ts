@@ -1,5 +1,6 @@
 import {
   AlternativeRecommendationOrchestrator,
+  type AIProvider,
   DateLocationExtractionOrchestrator,
   EligibilityOrchestrator,
   MissingInfoOrchestrator,
@@ -49,6 +50,8 @@ export interface TestAppCtxOverrides {
   fleetProvider?: FleetProvider;
   /** Overridable clock for `ReservationLockService`, used by expiry tests. */
   now?: () => Date;
+  /** Replaces the Gemini-backed provider (which is NOT_CONFIGURED in tests) with a scripted double. */
+  aiProvider?: AIProvider;
   /** Overridable pricing config — used by tests exercising a specific discount/threshold/validity rule. */
   pricingRules?: PricingRules;
 }
@@ -82,6 +85,7 @@ export async function buildTestApp(
     GEMINI_TEMPERATURE: 0.6,
     GEMINI_MAX_OUTPUT_TOKENS: 512,
     GEMINI_TIMEOUT_MS: 8000,
+    GEMINI_THINKING_LEVEL: 'low',
     JWT_SIGNING_SECRET: 'test-jwt-signing-secret-at-least-32-bytes-long',
     MFA_ENCRYPTION_KEY: 'hEPpdv0I3rPvipYa674EeHgK51Zb+BwciFTcTSAch60=',
     AUTH_TOKEN_ISSUER: 'AI Concierge Test',
@@ -101,7 +105,9 @@ export async function buildTestApp(
     connection: redis.duplicate(),
   });
 
-  const { provider: aiProvider, status: aiProviderStatus } = createAIProvider(config);
+  const { provider: aiProvider, status: aiProviderStatus } = ctxOverrides.aiProvider
+    ? { provider: ctxOverrides.aiProvider, status: 'CONFIGURED' as const }
+    : createAIProvider(config);
   const fleetProvider = ctxOverrides.fleetProvider ?? new DatabaseFleetProvider(prisma);
 
   const ctx: AppContext = {

@@ -18,6 +18,12 @@ export interface GeminiProviderConfig {
   temperature: number;
   maxOutputTokens: number;
   timeoutMs: number;
+  /**
+   * How hard the model thinks before answering. Thinking tokens count against
+   * maxOutputTokens, so a lower level is what keeps a short JSON reply from being
+   * truncated (and is cheaper and faster). Unset sends no thinkingConfig at all.
+   */
+  thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
 }
 
 interface GeminiGenerateContentResponse {
@@ -42,6 +48,8 @@ interface GeminiGenerateContentResponse {
  */
 export class GeminiProvider implements AIProvider {
   readonly name = 'gemini';
+  /** Set once the API rejects `thinkingConfig` for this model — later calls then omit it. */
+  private thinkingUnsupported = false;
 
   constructor(private readonly config: GeminiProviderConfig) {}
 
@@ -49,27 +57,47 @@ export class GeminiProvider implements AIProvider {
     const startedAt = Date.now();
     const url = `https://${GEMINI_API_HOST}/${GEMINI_API_VERSION}/models/${this.config.modelId}:generateContent`;
 
-    const response = await ssrfSafeFetch(url, [GEMINI_API_HOST], {
-      method: 'POST',
-      timeoutMs: input.timeoutMs ?? this.config.timeoutMs,
-      headers: {
-        'x-goog-api-key': this.config.apiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: input.prompt }] }],
-        systemInstruction: { parts: [{ text: input.systemInstruction }] },
-        generationConfig: {
-          temperature: input.temperature ?? this.config.temperature,
-          maxOutputTokens: input.maxOutputTokens ?? this.config.maxOutputTokens,
-          responseMimeType: 'application/json',
-          ...(input.responseSchema ? { responseSchema: input.responseSchema } : {}),
+    const send = (includeThinking: boolean) =>
+      ssrfSafeFetch(url, [GEMINI_API_HOST], {
+        method: 'POST',
+        timeoutMs: input.timeoutMs ?? this.config.timeoutMs,
+        headers: {
+          'x-goog-api-key': this.config.apiKey,
+          'Content-Type': 'application/json',
         },
-      }),
-    });
+        body: JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: input.prompt }] }],
+          systemInstruction: { parts: [{ text: input.systemInstruction }] },
+          generationConfig: {
+            temperature: input.temperature ?? this.config.temperature,
+            maxOutputTokens: input.maxOutputTokens ?? this.config.maxOutputTokens,
+            responseMimeType: 'application/json',
+            ...(input.responseSchema ? { responseSchema: input.responseSchema } : {}),
+            ...(includeThinking && this.config.thinkingLevel
+              ? { thinkingConfig: { thinkingLevel: this.config.thinkingLevel } }
+              : {}),
+          },
+        }),
+      });
+
+    const includeThinking = Boolean(this.config.thinkingLevel) && !this.thinkingUnsupported;
+    let response = await send(includeThinking);
+
+    // A model that does not accept `thinkingConfig` answers 400 naming it. That
+    // must never take the whole reply engine down: remember it and retry once
+    // without the field, so the call — and every later one — still succeeds.
+    let errorBody = '';
+    if (!response.ok && includeThinking && response.status === 400) {
+      errorBody = await response.text().catch(() => '');
+      if (/thinking/i.test(errorBody)) {
+        this.thinkingUnsupported = true;
+        response = await send(false);
+        errorBody = '';
+      }
+    }
 
     if (!response.ok) {
-      const errorBody = await response.text().catch(() => '');
+      errorBody = errorBody || (await response.text().catch(() => ''));
       throw new AppError('UPSTREAM_UNAVAILABLE', 'Gemini request failed', {
         details: { status: response.status, schemaName: input.schemaName },
         cause: errorBody,
@@ -138,6 +166,7 @@ export type GeminiConfig = Pick<
   | 'GEMINI_TEMPERATURE'
   | 'GEMINI_MAX_OUTPUT_TOKENS'
   | 'GEMINI_TIMEOUT_MS'
+  | 'GEMINI_THINKING_LEVEL'
 >;
 
 export interface AIProviderSetup {
@@ -161,6 +190,7 @@ export function createAIProvider(config: GeminiConfig): AIProviderSetup {
     temperature: config.GEMINI_TEMPERATURE,
     maxOutputTokens: config.GEMINI_MAX_OUTPUT_TOKENS,
     timeoutMs: config.GEMINI_TIMEOUT_MS,
+    thinkingLevel: config.GEMINI_THINKING_LEVEL,
   });
   return { provider: new ResilientAIProvider(gemini), status: 'CONFIGURED' };
 }

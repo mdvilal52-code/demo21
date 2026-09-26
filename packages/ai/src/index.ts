@@ -43,6 +43,9 @@ export * from './step5/policyValidator.js';
 export * from './step5/exceptionResolver.js';
 export * from './step5/reasonBuilder.js';
 export * from './step5/orchestrator.js';
+export * from './step5/intake/countries.js';
+export * from './step5/intake/intakeExtractor.js';
+export * from './step5/intake/geminiIntakeExtractor.js';
 
 // Step 6 — Availability
 export * from './step6/fleetProvider.js';

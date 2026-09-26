@@ -4,69 +4,26 @@ import {
   claimIdempotencyKey,
   completeIdempotencyKey,
   releaseIdempotencyKeyClaim,
-  findMessagesForConversation,
   PrismaAuditWriter,
   type Channel,
 } from '@ai-concierge/db';
-import { AppError, CustomerTimelineEventType } from '@ai-concierge/domain';
+import { AppError } from '@ai-concierge/domain';
 import { emailInboundAckResponseSchema } from '@ai-concierge/contracts';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { AppContext } from '../../context.js';
 import { flagUnexpectedPiiInOutboundText } from '../../lib/dlp.js';
-import {
-  generateConversationalReply,
-  MAX_RECENT_TURNS_FOR_REPLY,
-  type RecentTurn,
-} from '../../services/conversationalReplyService.js';
-import {
-  runFullEnquiryPipeline,
-  type FullEnquiryPipelineResult,
-} from '../../services/enquiryPipelineService.js';
-import { syncJourneyAfterMissingInfo } from '../../services/journeyService.js';
-import { syncCustomerFromJourney } from '../../services/crmService.js';
+import { handleInboundTurn, recordOutboundReply } from '../../services/conversationTurnService.js';
 
 const EMAIL_CHANNEL: Channel = 'EMAIL';
 
 /**
- * Same structured-decision-logging discipline as `whatsapp.ts`'s
- * `logPipelineDecision` — never the message body, only opaque ids and
- * classification outcomes.
- */
-function logPipelineDecision(
-  ctx: AppContext,
-  requestId: string,
-  pipeline: FullEnquiryPipelineResult,
-): void {
-  const intent = pipeline.enquiry.intent;
-  const missingInfo = pipeline.missingInfo.missingInfo;
-  ctx.logger.info(
-    {
-      requestId,
-      conversationId: pipeline.enquiry.conversationId,
-      messageId: pipeline.enquiry.messageId,
-      intentType: intent.intentType,
-      intentStatus: intent.status,
-      decisionEngine: intent.modelMetadata.engine,
-      stage: missingInfo.status,
-      missingFields: missingInfo.missingFields.map((field) => ({
-        field: field.field,
-        reason: field.reason,
-      })),
-      promptInjectionDetected: missingInfo.flags.promptInjectionDetectedAnywhere,
-    },
-    'email pipeline decision',
-  );
-}
-
-/**
- * Steps 1-4, automatically, for one inbound email, then replies with
- * whatever Step 4 actually determined — the exact same pipeline, journey
- * sync, CRM sync, and Gemini-grounded reply generation as
- * `whatsapp.ts`'s `processInboundMessage`, just over the Email channel.
- * Idempotency mirrors WhatsApp's own claim-before-work discipline: Mailgun
- * retries an inbound-webhook delivery that doesn't 200 fast enough, so the
- * key is claimed atomically before any work starts, not checked-then-saved
- * at the end (see whatsapp.ts's own doc for why that window matters).
+ * One inbound email, end to end and automatically — the exact same
+ * `handleInboundTurn` (Steps 1-4, the automatic Steps 5-8 chain, journey and
+ * CRM sync, Gemini-worded grounded reply) as WhatsApp, just over the Email
+ * channel. Idempotency mirrors WhatsApp's own claim-before-work discipline:
+ * Mailgun retries an inbound-webhook delivery that doesn't 200 fast enough,
+ * so the key is claimed atomically before any work starts, not
+ * checked-then-saved at the end.
  */
 async function processInboundEmail(
   ctx: AppContext,
@@ -85,73 +42,13 @@ async function processInboundEmail(
   }
 
   try {
-    const pipeline = await runFullEnquiryPipeline(
-      {
-        prisma: ctx.prisma,
-        intentEngine: ctx.intentEngine,
-        postEnquiryQueue: ctx.postEnquiryQueue,
-        dateLocationOrchestrator: ctx.dateLocationOrchestrator,
-        vehicleOrchestrator: ctx.vehicleOrchestrator,
-        missingInfoOrchestrator: ctx.missingInfoOrchestrator,
-      },
-      {
-        tenantId: ctx.config.DEFAULT_TENANT_ID,
-        channel: EMAIL_CHANNEL,
-        customerRef: inbound.from,
-        message: inbound.body,
-        requestId,
-      },
-    );
-
-    logPipelineDecision(ctx, requestId, pipeline);
-
-    // Best-effort journey/CRM tracking — same "never let this reach the
-    // outer catch" reasoning as whatsapp.ts: that catch releases the
-    // idempotency claim and rethrows, which would make Mailgun redeliver
-    // and re-send the reply a second time for an unrelated failure.
-    try {
-      const journey = await syncJourneyAfterMissingInfo(
-        { prisma: ctx.prisma, notificationProvider: ctx.notificationProvider },
-        {
-          tenantId: ctx.config.DEFAULT_TENANT_ID,
-          conversationId: pipeline.enquiry.conversationId,
-          messageId: pipeline.enquiry.messageId,
-          resolvedVehicleId: pipeline.vehicle.determination.resolvedVehicle?.id ?? null,
-          missingInfoStatus: pipeline.missingInfo.missingInfo.status,
-          requestId,
-        },
-      );
-      await syncCustomerFromJourney(
-        { prisma: ctx.prisma },
-        {
-          tenantId: ctx.config.DEFAULT_TENANT_ID,
-          conversationId: pipeline.enquiry.conversationId,
-          journeyId: journey.id,
-          eventType: CustomerTimelineEventType.JOURNEY_STARTED,
-          eventSummary: `Journey started on Email (${pipeline.missingInfo.missingInfo.status})`,
-          vehicleId: pipeline.vehicle.determination.resolvedVehicle?.id ?? null,
-          quoteId: null,
-          bookingCompleted: false,
-        },
-      );
-    } catch (error) {
-      ctx.logger.error({ err: error }, 'journey/CRM sync failed after email pipeline');
-    }
-
-    const conversationMessages = await findMessagesForConversation(
-      ctx.prisma,
-      ctx.config.DEFAULT_TENANT_ID,
-      pipeline.enquiry.conversationId,
-    );
-    const recentTurns: RecentTurn[] = conversationMessages
-      .slice(-MAX_RECENT_TURNS_FOR_REPLY)
-      .map((row) => ({ role: 'customer', content: row.content }));
-
-    const reply = await generateConversationalReply(
-      { aiProvider: ctx.aiProvider, logger: ctx.logger },
-      { missingInfo: pipeline.missingInfo.missingInfo, recentTurns },
-    );
-    const replyText = reply.text;
+    const turn = await handleInboundTurn(ctx, {
+      channel: EMAIL_CHANNEL,
+      customerRef: inbound.from,
+      body: inbound.body,
+      requestId,
+    });
+    const replyText = turn.reply.text;
 
     await flagUnexpectedPiiInOutboundText(
       { prisma: ctx.prisma, logger: ctx.logger },
@@ -162,6 +59,14 @@ async function processInboundEmail(
       ? inbound.subject
       : `Re: ${inbound.subject || 'Your rental enquiry'}`;
     const sendResult = await ctx.emailProvider.sendEmail(inbound.from, replySubject, replyText);
+    if (sendResult.status === 'SENT') {
+      await recordOutboundReply(ctx, {
+        conversationId: turn.conversationId,
+        text: replyText,
+        source: turn.reply.source === 'AI_GENERATED' ? 'AI_GENERATED' : 'TEMPLATE',
+        stage: turn.reply.stage,
+      });
+    }
 
     const auditWriter = new PrismaAuditWriter(ctx.prisma);
     await auditWriter.record({
@@ -169,16 +74,18 @@ async function processInboundEmail(
       actor: 'channel:email',
       action: 'email.reply_sent',
       entityType: 'Conversation',
-      entityId: pipeline.enquiry.conversationId,
+      entityId: turn.conversationId,
       after: {
         sendStatus: sendResult.status,
-        missingInfoStatus: pipeline.missingInfo.missingInfo.status,
+        missingInfoStatus: turn.missingInfoStatus,
+        journeyProgress: turn.progress.stage,
+        replySource: turn.reply.source,
       },
       requestId,
     });
 
     await completeIdempotencyKey(ctx.prisma, idempotencyKey, 200, {
-      conversationId: pipeline.enquiry.conversationId,
+      conversationId: turn.conversationId,
       replyText,
       sendStatus: sendResult.status,
     });

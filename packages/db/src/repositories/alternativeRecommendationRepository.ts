@@ -51,3 +51,20 @@ export async function findLatestAlternativeRecommendationForMessage(
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
   });
 }
+
+/**
+ * The most recent recommendation across every message of a conversation —
+ * what lets the concierge tell "the customer is still looking at the
+ * alternatives we already offered" apart from "the customer picked a
+ * different car" (compare `requestedVehicleId` with the vehicle now resolved).
+ */
+export async function findLatestAlternativeRecommendationForConversation(
+  db: Executor,
+  tenantId: TenantId,
+  conversationId: string,
+) {
+  return db.alternativeRecommendation.findFirst({
+    where: { tenantId, message: { conversationId } },
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+  });
+}

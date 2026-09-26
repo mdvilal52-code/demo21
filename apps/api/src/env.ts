@@ -63,6 +63,15 @@ export const apiEnvSchema = baseEnvSchema.extend({
     message:
       'MFA_ENCRYPTION_KEY must be base64 for exactly 32 bytes (AES-256) — see generateEncryptionKey()',
   }),
+  // Optional dedicated key for encrypting customer PII at rest (currently: the
+  // date of birth collected for Step 5). Unset means a purpose-separated
+  // subkey is derived from MFA_ENCRYPTION_KEY (HKDF) — see lib/piiKey.ts.
+  PII_ENCRYPTION_KEY: z
+    .string()
+    .refine((value) => Buffer.from(value, 'base64').length === 32, {
+      message: 'PII_ENCRYPTION_KEY must be base64 for exactly 32 bytes (AES-256)',
+    })
+    .optional(),
   AUTH_TOKEN_ISSUER: z.string().default('AI Concierge'),
   // Stricter than RATE_LIMIT_MAX/_WINDOW_MS above — brute-force protection
   // scoped to /v1/auth/login specifically (see plugins/security.ts).
@@ -81,6 +90,10 @@ export const apiEnvSchema = baseEnvSchema.extend({
   GEMINI_TEMPERATURE: z.coerce.number().min(0).max(2).default(0.6),
   GEMINI_MAX_OUTPUT_TOKENS: z.coerce.number().int().positive().default(512),
   GEMINI_TIMEOUT_MS: z.coerce.number().int().positive().default(8000),
+  // Thinking effort for the model. "low" is accepted by every current Flash model
+  // ("minimal" only by 3.5/3.6) and keeps thought tokens from eating the output
+  // budget. If the API rejects the field the provider retries without it.
+  GEMINI_THINKING_LEVEL: z.enum(['minimal', 'low', 'medium', 'high']).default('low'),
 
   // Twilio — staff SMS notification only (EscalationCase alerts), never a
   // customer-facing channel. All optional; unset means NOT_CONFIGURED, same

@@ -34,6 +34,68 @@ describe('GeminiProvider', () => {
     mocks.ssrfSafeFetch.mockReset();
   });
 
+  it('sends the configured thinking level in generationConfig', async () => {
+    mocks.ssrfSafeFetch.mockResolvedValue(
+      fakeGeminiResponse({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] }),
+    );
+    await new GeminiProvider({ ...CONFIG, thinkingLevel: 'low' }).generateStructured({
+      systemInstruction: 's',
+      prompt: 'p',
+      schemaName: 't',
+    });
+    const options = mocks.ssrfSafeFetch.mock.calls[0]![2] as { body: string };
+    expect(JSON.parse(options.body).generationConfig.thinkingConfig).toEqual({
+      thinkingLevel: 'low',
+    });
+  });
+
+  it('sends no thinkingConfig when no level is configured', async () => {
+    mocks.ssrfSafeFetch.mockResolvedValue(
+      fakeGeminiResponse({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] }),
+    );
+    await new GeminiProvider(CONFIG).generateStructured({
+      systemInstruction: 's',
+      prompt: 'p',
+      schemaName: 't',
+    });
+    const options = mocks.ssrfSafeFetch.mock.calls[0]![2] as { body: string };
+    expect(JSON.parse(options.body).generationConfig.thinkingConfig).toBeUndefined();
+  });
+
+  it('retries once without thinkingConfig when the API rejects it, and remembers that', async () => {
+    mocks.ssrfSafeFetch
+      .mockResolvedValueOnce(
+        fakeGeminiResponse({ error: { message: 'Unknown field thinkingLevel' } }, false, 400),
+      )
+      .mockResolvedValue(
+        fakeGeminiResponse({ candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }] }),
+      );
+    const provider = new GeminiProvider({ ...CONFIG, thinkingLevel: 'low' });
+    const call = () =>
+      provider.generateStructured({ systemInstruction: 's', prompt: 'p', schemaName: 't' });
+
+    expect((await call()).json).toEqual({ ok: true });
+    expect(mocks.ssrfSafeFetch).toHaveBeenCalledTimes(2);
+    const retried = mocks.ssrfSafeFetch.mock.calls[1]![2] as { body: string };
+    expect(JSON.parse(retried.body).generationConfig.thinkingConfig).toBeUndefined();
+
+    await call();
+    expect(mocks.ssrfSafeFetch).toHaveBeenCalledTimes(3);
+    const third = mocks.ssrfSafeFetch.mock.calls[2]![2] as { body: string };
+    expect(JSON.parse(third.body).generationConfig.thinkingConfig).toBeUndefined();
+  });
+
+  it('does not retry a 400 that is unrelated to thinking', async () => {
+    mocks.ssrfSafeFetch.mockResolvedValue(
+      fakeGeminiResponse({ error: { message: 'Invalid JSON payload' } }, false, 400),
+    );
+    const provider = new GeminiProvider({ ...CONFIG, thinkingLevel: 'low' });
+    await expect(
+      provider.generateStructured({ systemInstruction: 's', prompt: 'p', schemaName: 't' }),
+    ).rejects.toMatchObject({ code: 'UPSTREAM_UNAVAILABLE' });
+    expect(mocks.ssrfSafeFetch).toHaveBeenCalledTimes(1);
+  });
+
   it('calls the Gemini REST endpoint with the API key in a header, never in the URL', async () => {
     mocks.ssrfSafeFetch.mockResolvedValue(
       fakeGeminiResponse({
@@ -126,6 +188,7 @@ describe('createAIProvider', () => {
       GEMINI_TEMPERATURE: 0.6,
       GEMINI_MAX_OUTPUT_TOKENS: 512,
       GEMINI_TIMEOUT_MS: 8000,
+      GEMINI_THINKING_LEVEL: 'low' as const,
     });
     expect(status).toBe('NOT_CONFIGURED');
     expect(provider).toBeInstanceOf(NotConfiguredProvider);
@@ -138,6 +201,7 @@ describe('createAIProvider', () => {
       GEMINI_TEMPERATURE: 0.6,
       GEMINI_MAX_OUTPUT_TOKENS: 512,
       GEMINI_TIMEOUT_MS: 8000,
+      GEMINI_THINKING_LEVEL: 'low' as const,
     });
     expect(status).toBe('CONFIGURED');
     expect(provider).toBeInstanceOf(ResilientAIProvider);

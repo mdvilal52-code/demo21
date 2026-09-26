@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, hkdfSync, randomBytes } from 'node:crypto';
 
 /**
  * Field-level encryption for the PII/secrets this codebase actually stores
@@ -25,6 +25,20 @@ function loadKey(keyBase64: string): Buffer {
     );
   }
   return key;
+}
+
+/**
+ * Derives an independent AES-256 key for one purpose from a master key
+ * (HKDF-SHA256, purpose as the `info`). Lets a new class of encrypted field
+ * (e.g. customer dates of birth) get its own key without a new secret to
+ * provision, while keeping it cryptographically separate from the master
+ * key's other uses (e.g. TOTP seeds) — compromising one derived key reveals
+ * nothing about another.
+ */
+export function deriveSubKey(masterKeyBase64: string, purpose: string): string {
+  const master = loadKey(masterKeyBase64);
+  const derived = hkdfSync('sha256', master, Buffer.alloc(0), `ai-concierge:${purpose}`, KEY_BYTES);
+  return Buffer.from(derived).toString('base64');
 }
 
 /** Returns `base64(iv || authTag || ciphertext)` — self-contained, nothing else to store alongside it. */

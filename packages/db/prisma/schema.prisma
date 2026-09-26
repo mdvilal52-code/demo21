@@ -42,6 +42,8 @@ model Tenant {
   escalationCases            EscalationCase[]
   customers                  Customer[]
   customerTimelineEvents     CustomerTimelineEvent[]
+  eligibilityIntakes         EligibilityIntake[]
+  outboundMessages           OutboundMessage[]
 
   @@map("tenants")
 }
@@ -183,6 +185,9 @@ model Conversation {
   messages Message[]
   quotes   Quote[]
   journey  Journey?
+
+  eligibilityIntake EligibilityIntake?
+  outboundMessages  OutboundMessage[]
 
   @@index([tenantId])
   @@map("conversations")
@@ -962,4 +967,55 @@ model CustomerTimelineEvent {
   @@index([tenantId])
   @@index([customerId])
   @@map("customer_timeline_events")
+}
+
+/// The customer-claimed driver details Step 5 (Eligibility) needs, collected
+/// over chat one message at a time (see @ai-concierge/domain
+/// eligibilityIntake.ts). One row per conversation, filled in progressively.
+/// These are the customer's own claims; Steps 9-10 (documents) verify them
+/// later. `dateOfBirthEnc` is field-encrypted (AES-256-GCM, encryptField)
+/// because a date of birth is PII; nothing else here is. `askedAt` marks
+/// when the concierge first asked for these details, which is what lets a
+/// bare "Indian" or "yes" be read as an answer rather than noise.
+model EligibilityIntake {
+  id               String       @id @default(uuid())
+  tenantId         String
+  tenant           Tenant       @relation(fields: [tenantId], references: [id])
+  conversationId   String       @unique
+  conversation     Conversation @relation(fields: [conversationId], references: [id])
+  dateOfBirthEnc   String?
+  nationality      String?
+  licenseType      String?
+  hasValidLicense  Boolean?
+  passportProvided Boolean?
+  askedAt          DateTime?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  @@index([tenantId])
+  @@map("eligibility_intakes")
+}
+
+/// What the concierge itself sent back to the customer. Kept apart from
+/// `Message` on purpose: every step service reads "the latest Message" as the
+/// customer's latest turn, so an assistant row in that table would make Steps
+/// 2-8 re-read the concierge's own words as customer input. Used to give the
+/// reply engine both sides of the conversation, and as an audit trail of
+/// exactly what a customer was told.
+model OutboundMessage {
+  id             String       @id @default(uuid())
+  tenantId       String
+  tenant         Tenant       @relation(fields: [tenantId], references: [id])
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id])
+  content        String
+  /// AI_GENERATED | TEMPLATE
+  source         String
+  /// The journey stage this reply was written for (e.g. QUOTE_ISSUED).
+  stage          String
+  createdAt      DateTime     @default(now())
+
+  @@index([conversationId, createdAt])
+  @@index([tenantId])
+  @@map("outbound_messages")
 }

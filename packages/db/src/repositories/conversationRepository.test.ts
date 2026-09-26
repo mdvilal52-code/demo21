@@ -16,6 +16,7 @@ import {
   findMessagesForConversation,
   findOpenConversationForCustomer,
   markConversationProcessed,
+  CONVERSATION_STALE_AFTER_HOURS,
 } from './conversationRepository.js';
 import { createMissingInfoCheck } from './missingInfoCheckRepository.js';
 
@@ -369,6 +370,119 @@ describe('conversationRepository', () => {
         'shared-ref-1',
       );
       expect(found).toBeNull();
+    });
+  });
+
+  describe('findOpenConversationForCustomer — journey-aware (automatic Steps 5-8)', () => {
+    async function conversationWithJourney(
+      customerRef: string,
+      journeyState: string | null,
+      step4Status: 'COMPLETE' | 'NEEDS_INFO' = 'COMPLETE',
+    ) {
+      const { conversation, message } = await createConversationWithMessage(prisma, {
+        tenantId: TEST_TENANT_ID,
+        channel: 'WHATSAPP',
+        customerRef,
+        content: 'I want the Urus',
+      });
+      await createMissingInfoCheck(prisma, {
+        tenantId: TEST_TENANT_ID,
+        messageId: message.id,
+        result: fakeMissingInfoResult(step4Status),
+      });
+      if (journeyState) {
+        await prisma.journey.create({
+          data: {
+            tenantId: TEST_TENANT_ID,
+            conversationId: conversation.id,
+            state: journeyState as never,
+            context: {},
+          },
+        });
+      }
+      return conversation;
+    }
+
+    it.each([
+      'ELIGIBILITY_CHECK',
+      'AVAILABILITY_CHECK',
+      'OFFERING_ALTERNATIVES',
+      'QUOTE_ISSUED',
+      'ESCALATED',
+    ])('stays open when Step 4 is COMPLETE but the journey is still live (%s)', async (state) => {
+      const conversation = await conversationWithJourney(`live-${state}`, state);
+      const found = await findOpenConversationForCustomer(
+        prisma,
+        TEST_TENANT_ID,
+        'WHATSAPP',
+        `live-${state}`,
+      );
+      expect(found?.id).toBe(conversation.id);
+    });
+
+    it.each(['CLOSED', 'CANCELLED', 'DECLINED', 'EXPIRED'])(
+      'is finished once the journey reaches %s',
+      async (state) => {
+        await conversationWithJourney(`done-${state}`, state);
+        const found = await findOpenConversationForCustomer(
+          prisma,
+          TEST_TENANT_ID,
+          'WHATSAPP',
+          `done-${state}`,
+        );
+        expect(found).toBeNull();
+      },
+    );
+
+    it('is still finished when Step 4 ended EXPIRED, whatever the journey says', async () => {
+      const { conversation, message } = await createConversationWithMessage(prisma, {
+        tenantId: TEST_TENANT_ID,
+        channel: 'WHATSAPP',
+        customerRef: 'expired-step4',
+        content: 'I want a car',
+      });
+      await createMissingInfoCheck(prisma, {
+        tenantId: TEST_TENANT_ID,
+        messageId: message.id,
+        result: fakeMissingInfoResult('EXPIRED'),
+      });
+      await prisma.journey.create({
+        data: {
+          tenantId: TEST_TENANT_ID,
+          conversationId: conversation.id,
+          state: 'COLLECTING_MISSING_INFO',
+          context: {},
+        },
+      });
+      expect(
+        await findOpenConversationForCustomer(prisma, TEST_TENANT_ID, 'WHATSAPP', 'expired-step4'),
+      ).toBeNull();
+    });
+
+    it('is finished once nothing has been said for longer than the stale window', async () => {
+      await conversationWithJourney('stale-quote', 'QUOTE_ISSUED');
+      const wayLater = new Date(Date.now() + (CONVERSATION_STALE_AFTER_HOURS + 1) * 3600 * 1000);
+      expect(
+        await findOpenConversationForCustomer(
+          prisma,
+          TEST_TENANT_ID,
+          'WHATSAPP',
+          'stale-quote',
+          wayLater,
+        ),
+      ).toBeNull();
+      const soon = new Date(Date.now() + 3600 * 1000);
+      expect(
+        (
+          await findOpenConversationForCustomer(
+            prisma,
+            TEST_TENANT_ID,
+            'WHATSAPP',
+            'stale-quote',
+            soon,
+          )
+        )?.id,
+      ).toBeDefined();
     });
   });
 });

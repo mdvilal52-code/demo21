@@ -502,3 +502,47 @@ export async function getJourney(
   const transitions = await findJourneyTransitions(deps.prisma, input.tenantId, journey.id);
   return { journey, transitions };
 }
+
+export interface EscalateJourneyInput {
+  tenantId: TenantId;
+  conversationId: string;
+  decision: EscalationDecision;
+  requestId: string;
+}
+
+export interface EscalateJourneyResult {
+  escalated: boolean;
+  escalationCaseId: string | null;
+  tier: EscalationDecision['tier'] | null;
+}
+
+/**
+ * Hands a live journey to a human on the concierge's own initiative — the
+ * customer asked for a person, or accepted a quote and the steps after it
+ * (documents, payment, confirmation) are still manual. Uses exactly the same
+ * path as every policy-driven escalation above (journey -> ESCALATED, an
+ * EscalationCase, an audit event, and an SMS page to the on-call tier), so
+ * the case appears on the dashboard's Escalation Queue like any other.
+ *
+ * A journey that is already ESCALATED, terminal, or missing is a silent
+ * no-op (`escalated: false`), never an error: two overlapping decisions for
+ * the same customer must not create two cases.
+ */
+export async function escalateJourney(
+  deps: JourneyServiceDeps,
+  input: EscalateJourneyInput,
+): Promise<EscalateJourneyResult> {
+  const outcome = await deps.prisma.$transaction(async (tx) => {
+    await acquireJourneyLock(tx, input.tenantId, input.conversationId);
+    const journey = await findJourneyByConversationId(tx, input.tenantId, input.conversationId);
+    if (!journey) return null;
+    return escalate(tx, input.tenantId, journey, input.decision, input.requestId);
+  });
+
+  await notifyIfEscalated(deps, input.tenantId, outcome);
+  return {
+    escalated: outcome !== null,
+    escalationCaseId: outcome?.escalationCaseId ?? null,
+    tier: outcome?.escalationTier ?? null,
+  };
+}

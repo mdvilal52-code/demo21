@@ -115,14 +115,36 @@ export async function appendMessageToConversation(
 }
 
 /**
- * The customer's most recent conversation on this channel, unless it
- * already reached a terminal Step 4 outcome (COMPLETE/EXPIRED/CANCELLED) —
- * in which case there is nothing open to continue and the caller should
- * start a new conversation instead. "Open" is derived from the latest
- * message's latest MissingInfoCheck rather than a new column: same
- * append-only-history convention every other cross-step read in this
- * codebase already uses, so there's no second source of truth to keep in
- * sync.
+ * How long an untouched conversation stays open. A customer who comes back
+ * days later starts fresh rather than resuming a stale quote/hold.
+ */
+export const CONVERSATION_STALE_AFTER_HOURS = 72;
+
+/** Journey states in which a conversation is finished — a new message starts a new one. */
+const FINISHED_JOURNEY_STATES: ReadonlySet<string> = new Set([
+  'CLOSED',
+  'CANCELLED',
+  'DECLINED',
+  'EXPIRED',
+]);
+
+/**
+ * The customer's most recent conversation on this channel, unless it is
+ * finished — in which case there is nothing open to continue and the caller
+ * should start a new conversation instead.
+ *
+ * "Finished" is derived from history that already exists rather than a new
+ * column (the append-only convention every other cross-step read here uses):
+ *   - Step 4 ended EXPIRED or CANCELLED, or
+ *   - Step 4 reached COMPLETE and the conversation has *no* journey (the
+ *     pre-workflow-engine behaviour, kept so old data reads the same), or
+ *   - it has a journey that reached a terminal state
+ *     (CLOSED/CANCELLED/DECLINED/EXPIRED), or
+ *   - nothing has been said in it for CONVERSATION_STALE_AFTER_HOURS.
+ * A COMPLETE conversation whose journey is still live (asking for driver
+ * details, checking availability, holding a quote, waiting on a human) stays
+ * open, so the customer's next reply continues it instead of being read as a
+ * brand-new enquiry.
  *
  * Read outside any transaction, so two genuinely concurrent deliveries for
  * the same customer could both see "nothing open" and each start their own
@@ -135,16 +157,19 @@ export async function findOpenConversationForCustomer(
   tenantId: TenantId,
   channel: Channel,
   customerRef: string,
+  now: Date = new Date(),
 ): Promise<{ id: string } | null> {
   const conversation = await db.conversation.findFirst({
     where: { tenantId, channel, customerRef },
     orderBy: { createdAt: 'desc' },
     select: {
       id: true,
+      journey: { select: { state: true } },
       messages: {
         orderBy: { createdAt: 'desc' },
         take: 1,
         select: {
+          createdAt: true,
           missingInfoChecks: {
             orderBy: { createdAt: 'desc' },
             take: 1,
@@ -156,9 +181,17 @@ export async function findOpenConversationForCustomer(
   });
   if (!conversation) return null;
 
-  const latestStatus = conversation.messages[0]?.missingInfoChecks[0]?.status;
-  if (latestStatus === 'COMPLETE' || latestStatus === 'EXPIRED' || latestStatus === 'CANCELLED') {
-    return null;
+  const latestMessage = conversation.messages[0];
+  const latestStatus = latestMessage?.missingInfoChecks[0]?.status;
+  if (latestStatus === 'EXPIRED' || latestStatus === 'CANCELLED') return null;
+
+  const journeyState = conversation.journey?.state;
+  if (journeyState !== undefined && FINISHED_JOURNEY_STATES.has(journeyState)) return null;
+  if (latestStatus === 'COMPLETE' && journeyState === undefined) return null;
+
+  if (latestMessage) {
+    const idleMs = now.getTime() - latestMessage.createdAt.getTime();
+    if (idleMs > CONVERSATION_STALE_AFTER_HOURS * 60 * 60 * 1000) return null;
   }
 
   return { id: conversation.id };

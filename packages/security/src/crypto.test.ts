@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   decryptField,
+  deriveSubKey,
   encryptField,
   generateEncryptionKey,
   generateOpaqueToken,
@@ -56,5 +57,29 @@ describe('generateOpaqueToken', () => {
     const b = generateOpaqueToken();
     expect(a).not.toBe(b);
     expect(a.length).toBeGreaterThanOrEqual(32);
+  });
+});
+
+describe('deriveSubKey', () => {
+  it('is deterministic for the same master key and purpose', () => {
+    const master = generateEncryptionKey();
+    expect(deriveSubKey(master, 'pii')).toBe(deriveSubKey(master, 'pii'));
+  });
+
+  it('yields an independent key per purpose and per master key', () => {
+    const master = generateEncryptionKey();
+    expect(deriveSubKey(master, 'pii')).not.toBe(deriveSubKey(master, 'totp'));
+    expect(deriveSubKey(master, 'pii')).not.toBe(deriveSubKey(generateEncryptionKey(), 'pii'));
+    expect(deriveSubKey(master, 'pii')).not.toBe(master);
+  });
+
+  it('yields a valid AES-256 key that round-trips a field', () => {
+    const derived = deriveSubKey(generateEncryptionKey(), 'pii');
+    expect(Buffer.from(derived, 'base64')).toHaveLength(32);
+    expect(decryptField(encryptField('1990-05-12', derived), derived)).toBe('1990-05-12');
+  });
+
+  it('rejects a master key of the wrong length', () => {
+    expect(() => deriveSubKey(Buffer.from('short').toString('base64'), 'pii')).toThrow(/32 bytes/);
   });
 });

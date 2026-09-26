@@ -418,6 +418,27 @@ genuinely reused, or because a concurrent request won the same race — kills th
 family: every refresh token for that session is revoked in Postgres, and live access tokens are
 denied immediately via the Redis revocation set rather than waiting out their own `exp`.
 
+## Phase 16 scope: automatic Steps 5-8 chain + conversation engine v2
+
+One inbound customer message, on any channel, now runs `handleInboundTurn`
+(`apps/api/src/services/conversationTurnService.ts`):
+
+```
+Steps 1-4 (runFullEnquiryPipeline) -> syncJourneyAfterMissingInfo + CRM
+   -> advanceJourneyAutomatically (journeyAutopilotService)
+        ELIGIBILITY_CHECK      collect driver details (EligibilityIntake) -> Step 5
+        AVAILABILITY_CHECK     Step 6 hold -> Step 8 quote  |  Step 7 alternatives
+        OFFERING_ALTERNATIVES  same car: re-offer  |  other car: Step 6 -> 8
+        QUOTE_ISSUED           accept -> human hand-off  |  question -> grounded answer
+        any state              asks for a person / complaint / failure -> EscalationCase
+   -> generateJourneyReply: deterministic draft -> Gemini rewrite -> grounding guard -> send
+   -> recordOutboundReply (only after a real delivery)
+```
+
+Each hop calls the same step service and `record*Outcome` the REST endpoints use. The model
+never decides a fact: it only rewords a draft built from verified step results, and any reply that
+alters a number or makes an unearned claim is replaced by the draft. See `docs/PHASE-16.md`.
+
 ## Monorepo layout
 
 ```
