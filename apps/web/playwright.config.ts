@@ -12,6 +12,8 @@ export default defineConfig({
   fullyParallel: false,
   workers: 1,
   retries: 0,
+  // Raise on a slow database link (e.g. tests run through an SSH tunnel); CI keeps the default.
+  expect: { timeout: Number(process.env.PW_EXPECT_TIMEOUT ?? 5_000) },
   reporter: [['list']],
   use: {
     baseURL: `http://localhost:${WEB_PORT}`,
@@ -19,7 +21,7 @@ export default defineConfig({
     // This sandbox pre-installs Chromium at a fixed revision under
     // /opt/pw-browsers rather than the revision this Playwright version
     // would otherwise download; point at it explicitly instead.
-    launchOptions: { executablePath: '/opt/pw-browsers/chromium' },
+    launchOptions: { executablePath: process.env.PW_CHROMIUM_PATH ?? '/opt/pw-browsers/chromium' },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: [
