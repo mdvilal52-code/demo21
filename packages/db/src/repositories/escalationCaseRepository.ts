@@ -159,6 +159,39 @@ export async function resolveEscalationCase(
   return findEscalationCaseById(db, params.tenantId, params.id);
 }
 
+export interface CancelEscalationCaseParams {
+  tenantId: TenantId;
+  id: string;
+  note: string;
+  now: Date;
+}
+
+/**
+ * Closes a case that no longer needs a person because the situation that
+ * raised it resolved itself (e.g. a customer who stalled on booking details
+ * later supplied them). Distinct from `resolveEscalationCase`: no human
+ * decided anything, so no resolver and no APPROVED/REJECTED outcome is
+ * recorded. Only OPEN/IN_PROGRESS cases can be cancelled.
+ */
+export async function cancelEscalationCase(
+  db: Executor,
+  params: CancelEscalationCaseParams,
+): Promise<boolean> {
+  const result = await db.escalationCase.updateMany({
+    where: {
+      id: params.id,
+      tenantId: params.tenantId,
+      status: { in: [EscalationStatus.OPEN, EscalationStatus.IN_PROGRESS] },
+    },
+    data: {
+      status: EscalationStatus.CANCELLED,
+      resolutionNote: params.note,
+      resolvedAt: params.now,
+    },
+  });
+  return result.count > 0;
+}
+
 /** Worker SLA sweep — flips `slaBreached` for reporting/notification-escalation only; never relied on for correctness of the case itself (same "housekeeping, self-heals" posture as `expireDueHolds`). */
 export async function findBreachedEscalationCases(
   db: Executor,

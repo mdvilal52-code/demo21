@@ -25,6 +25,7 @@ import {
   type CollectedBookingInfo,
   type CustomerTimelineEventTypeValue,
   type Journey,
+  type MissingInfoStatusValue,
   type TenantId,
 } from '@ai-concierge/domain';
 import { isTerminalState, type EscalationDecision } from '@ai-concierge/workflow';
@@ -37,6 +38,8 @@ import type { ReplyServiceLogger } from './conversationalReplyService.js';
 import { syncCustomerFromJourney } from './crmService.js';
 import {
   escalateJourney,
+  isStalledInfoEscalation,
+  resumeStalledJourney,
   recordAlternativesOutcome,
   recordAvailabilityOutcome,
   recordEligibilityOutcome,
@@ -67,6 +70,8 @@ export interface AdvanceJourneyInput {
   requestId: string;
   /** The journey *after* `syncJourneyAfterMissingInfo` ran for this message. */
   journey: Journey;
+  /** Step 4's verdict for this message (drives how a stalled-info escalation is handled). */
+  missingInfoStatus: MissingInfoStatusValue;
   /** What Steps 2-4 have resolved for the conversation so far. */
   collected: CollectedBookingInfo;
   /** The customer's message being answered. */
@@ -431,7 +436,25 @@ async function runQuoteFollowUp(ctx: Ctx): Promise<JourneyProgress> {
 async function advance(ctx: Ctx): Promise<JourneyProgress> {
   const { journey, input } = ctx;
 
-  if (journey.state === JourneyState.ESCALATED) return { stage: 'ESCALATED_WAITING' };
+  if (journey.state === JourneyState.ESCALATED) {
+    // An escalation raised only because the customer stalled on booking
+    // details is a heads-up to staff, not a hand-over: keep guiding the
+    // customer through Step 4, and once they finish it put the journey back
+    // on the automatic track. Every other escalation belongs to a person.
+    const stalled = await isStalledInfoEscalation(journeyDeps(ctx.deps), {
+      tenantId: input.tenantId,
+      conversationId: input.conversationId,
+    });
+    if (!stalled || wantsHuman(input.customerMessage)) return { stage: 'ESCALATED_WAITING' };
+    if (input.missingInfoStatus !== 'COMPLETE') return { stage: 'STEP4_PENDING' };
+    const resumed = await resumeStalledJourney(journeyDeps(ctx.deps), {
+      tenantId: input.tenantId,
+      conversationId: input.conversationId,
+      requestId: input.requestId,
+    });
+    if (!resumed) return { stage: 'STEP4_PENDING' };
+    return advance({ ...ctx, journey: resumed });
+  }
   if (isTerminalState(journey.state)) return { stage: 'CLOSED', state: journey.state };
 
   if (wantsHuman(input.customerMessage)) {

@@ -76,25 +76,50 @@ function formatMoney(minorUnits: number, currency: string): string {
   return `${currency} ${major.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
 }
 
-function formatDate(iso: string): string {
-  return new Intl.DateTimeFormat('en-GB', {
-    timeZone: DISPLAY_TIME_ZONE,
-    day: 'numeric',
-    month: 'short',
-    year: 'numeric',
-  }).format(new Date(iso));
-}
+const MONTH_ABBREVIATIONS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
 
-function formatDateTime(iso: string): string {
-  return `${new Intl.DateTimeFormat('en-GB', {
+/** Calendar parts of `iso` in the display time zone. Built from numeric parts, never a locale's month abbreviation (ICU versions disagree: "Sep" vs "Sept"). */
+function displayParts(iso: string) {
+  const parts = new Intl.DateTimeFormat('en-GB', {
     timeZone: DISPLAY_TIME_ZONE,
     day: 'numeric',
-    month: 'short',
+    month: 'numeric',
     year: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
-    hour12: false,
-  }).format(new Date(iso))} (Dubai time)`;
+    hourCycle: 'h23',
+  }).formatToParts(new Date(iso));
+  const get = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
+  return {
+    day: String(Number(get('day'))),
+    month: MONTH_ABBREVIATIONS[Number(get('month')) - 1] ?? get('month'),
+    year: get('year'),
+    hour: get('hour'),
+    minute: get('minute'),
+  };
+}
+
+function formatDate(iso: string): string {
+  const { day, month, year } = displayParts(iso);
+  return `${day} ${month} ${year}`;
+}
+
+function formatDateTime(iso: string): string {
+  const { day, month, year, hour, minute } = displayParts(iso);
+  return `${day} ${month} ${year}, ${hour}:${minute} (Dubai time)`;
 }
 
 function vehicleName(collected: CollectedBookingInfo): string {

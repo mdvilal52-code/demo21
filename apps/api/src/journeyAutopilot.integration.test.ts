@@ -382,6 +382,58 @@ describe('automatic Steps 5-8 chain — integration', () => {
   );
 
   it(
+    'keeps guiding a customer who tripped the stall alert, and resumes automatically once Step 4 is done',
+    { timeout: 180_000 },
+    async () => {
+      await seedFleet();
+      await seedPolicy();
+      const from = '971501110011';
+
+      // Four turns of one-field-at-a-time booking trips Step 4's stall alert (3 attempts).
+      await say(from, 'Hi');
+      await say(from, 'Yes');
+      const vehicleReply = await say(from, 'Lamborghini Urus');
+      const nudged = await say(from, 'hmm ok');
+      const { journey: stalled } = await journeyFor(from);
+      expect(stalled?.state).toBe('ESCALATED');
+      expect(await testApp.ctx.prisma.escalationCase.count({ where: { status: 'OPEN' } })).toBe(1);
+      // The customer is NOT handed a "team is looking after you" dead end: Step 4 carries on.
+      expect(nudged).toBe(vehicleReply);
+      expect(nudged).not.toMatch(/already looking after/i);
+
+      const asksDetails = await say(from, 'from 15 October to 19 October, pickup Dubai Marina');
+      expect(asksDetails).toMatch(/date of birth/i);
+      const { journey } = await journeyFor(from);
+      expect(journey?.state).toBe('ELIGIBILITY_CHECK');
+      expect(await testApp.ctx.prisma.escalationCase.count({ where: { status: 'OPEN' } })).toBe(0);
+      expect(
+        await testApp.ctx.prisma.escalationCase.count({ where: { status: 'CANCELLED' } }),
+      ).toBe(1);
+
+      const quote = await say(from, FULL_DETAILS);
+      expect(quote).toMatch(/Total: AED/);
+    },
+  );
+
+  it(
+    'still hands over to a person when a stalled customer asks for one',
+    { timeout: 120_000 },
+    async () => {
+      await seedFleet();
+      await seedPolicy();
+      const from = '971501110012';
+
+      await say(from, 'Hi');
+      await say(from, 'Yes');
+      await say(from, 'Lamborghini Urus');
+      await say(from, 'hmm ok');
+      const reply = await say(from, 'can I talk to a real person please');
+      expect(reply).toMatch(/already looking after/i);
+      expect(await testApp.ctx.prisma.escalationCase.count()).toBe(1);
+    },
+  );
+
+  it(
     'stops asking and escalates after repeated unanswered requests for details',
     { timeout: 180_000 },
     async () => {

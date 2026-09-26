@@ -434,6 +434,21 @@ describe('conversationRepository', () => {
       },
     );
 
+    it.each(['ENQUIRY_RECEIVED', 'COLLECTING_MISSING_INFO'])(
+      'is finished when Step 4 is COMPLETE but the journey never got past the pre-eligibility state %s',
+      async (state) => {
+        await conversationWithJourney(`stuck-${state}`, state);
+        expect(
+          await findOpenConversationForCustomer(
+            prisma,
+            TEST_TENANT_ID,
+            'WHATSAPP',
+            `stuck-${state}`,
+          ),
+        ).toBeNull();
+      },
+    );
+
     it('is still finished when Step 4 ended EXPIRED, whatever the journey says', async () => {
       const { conversation, message } = await createConversationWithMessage(prisma, {
         tenantId: TEST_TENANT_ID,

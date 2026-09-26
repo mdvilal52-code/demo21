@@ -120,6 +120,19 @@ export async function appendMessageToConversation(
  */
 export const CONVERSATION_STALE_AFTER_HOURS = 72;
 
+/**
+ * Journey states before Step 5. A conversation whose Step 4 is COMPLETE but
+ * whose journey never advanced past these is treated as finished — the same
+ * answer as when there is no journey at all — so a journey that failed to
+ * sync cannot pin a customer to a completed conversation.
+ */
+const PRE_ELIGIBILITY_JOURNEY_STATES: ReadonlySet<string> = new Set([
+  'ENQUIRY_RECEIVED',
+  'EXTRACTING_REQUIREMENTS',
+  'VEHICLE_SELECTION',
+  'COLLECTING_MISSING_INFO',
+]);
+
 /** Journey states in which a conversation is finished — a new message starts a new one. */
 const FINISHED_JOURNEY_STATES: ReadonlySet<string> = new Set([
   'CLOSED',
@@ -136,7 +149,8 @@ const FINISHED_JOURNEY_STATES: ReadonlySet<string> = new Set([
  * "Finished" is derived from history that already exists rather than a new
  * column (the append-only convention every other cross-step read here uses):
  *   - Step 4 ended EXPIRED or CANCELLED, or
- *   - Step 4 reached COMPLETE and the conversation has *no* journey (the
+ *   - Step 4 reached COMPLETE and the conversation has *no* journey, or a
+ *     journey that never got past the pre-eligibility states (the
  *     pre-workflow-engine behaviour, kept so old data reads the same), or
  *   - it has a journey that reached a terminal state
  *     (CLOSED/CANCELLED/DECLINED/EXPIRED), or
@@ -187,7 +201,12 @@ export async function findOpenConversationForCustomer(
 
   const journeyState = conversation.journey?.state;
   if (journeyState !== undefined && FINISHED_JOURNEY_STATES.has(journeyState)) return null;
-  if (latestStatus === 'COMPLETE' && journeyState === undefined) return null;
+  if (
+    latestStatus === 'COMPLETE' &&
+    (journeyState === undefined || PRE_ELIGIBILITY_JOURNEY_STATES.has(journeyState))
+  ) {
+    return null;
+  }
 
   if (latestMessage) {
     const idleMs = now.getTime() - latestMessage.createdAt.getTime();

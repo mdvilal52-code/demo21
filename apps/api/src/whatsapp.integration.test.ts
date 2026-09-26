@@ -465,7 +465,9 @@ describe('WhatsApp webhook — integration', () => {
 
     const { reply } = await send(from, message);
     expect(reply).toMatch(/Lamborghini Urus/);
-    expect(reply).toMatch(/2026-09-25 to 2026-09-28/);
+    // Step 4 is complete, so the concierge moves straight on to the driver details Step 5 needs.
+    expect(reply).toMatch(/25 Sep 2026 to 28 Sep 2026/);
+    expect(reply).toMatch(/date of birth/i);
     expect(reply).toMatch(/Dubai/);
     expect(reply).toMatch(/quote/i);
 
@@ -487,8 +489,21 @@ describe('WhatsApp webhook — integration', () => {
     const vehicleReply = await send(from, 'Lamborghini Urus');
     expect(vehicleReply.reply).not.toMatch(/which vehicle/i);
 
+    // The customer needed several turns to give the details, so Step 4's stall
+    // heads-up to staff has already fired; finishing Step 4 must put the journey
+    // back on the automatic track and move on to the driver details.
     const datesReply = await send(from, '25 September to 28 September');
     expect(datesReply.reply).toMatch(/quote/i);
+    expect(datesReply.reply).toMatch(/date of birth/i);
+    expect(await testApp.ctx.prisma.journey.findFirst()).toMatchObject({
+      state: 'ELIGIBILITY_CHECK',
+    });
+    // The stall case is closed, not left open for staff to chase.
+    expect(
+      await testApp.ctx.prisma.escalationCase.count({
+        where: { status: { in: ['OPEN', 'IN_PROGRESS'] } },
+      }),
+    ).toBe(0);
 
     const check = await latestMissingInfo(from);
     expect(check?.status).toBe(MissingInfoStatus.COMPLETE);

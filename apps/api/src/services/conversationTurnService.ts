@@ -194,6 +194,7 @@ export async function handleInboundTurn(
           conversationId,
           requestId: input.requestId,
           journey,
+          missingInfoStatus: missingInfo.status,
           collected: missingInfo.collected,
           customerMessage: input.body,
           intentType: pipeline.enquiry.intent.intentType,

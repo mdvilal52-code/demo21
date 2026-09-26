@@ -1,8 +1,10 @@
 import {
   acquireJourneyLock,
+  cancelEscalationCase,
   createEscalationCase,
   createJourney,
   findActiveUsersByRole,
+  findOpenEscalationCaseForJourney,
   findJourneyByConversationId,
   findJourneyTransitions,
   PrismaAuditWriter,
@@ -11,6 +13,7 @@ import {
 } from '@ai-concierge/db';
 import {
   createInitialJourneyContext,
+  EscalationReason,
   AppError,
   EligibilityDecisionStatus,
   InventoryStatus,
@@ -545,4 +548,84 @@ export async function escalateJourney(
     escalationCaseId: outcome?.escalationCaseId ?? null,
     tier: outcome?.escalationTier ?? null,
   };
+}
+
+export interface StalledEscalationInput {
+  tenantId: TenantId;
+  conversationId: string;
+}
+
+/**
+ * True when the journey is ESCALATED *only because* the customer stalled on
+ * Step 4's booking details (`MISSING_INFO_STALLED`). That escalation is a
+ * heads-up to staff, not a hand-over: the customer is still mid-booking and
+ * the concierge keeps guiding them. Any other escalation (a requested person,
+ * an accepted quote, a review) does hand the conversation to a human.
+ */
+export async function isStalledInfoEscalation(
+  deps: Pick<JourneyServiceDeps, 'prisma'>,
+  input: StalledEscalationInput,
+): Promise<boolean> {
+  const journey = await findJourneyByConversationId(
+    deps.prisma,
+    input.tenantId,
+    input.conversationId,
+  );
+  if (!journey || journey.state !== JourneyState.ESCALATED) return false;
+  const open = await findOpenEscalationCaseForJourney(deps.prisma, input.tenantId, journey.id);
+  return open?.reason === EscalationReason.MISSING_INFO_STALLED;
+}
+
+/**
+ * Puts a stalled journey back on the automatic track once the customer has
+ * supplied everything Step 4 was waiting for: ESCALATED -> ELIGIBILITY_CHECK,
+ * with the now-pointless stall case cancelled (not "resolved" — no person
+ * decided anything). Returns the resumed journey, or `null` (a silent
+ * no-op) when the journey is not in a stalled-info escalation.
+ */
+export async function resumeStalledJourney(
+  deps: Pick<JourneyServiceDeps, 'prisma'>,
+  input: StalledEscalationInput & { requestId: string },
+): Promise<Journey | null> {
+  return deps.prisma.$transaction(async (tx) => {
+    await acquireJourneyLock(tx, input.tenantId, input.conversationId);
+    const journey = await findJourneyByConversationId(tx, input.tenantId, input.conversationId);
+    if (!journey || journey.state !== JourneyState.ESCALATED) return null;
+    const open = await findOpenEscalationCaseForJourney(tx, input.tenantId, journey.id);
+    if (open?.reason !== EscalationReason.MISSING_INFO_STALLED) return null;
+
+    const reason = 'Customer supplied the missing booking information';
+    if (
+      !checkTransition({ from: journey.state, to: JourneyState.ELIGIBILITY_CHECK, reason }).allowed
+    ) {
+      return null;
+    }
+    const result = await transitionJourney(tx, {
+      tenantId: input.tenantId,
+      journeyId: journey.id,
+      expectedVersion: journey.version,
+      toState: JourneyState.ELIGIBILITY_CHECK,
+      context: { ...journey.context, missingInfoAttempts: 0 },
+      actor: 'SYSTEM',
+      reason,
+    });
+    if (result.outcome !== 'TRANSITIONED') return null;
+
+    await cancelEscalationCase(tx, {
+      tenantId: input.tenantId,
+      id: open.id,
+      note: 'Cancelled automatically: the customer supplied the missing booking information',
+      now: new Date(),
+    });
+    await new PrismaAuditWriter(tx).record({
+      tenantId: input.tenantId,
+      actor: 'system:journey-service',
+      action: 'journey.resumed_after_stall',
+      entityType: 'Journey',
+      entityId: journey.id,
+      after: { escalationCaseId: open.id },
+      requestId: input.requestId,
+    });
+    return result.journey;
+  });
 }
