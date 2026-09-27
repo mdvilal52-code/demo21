@@ -15,8 +15,7 @@
     "test:security": "echo \"no security tests in @ai-concierge/workflow\""
   },
   "dependencies": {
-    "@ai-concierge/domain": "workspace:*",
-    "zod": "^3.23.8"
+    "@ai-concierge/domain": "workspace:*"
   },
   "devDependencies": {
     "typescript": "^5.6.3",
