@@ -15,6 +15,9 @@ export const apiEnvSchema = baseEnvSchema.extend({
         .filter(Boolean),
     ),
   API_BODY_LIMIT_BYTES: z.coerce.number().int().positive().default(102_400),
+  // Where uploaded car photos live on disk (must be writable by the API process
+  // and included in backups). Public URLs are built from API_PUBLIC_URL.
+  MEDIA_ROOT: z.string().trim().min(1).default('./media'),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 
@@ -76,6 +79,10 @@ export const apiEnvSchema = baseEnvSchema.extend({
   // and for the whole chat per minute — the cap on AI spend if the chat is abused.
   CHAT_SESSION_LIMIT_PER_10_MIN: z.coerce.number().int().positive().default(30),
   CHAT_GLOBAL_LIMIT_PER_MIN: z.coerce.number().int().positive().default(120),
+  // Automatic customer email/SMS caps (a customer types the address we notify, so it must not be an open tap).
+  NOTIFY_PER_RECIPIENT_PER_DAY: z.coerce.number().int().positive().default(5),
+  NOTIFY_SMS_GLOBAL_PER_DAY: z.coerce.number().int().positive().default(300),
+  NOTIFY_EMAIL_GLOBAL_PER_DAY: z.coerce.number().int().positive().default(1000),
   AUTH_TOKEN_ISSUER: z.string().default('AI Concierge'),
   // Stricter than RATE_LIMIT_MAX/_WINDOW_MS above — brute-force protection
   // scoped to /v1/auth/login specifically (see plugins/security.ts).

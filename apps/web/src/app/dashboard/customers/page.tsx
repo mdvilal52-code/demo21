@@ -39,6 +39,11 @@ export default async function CustomersPage() {
                   <p className="text-xs text-cream-50/50">
                     {customer.channel} · {customer.customerRef}
                   </p>
+                  {(customer.email || customer.phone) && (
+                    <p className="text-xs text-cream-50/60">
+                      {[customer.email, customer.phone].filter(Boolean).join(' · ')}
+                    </p>
+                  )}
                 </div>
                 <StatusChip tone="neutral">{`${customer.bookingCount} bookings`}</StatusChip>
               </div>

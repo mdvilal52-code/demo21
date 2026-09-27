@@ -16,6 +16,8 @@ export function toDomainCustomer(row: PrismaCustomer): Customer {
     channel: row.channel,
     customerRef: row.customerRef,
     displayName: row.displayName,
+    email: row.email,
+    phone: row.phone,
     lastVehicleId: row.lastVehicleId,
     lastQuoteId: row.lastQuoteId,
     bookingCount: row.bookingCount,
@@ -70,6 +72,76 @@ export async function upsertCustomerFromJourney(
     },
   });
   return toDomainCustomer(row);
+}
+
+export interface CustomerContactPatch {
+  email?: string | null;
+  phone?: string | null;
+  displayName?: string | null;
+}
+
+/**
+ * Saves contact details the customer gave (only the fields present in
+ * `patch` — never blanks an existing value). Creates the customer row if the
+ * journey sync has not yet, so contact captured on a very first message is
+ * not lost. Returns the up-to-date customer.
+ */
+export async function saveCustomerContact(
+  db: Executor,
+  tenantId: TenantId,
+  identity: { channel: Customer['channel']; customerRef: string },
+  patch: CustomerContactPatch,
+  now: Date,
+): Promise<Customer> {
+  const data = {
+    ...(patch.email ? { email: patch.email } : {}),
+    ...(patch.phone ? { phone: patch.phone } : {}),
+    ...(patch.displayName ? { displayName: patch.displayName } : {}),
+  };
+  const row = await db.customer.upsert({
+    where: {
+      tenantId_channel_customerRef: {
+        tenantId,
+        channel: identity.channel,
+        customerRef: identity.customerRef,
+      },
+    },
+    create: {
+      tenantId,
+      channel: identity.channel,
+      customerRef: identity.customerRef,
+      lastActivityAt: now,
+      ...data,
+    },
+    update: data,
+  });
+  return toDomainCustomer(row);
+}
+
+export async function findCustomerByIdentity(
+  db: Executor,
+  tenantId: TenantId,
+  identity: { channel: Customer['channel']; customerRef: string },
+): Promise<Customer | null> {
+  const row = await db.customer.findFirst({
+    where: { tenantId, channel: identity.channel, customerRef: identity.customerRef },
+  });
+  return row ? toDomainCustomer(row) : null;
+}
+
+/** True when this journey already has an event of this type — keeps "Journey started" to one CRM entry per journey. */
+export async function hasCustomerTimelineEvent(
+  db: Executor,
+  tenantId: TenantId,
+  customerId: string,
+  journeyId: string,
+  type: CustomerTimelineEventTypeValue,
+): Promise<boolean> {
+  const row = await db.customerTimelineEvent.findFirst({
+    where: { tenantId, customerId, journeyId, type },
+    select: { id: true },
+  });
+  return row !== null;
 }
 
 export async function findCustomerById(

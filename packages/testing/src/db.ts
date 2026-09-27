@@ -35,6 +35,8 @@ export function createScopedRoleTestPrismaClient(
 }
 
 const TABLES = [
+  'notification_deliveries',
+  'vehicle_photos',
   'eligibility_intakes',
   'outbound_messages',
   'customer_timeline_events',

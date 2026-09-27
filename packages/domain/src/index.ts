@@ -16,4 +16,5 @@ export * from './money.js';
 export * from './quote.js';
 export * from './journey.js';
 export * from './crm.js';
+export * from './attachment.js';
 export * from './notification.js';

@@ -1,3 +1,4 @@
+import { DiskMediaStorage } from './lib/mediaStorage.js';
 import {
   AlternativeRecommendationOrchestrator,
   DateLocationExtractionOrchestrator,
@@ -70,6 +71,7 @@ async function main(): Promise<void> {
   const { provider: notificationProvider, status: notificationProviderStatus } =
     createNotificationProvider(config);
 
+  const mediaStorage = new DiskMediaStorage(config.MEDIA_ROOT);
   const fleetProvider = createFleetProvider(config, prisma, redis);
   const reservationLockService = new ReservationLockService(prisma, fleetProvider, {
     ttlSeconds: config.AVAILABILITY_HOLD_TTL_SECONDS,
@@ -120,6 +122,7 @@ async function main(): Promise<void> {
     emailProviderStatus,
     notificationProvider,
     notificationProviderStatus,
+    mediaStorage,
     fleetProvider,
     reservationLockService,
     observabilityStatus: observability.status,

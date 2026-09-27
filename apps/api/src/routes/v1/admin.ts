@@ -3,7 +3,6 @@ import {
   findCustomerTimeline,
   listCustomers,
   listJourneys,
-  listVehicles,
 } from '@ai-concierge/db';
 import {
   getCustomerParamsSchema,
@@ -20,6 +19,7 @@ import { AppError, Permission } from '@ai-concierge/domain';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { authenticate } from '../../plugins/auth.js';
 import { requirePermission } from '../../lib/authz.js';
+import { listFleet } from '../../services/fleetService.js';
 
 /**
  * The admin dashboard's remaining read surfaces — Journeys list, Fleet,
@@ -63,11 +63,18 @@ export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const items = await listVehicles(app.ctx.prisma, {
-        tenantId: request.auth!.tenantId,
-        limit: request.query.limit,
-        offset: request.query.offset,
-      });
+      const items = await listFleet(
+        {
+          prisma: app.ctx.prisma,
+          storage: app.ctx.mediaStorage,
+          publicBaseUrl: app.ctx.config.API_PUBLIC_URL,
+        },
+        {
+          tenantId: request.auth!.tenantId,
+          limit: request.query.limit,
+          offset: request.query.offset,
+        },
+      );
       reply.status(200).send({ items });
     },
   );
