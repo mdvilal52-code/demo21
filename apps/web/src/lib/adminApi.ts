@@ -1,22 +1,36 @@
 import 'server-only';
 import {
+  dashboardSummaryResponseSchema,
   errorResponseSchema,
   escalationCaseResponseSchema,
   getCustomerResponseSchema,
   getJourneyResponseSchema,
+  listAuditEventsResponseSchema,
   listCustomersResponseSchema,
   listEscalationsResponseSchema,
   listJourneysResponseSchema,
+  listQuotesResponseSchema,
+  listSecurityEventsResponseSchema,
   listVehiclesResponseSchema,
   providerStatusResponseSchema,
+  resendEmailResponseSchema,
+  staffReplyResponseSchema,
+  transcriptResponseSchema,
+  type DashboardSummaryResponse,
   type EscalationCaseResponse,
   type GetCustomerResponse,
   type GetJourneyResponse,
+  type ListAuditEventsResponse,
   type ListCustomersResponse,
   type ListEscalationsResponse,
   type ListJourneysResponse,
+  type ListQuotesResponse,
+  type ListSecurityEventsResponse,
   type ListVehiclesResponse,
   type ProviderStatusResponse,
+  type ResendEmailResponse,
+  type StaffReplyResponse,
+  type TranscriptResponse,
 } from '@ai-concierge/contracts';
 import type { z } from 'zod';
 import { backendFetch } from './backendFetch';
@@ -147,5 +161,62 @@ export function resolveEscalation(
     `/v1/escalations/${encodeURIComponent(escalationCaseId)}/resolve`,
     body,
     escalationCaseResponseSchema,
+  );
+}
+
+export function fetchDashboardSummary(): Promise<DashboardSummaryResponse> {
+  return adminGet('/v1/dashboard/summary', dashboardSummaryResponseSchema);
+}
+
+export function fetchQuotes(params: {
+  limit?: number;
+  offset?: number;
+}): Promise<ListQuotesResponse> {
+  return adminGet(`/v1/quotes${toQueryString(params)}`, listQuotesResponseSchema);
+}
+
+export function fetchTranscript(conversationId: string): Promise<TranscriptResponse> {
+  return adminGet(
+    `/v1/enquiries/${encodeURIComponent(conversationId)}/transcript`,
+    transcriptResponseSchema,
+  );
+}
+
+export function fetchAuditEvents(params: {
+  limit?: number;
+  cursor?: string;
+}): Promise<ListAuditEventsResponse> {
+  return adminGet(`/v1/audit-events${toQueryString(params)}`, listAuditEventsResponseSchema);
+}
+
+export function fetchSecurityEvents(params: {
+  severity?: string;
+  limit?: number;
+  cursor?: string;
+}): Promise<ListSecurityEventsResponse> {
+  return adminGet(`/v1/security-events${toQueryString(params)}`, listSecurityEventsResponseSchema);
+}
+
+/** Human worker: answer the customer of an escalated (or any live) conversation. */
+export function sendStaffReply(
+  conversationId: string,
+  message: string,
+): Promise<StaffReplyResponse> {
+  return adminPost(
+    `/v1/enquiries/${encodeURIComponent(conversationId)}/staff-reply`,
+    { message },
+    staffReplyResponseSchema,
+  );
+}
+
+/** Re-attempts sending one FAILED email message's already-written content — never edits it. */
+export function resendEmailMessage(
+  conversationId: string,
+  outboundMessageId: string,
+): Promise<ResendEmailResponse> {
+  return adminPost(
+    `/v1/enquiries/${encodeURIComponent(conversationId)}/outbound-messages/${encodeURIComponent(outboundMessageId)}/resend`,
+    {},
+    resendEmailResponseSchema,
   );
 }

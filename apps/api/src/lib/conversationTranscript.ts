@@ -15,10 +15,20 @@ const MAX_TRANSCRIPT_LENGTH = 8000;
  * still resolves both the vehicle and the dates. Bounded to the most recent
  * messages/characters; for a single-message conversation this returns that
  * message's content unchanged.
+ *
+ * Each message's own content has any newline collapsed to a space *before*
+ * joining, so "\n" in the result always means exactly one thing: a boundary
+ * between two different messages, never a line break the customer typed
+ * inside a single one. Consumers (e.g. VehicleIntentService.propose, which
+ * scans this transcript one line at a time to prefer a later message's
+ * correction over an earlier one) rely on that invariant — without it, a
+ * customer's own multi-line message ("I want a Lamborghini Urus\nfor an SUV
+ * trip please") would be misread as two separate turns, and the second
+ * "turn" could wrongly outrank the first.
  */
 export function buildAccumulatedTranscript(messages: Array<{ content: string }>): string {
   const recent = messages.slice(-MAX_TRANSCRIPT_MESSAGES);
-  const joined = recent.map((message) => message.content).join('\n');
+  const joined = recent.map((message) => message.content.replace(/\r\n|\r|\n/g, ' ')).join('\n');
   return joined.length > MAX_TRANSCRIPT_LENGTH
     ? joined.slice(joined.length - MAX_TRANSCRIPT_LENGTH)
     : joined;

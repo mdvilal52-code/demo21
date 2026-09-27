@@ -1,5 +1,6 @@
 import { Worker, type Job } from 'bullmq';
 import { Redis } from 'ioredis';
+import { createEmailProvider } from '@ai-concierge/channels';
 import { createPrismaClient } from '@ai-concierge/db';
 import { postEnquiryJobSchema, QUEUE_NAMES } from '@ai-concierge/contracts';
 import {
@@ -8,6 +9,7 @@ import {
   createLogger,
 } from '@ai-concierge/observability';
 import { loadWorkerEnv } from './env.js';
+import { startEmailResendSweep } from './jobs/emailResendSweep.js';
 import { startEscalationSlaSweep } from './jobs/escalationSlaSweep.js';
 import { startHoldExpirationSweep } from './jobs/holdExpirationSweep.js';
 import { processPostEnquiryJob } from './processors/postEnquiryProcessor.js';
@@ -52,6 +54,18 @@ async function main(): Promise<void> {
     logger,
     intervalMs: config.ESCALATION_SLA_SWEEP_INTERVAL_MS,
   });
+  const { provider: emailProvider, status: emailProviderStatus } = createEmailProvider(config);
+  if (emailProviderStatus === 'NOT_CONFIGURED') {
+    logger.info('email resend sweep: Mailgun not configured, sweep will no-op every tick');
+  }
+  const stopEmailResendSweep = startEmailResendSweep({
+    prisma,
+    emailProvider,
+    logger,
+    intervalMs: config.EMAIL_RESEND_SWEEP_INTERVAL_MS,
+    minAgeMs: config.EMAIL_RESEND_MIN_AGE_MS,
+    maxAttempts: config.EMAIL_RESEND_MAX_ATTEMPTS,
+  });
 
   logger.info({ concurrency: config.WORKER_CONCURRENCY }, 'worker started');
 
@@ -59,6 +73,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, 'shutting down');
     stopHoldExpirationSweep();
     stopEscalationSlaSweep();
+    stopEmailResendSweep();
     await worker.close();
     await Promise.allSettled([prisma.$disconnect(), connection.quit(), observability.shutdown()]);
     process.exit(0);

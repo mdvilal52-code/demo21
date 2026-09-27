@@ -10,6 +10,17 @@ export const workerEnvSchema = baseEnvSchema.extend({
   // past their SLA due date. Never load-bearing for correctness — same
   // "housekeeping only, self-heals" posture as the hold-expiration sweep.
   ESCALATION_SLA_SWEEP_INTERVAL_MS: z.coerce.number().int().positive().default(60_000),
+  // Email retry/resend: how often the sweep re-attempts a FAILED outbound
+  // email, how old a failure must be before the first retry (never hammer a
+  // provider outage immediately), and how many attempts before giving up.
+  EMAIL_RESEND_SWEEP_INTERVAL_MS: z.coerce.number().int().positive().default(300_000),
+  EMAIL_RESEND_MIN_AGE_MS: z.coerce.number().int().nonnegative().default(120_000),
+  EMAIL_RESEND_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
+  // Same Mailgun config apps/api uses to build an EmailProvider — the worker
+  // needs its own copy of these three vars to retry a failed send.
+  MAILGUN_API_KEY: z.string().trim().min(1).optional(),
+  MAILGUN_DOMAIN: z.string().trim().min(1).optional(),
+  MAILGUN_FROM_ADDRESS: z.string().trim().email().optional(),
 });
 
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;

@@ -23,6 +23,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
+    "@ai-concierge/db": "workspace:*",
     "@ai-concierge/testing": "workspace:*",
     "@axe-core/playwright": "^4.10.0",
     "@playwright/test": "^1.48.0",

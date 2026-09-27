@@ -2,7 +2,7 @@
   "$schema": "./phase-contracts.schema.json",
   "project": "AI Concierge — Luxury Car Rental (Dubai)",
   "version": "1.0.0",
-  "updatedAt": "2026-09-26",
+  "updatedAt": "2026-09-27",
   "statusLegend": [
     "PENDING",
     "IN_PROGRESS",
@@ -392,16 +392,17 @@
     {
       "id": 16,
       "name": "Automatic Steps 5-8 chaining + Conversation Engine v2",
-      "status": "IN_PROGRESS",
+      "status": "FROZEN",
       "goal": "A customer message advances the journey by itself from Step 4 to an issued quote (or alternatives / a human hand-off), and every reply is Gemini-worded but grounded in deterministic facts.",
-      "progressNote": "Implemented and green on typecheck, lint, unit and the integration/security suites listed in docs/PHASE-16.md: driver-detail intake over chat (deterministic + evidence-grounded Gemini extraction, DOB encrypted at rest), the Step 5->6->8/7 chain reusing each step service and record*Outcome, human hand-off for requested person / complaint / accepted quote / expired quote / step failure / stalled details, a draft-then-rewrite reply engine with a grounding guard, stored outbound replies, one shared handleInboundTurn for WhatsApp and Email, journey-aware open-conversation lookup. NOT frozen: Playwright e2e and an independent code review were not run. Steps 9-19, the Customer PWA and an email retry feature remain PENDING.",
+      "progressNote": "Implemented and green on the full gate pipeline (typecheck, lint, unit, integration, security, e2e, build, code review, architecture review, regression) — see docs/PHASE-16.md §9 addendum (2026-09-27): driver-detail intake over chat (deterministic + evidence-grounded Gemini extraction, DOB encrypted at rest), the Step 5->6->8/7 chain reusing each step service and record*Outcome, human hand-off for requested person / complaint / accepted quote / expired quote / step failure / stalled details, a draft-then-rewrite reply engine with a grounding guard, stored outbound replies, one shared handleInboundTurn for WhatsApp and Email, journey-aware open-conversation lookup. Addendum also closed the two root-caused conversation bugs (vehicle-correction shadowing, nationality lost to a licence-phrase regex crossing a newline), added Playwright e2e (docs/PHASE-16.md §9), ran two independent code-review passes, and added the previously out-of-scope email retry/resend feature (also code-reviewed; found and fixed 3 real bugs before shipping) plus a least-privilege grant an architecture-review pass caught. Steps 9-19 remain PENDING project-wide by design (an accepted quote ends in a human hand-off); the Customer PWA, web chat and staff-side reply composition were built separately under Phase 17.",
       "deliverables": [
         "EligibilityIntake + OutboundMessage tables (RLS forced) and repositories [DONE]",
         "Intake extraction: deterministic + Gemini with verbatim-evidence grounding [DONE]",
         "journeyAutopilotService: automatic Step 5 -> 6 -> 8 / 7 with human hand-off rules [DONE]",
         "journeyReplyService: grounded draft + Gemini rewrite, grounding guard, deterministic fallback [DONE]",
         "Shared handleInboundTurn for WhatsApp and Email [DONE]",
-        "Playwright e2e + independent code review [PENDING]"
+        "Playwright e2e + independent code review [DONE]",
+        "Email retry/resend (automatic worker sweep + staff-triggered dashboard resend) [DONE]"
       ],
       "acceptance": [
         "A first message with vehicle/dates followed by the driver details yields an issued quote with no manual endpoint call",
@@ -421,6 +422,27 @@
         12
       ],
       "phaseDoc": "docs/PHASE-16.md"
+    },
+    {
+      "id": 17,
+      "name": "Frontend completion: admin dashboard, human worker, customer web chat (PWA)",
+      "status": "IN_PROGRESS",
+      "goal": "Everything the backend does for Steps 1-8 is reachable from the deployed website: staff see and act on journeys, and customers chat and follow their request.",
+      "progressNote": "Implemented; see docs/PHASE-17.md. Web e2e specs (customer app + staff redirect) are written and green; NOT frozen: an independent code review was not run; Bookings, documents, payments and Steps 9-19 are not built.",
+      "deliverables": [
+        "Dashboard summary, quotes, transcript and human reply endpoints [DONE]",
+        "Public web chat endpoints with idempotency and rate limits [DONE]",
+        "Admin dashboard pages: overview, journeys, escalations, quotes, audit, security [DONE]",
+        "Customer PWA: home, chat, requests, profile, manifest, service worker, offline page [DONE]",
+        "Playwright e2e + independent code review [PENDING]"
+      ],
+      "acceptance": [
+        "A customer can go from first message to an issued quote and hand-over in the web chat",
+        "A staff reply appears in the customer's chat without a reload",
+        "Nothing the backend cannot do is presented as available"
+      ],
+      "dependsOn": [16],
+      "phaseDoc": "docs/PHASE-17.md"
     }
   ]
 }

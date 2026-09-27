@@ -34,6 +34,15 @@ const BOOKING =
 const FULL_DETAILS =
   "I'm Indian, born 12 May 1990, I hold a UAE driving licence and I can provide my passport";
 
+/** Mirrors how replies print a total: whole amounts bare, cents as exactly two digits. */
+function formatTotal(minorUnits: number): string {
+  const digits = minorUnits % 100 === 0 ? 0 : 2;
+  return (minorUnits / 100).toLocaleString('en-US', {
+    minimumFractionDigits: digits,
+    maximumFractionDigits: digits,
+  });
+}
+
 function sign(body: string): string {
   return `sha256=${createHmac('sha256', APP_SECRET).update(body, 'utf8').digest('hex')}`;
 }
@@ -187,7 +196,7 @@ describe('automatic Steps 5-8 chain — integration', () => {
       const quote = await prisma.quote.findFirst({ where: { conversationId: conversation!.id } });
       expect(quote?.status).toBe('ISSUED');
       const totalMinor = (quote!.total as { minorUnits: number }).minorUnits;
-      const total = (totalMinor / 100).toLocaleString('en-US', { maximumFractionDigits: 2 });
+      const total = formatTotal(totalMinor);
       expect(quoteReply).toContain(`Total: AED ${total}`);
 
       // The customer's date of birth is stored encrypted, never in the clear.

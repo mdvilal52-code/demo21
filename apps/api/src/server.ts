@@ -8,7 +8,11 @@ import {
   RuleBasedIntentEngine,
   VehicleDeterminationOrchestrator,
 } from '@ai-concierge/ai';
-import { MetaWhatsAppProvider, NotConfiguredWhatsAppProvider } from '@ai-concierge/channels';
+import {
+  createEmailProvider,
+  MetaWhatsAppProvider,
+  NotConfiguredWhatsAppProvider,
+} from '@ai-concierge/channels';
 import { createPrismaClient } from '@ai-concierge/db';
 import {
   createLogger,
@@ -19,7 +23,6 @@ import { buildApp } from './app.js';
 import type { AppContext } from './context.js';
 import { loadApiEnv } from './env.js';
 import { createAIProvider } from './lib/geminiProvider.js';
-import { createEmailProvider } from './lib/createEmailProvider.js';
 import { createNotificationProvider } from './lib/notificationProvider.js';
 import { createPostEnquiryQueue } from './lib/queue.js';
 import { createRedisClient } from './lib/redis.js';

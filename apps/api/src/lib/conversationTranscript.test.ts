@@ -34,4 +34,12 @@ describe('buildAccumulatedTranscript', () => {
     expect(transcript.endsWith('b'.repeat(5000))).toBe(true);
     expect(transcript).not.toBe(`${'a'.repeat(5000)}\n${'b'.repeat(5000)}`);
   });
+
+  it('collapses a newline the customer typed inside one message, so "\\n" in the result only ever means a message boundary (regression)', () => {
+    const transcript = buildAccumulatedTranscript([
+      { content: 'I want a Lamborghini Urus\nfor an SUV trip please' },
+      { content: '15 to 19 Oct' },
+    ]);
+    expect(transcript).toBe('I want a Lamborghini Urus for an SUV trip please\n15 to 19 Oct');
+  });
 });
