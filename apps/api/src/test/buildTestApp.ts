@@ -1,3 +1,5 @@
+import os from 'node:os';
+import path from 'node:path';
 import {
   AlternativeRecommendationOrchestrator,
   type AIProvider,
@@ -28,6 +30,7 @@ import { buildApp } from '../app.js';
 import type { AppContext } from '../context.js';
 import type { ApiEnv } from '../env.js';
 import { createAIProvider } from '../lib/geminiProvider.js';
+import { DiskMediaStorage, type MediaStorage } from '../lib/mediaStorage.js';
 import {
   NotConfiguredNotificationProvider,
   type NotificationProvider,
@@ -43,7 +46,11 @@ export interface TestApp {
   close: () => Promise<void>;
 }
 
+/** Photos written by tests land here (a throw-away temp dir), never in a real media folder. */
+const TEST_MEDIA_ROOT = path.join(os.tmpdir(), 'ai-concierge-test-media');
+
 export interface TestAppCtxOverrides {
+  mediaStorage?: MediaStorage;
   whatsappProvider?: WhatsAppProvider;
   emailProvider?: EmailProvider;
   notificationProvider?: NotificationProvider;
@@ -75,6 +82,7 @@ export async function buildTestApp(
     API_PUBLIC_URL: 'http://localhost:4000',
     CORS_ALLOWED_ORIGINS: ['http://localhost:3000'],
     API_BODY_LIMIT_BYTES: 102_400,
+    MEDIA_ROOT: TEST_MEDIA_ROOT,
     // High by default so ordinary integration tests never trip the limiter,
     // which (per @fastify/rate-limit) tracks one counter per IP for the
     // whole app/test file. Tests that specifically exercise rate limiting
@@ -88,6 +96,9 @@ export async function buildTestApp(
     GEMINI_THINKING_LEVEL: 'low',
     CHAT_SESSION_LIMIT_PER_10_MIN: 1000,
     CHAT_GLOBAL_LIMIT_PER_MIN: 10000,
+    NOTIFY_PER_RECIPIENT_PER_DAY: 5,
+    NOTIFY_SMS_GLOBAL_PER_DAY: 300,
+    NOTIFY_EMAIL_GLOBAL_PER_DAY: 1000,
     JWT_SIGNING_SECRET: 'test-jwt-signing-secret-at-least-32-bytes-long',
     MFA_ENCRYPTION_KEY: 'hEPpdv0I3rPvipYa674EeHgK51Zb+BwciFTcTSAch60=',
     AUTH_TOKEN_ISSUER: 'AI Concierge Test',
@@ -140,6 +151,7 @@ export async function buildTestApp(
     notificationProvider:
       ctxOverrides.notificationProvider ?? new NotConfiguredNotificationProvider(),
     notificationProviderStatus: ctxOverrides.notificationProvider ? 'CONFIGURED' : 'NOT_CONFIGURED',
+    mediaStorage: ctxOverrides.mediaStorage ?? new DiskMediaStorage(TEST_MEDIA_ROOT),
     fleetProvider,
     reservationLockService: new ReservationLockService(prisma, fleetProvider, {
       ttlSeconds: config.AVAILABILITY_HOLD_TTL_SECONDS,

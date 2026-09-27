@@ -1,14 +1,23 @@
 import {
   createOutboundMessage,
+  findCustomerByIdentity,
   findMessagesForConversation,
   findOutboundMessagesForConversation,
   type Channel,
   type OutboundMessageSourceValue,
 } from '@ai-concierge/db';
-import { CustomerTimelineEventType, type Journey, type TenantId } from '@ai-concierge/domain';
+import {
+  CustomerTimelineEventType,
+  type Journey,
+  type OutboundAttachment,
+  type TenantId,
+} from '@ai-concierge/domain';
 import type { AppContext } from '../context.js';
+import { RedisNotificationLimiter } from '../lib/notificationLimiter.js';
 import { resolvePiiKey } from '../lib/piiKey.js';
 import { MAX_RECENT_TURNS_FOR_REPLY, type RecentTurn } from './conversationalReplyService.js';
+import { captureCustomerContact } from './customerContactService.js';
+import { notifyCustomerAfterTurn } from './customerNotificationService.js';
 import { syncCustomerFromJourney } from './crmService.js';
 import {
   runFullEnquiryPipeline,
@@ -18,6 +27,7 @@ import { advanceJourneyAutomatically } from './journeyAutopilotService.js';
 import type { JourneyProgress } from './journeyProgress.js';
 import { generateJourneyReply, type JourneyReply } from './journeyReplyService.js';
 import { syncJourneyAfterMissingInfo } from './journeyService.js';
+import { buildPhotoReply } from './vehiclePhotoReplyService.js';
 
 export interface InboundTurnInput {
   channel: Channel;
@@ -33,7 +43,26 @@ export interface InboundTurnResult {
   reply: JourneyReply;
   progress: JourneyProgress;
   missingInfoStatus: string;
+  /** Car photos to send with the reply (stored as ids; each channel turns them into what it can send). */
+  attachments: OutboundAttachment[];
 }
+
+/**
+ * Asked at most twice per conversation, and only in the website chat — an
+ * email or WhatsApp customer is already reachable through the channel itself.
+ * Without contact details the team cannot follow up and no quote email or SMS
+ * can be sent.
+ */
+export const CONTACT_REQUEST_TEXT =
+  'To receive your quote by email or SMS, and so our team can reach you, please share your email address and phone number (with country code).';
+const CONTACT_REQUEST_MARKER = 'please share your email address and phone number';
+const MAX_CONTACT_REQUESTS = 2;
+const CONTACT_REQUEST_STAGES: JourneyProgress['stage'][] = [
+  'QUOTE_ISSUED',
+  'QUOTE_FOLLOWUP',
+  'HUMAN_REVIEW',
+  'ESCALATED_WAITING',
+];
 
 /**
  * One line per processed message: ids, intent, stage and the fields still
@@ -142,6 +171,21 @@ export async function handleInboundTurn(
   const conversationId = pipeline.enquiry.conversationId;
   const missingInfo = pipeline.missingInfo.missingInfo;
 
+  // Contact details the customer typed (or the channel itself is) go straight to the CRM.
+  try {
+    await captureCustomerContact(
+      { prisma: ctx.prisma },
+      {
+        tenantId,
+        channel: input.channel,
+        customerRef: input.customerRef,
+        message: input.body,
+      },
+    );
+  } catch (error) {
+    ctx.logger.error({ err: error }, 'could not save customer contact details');
+  }
+
   let journey: Journey | null = null;
   try {
     journey = await syncJourneyAfterMissingInfo(
@@ -205,12 +249,83 @@ export async function handleInboundTurn(
   logPipelineDecision(ctx, input.channel, input.requestId, pipeline, progress);
 
   const turns = await loadTurns(ctx, tenantId, conversationId);
-  const reply = await generateJourneyReply(
+  const journeyReply = await generateJourneyReply(
     { aiProvider: ctx.aiProvider, logger: ctx.logger },
     { progress, missingInfo, turns },
   );
 
-  return { conversationId, reply, progress, missingInfoStatus: missingInfo.status };
+  let replyText = journeyReply.text;
+  let attachments: OutboundAttachment[] = [];
+
+  // "Send me a photo of the Range Rover": attach the photos staff uploaded for it.
+  try {
+    const photoReply = await buildPhotoReply(
+      { prisma: ctx.prisma },
+      {
+        tenantId,
+        message: input.body,
+        resolvedVehicleId: pipeline.vehicle.determination.resolvedVehicle?.id ?? null,
+      },
+    );
+    if (photoReply) {
+      replyText = `${photoReply.text}\n\n${replyText}`;
+      attachments = photoReply.attachments;
+    }
+  } catch (error) {
+    ctx.logger.error({ err: error }, 'could not build the car photo reply');
+  }
+
+  // Ask for an email/phone (website chat only) once a quote or hand-over makes them useful.
+  try {
+    if (input.channel === 'WEB' && CONTACT_REQUEST_STAGES.includes(progress.stage)) {
+      const customer = await findCustomerByIdentity(ctx.prisma, tenantId, {
+        channel: input.channel,
+        customerRef: input.customerRef,
+      });
+      const asked = turns.filter(
+        (turn) => turn.role === 'assistant' && turn.content.includes(CONTACT_REQUEST_MARKER),
+      ).length;
+      if (customer && !customer.email && !customer.phone && asked < MAX_CONTACT_REQUESTS) {
+        replyText = `${replyText}\n\n${CONTACT_REQUEST_TEXT}`;
+      }
+    }
+  } catch (error) {
+    ctx.logger.error({ err: error }, 'could not check whether contact details are needed');
+  }
+
+  // Automatic quote / hand-over email and SMS. Never allowed to fail the turn.
+  try {
+    await notifyCustomerAfterTurn(
+      {
+        prisma: ctx.prisma,
+        emailProvider: ctx.emailProvider,
+        notificationProvider: ctx.notificationProvider,
+        limiter: new RedisNotificationLimiter(ctx.redis, {
+          perRecipientPerDay: ctx.config.NOTIFY_PER_RECIPIENT_PER_DAY,
+          globalSmsPerDay: ctx.config.NOTIFY_SMS_GLOBAL_PER_DAY,
+          globalEmailPerDay: ctx.config.NOTIFY_EMAIL_GLOBAL_PER_DAY,
+        }),
+      },
+      {
+        tenantId,
+        conversationId,
+        channel: input.channel,
+        customerRef: input.customerRef,
+        journeyId: journey?.id ?? null,
+        progress,
+      },
+    );
+  } catch (error) {
+    ctx.logger.error({ err: error }, 'customer notification failed after inbound turn');
+  }
+
+  return {
+    conversationId,
+    reply: { ...journeyReply, text: replyText },
+    progress,
+    missingInfoStatus: missingInfo.status,
+    attachments,
+  };
 }
 
 /**
@@ -226,6 +341,7 @@ export async function recordOutboundReply(
     text: string;
     source: OutboundMessageSourceValue;
     stage: string;
+    attachments?: OutboundAttachment[];
   },
 ): Promise<void> {
   try {
@@ -235,6 +351,7 @@ export async function recordOutboundReply(
       content: input.text,
       source: input.source,
       stage: input.stage,
+      ...(input.attachments ? { attachments: input.attachments } : {}),
     });
   } catch (error) {
     ctx.logger.error({ err: error }, 'could not record the outbound reply');

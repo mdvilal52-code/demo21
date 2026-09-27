@@ -16,6 +16,8 @@ export interface WhatsAppSendResult {
 export interface WhatsAppProvider {
   readonly name: string;
   sendTextMessage(to: string, body: string): Promise<WhatsAppSendResult>;
+  /** Sends a picture the customer can see inline; `imageUrl` must be publicly reachable by Meta. */
+  sendImageMessage(to: string, imageUrl: string, caption: string): Promise<WhatsAppSendResult>;
 }
 
 /** No WhatsApp credentials configured for this environment. */
@@ -23,6 +25,14 @@ export class NotConfiguredWhatsAppProvider implements WhatsAppProvider {
   readonly name = 'not-configured';
 
   async sendTextMessage(_to: string, _body: string): Promise<WhatsAppSendResult> {
+    return { status: 'NOT_CONFIGURED' };
+  }
+
+  async sendImageMessage(
+    _to: string,
+    _imageUrl: string,
+    _caption: string,
+  ): Promise<WhatsAppSendResult> {
     return { status: 'NOT_CONFIGURED' };
   }
 }
@@ -55,6 +65,23 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
   ) {}
 
   async sendTextMessage(to: string, body: string): Promise<WhatsAppSendResult> {
+    return this.post({ messaging_product: 'whatsapp', to, type: 'text', text: { body } });
+  }
+
+  async sendImageMessage(
+    to: string,
+    imageUrl: string,
+    caption: string,
+  ): Promise<WhatsAppSendResult> {
+    return this.post({
+      messaging_product: 'whatsapp',
+      to,
+      type: 'image',
+      image: { link: imageUrl, caption: caption.slice(0, 1000) },
+    });
+  }
+
+  private async post(payload: Record<string, unknown>): Promise<WhatsAppSendResult> {
     const url = `https://${GRAPH_API_HOST}/${this.config.apiVersion}/${this.config.phoneNumberId}/messages`;
     try {
       const response = await this.fetchImpl(url, [GRAPH_API_HOST], {
@@ -63,7 +90,7 @@ export class MetaWhatsAppProvider implements WhatsAppProvider {
           'content-type': 'application/json',
           authorization: `Bearer ${this.config.accessToken}`,
         },
-        body: JSON.stringify({ messaging_product: 'whatsapp', to, type: 'text', text: { body } }),
+        body: JSON.stringify(payload),
         timeoutMs: 8000,
       });
 

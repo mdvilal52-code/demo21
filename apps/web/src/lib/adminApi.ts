@@ -1,6 +1,8 @@
 import 'server-only';
 import {
   dashboardSummaryResponseSchema,
+  deleteVehiclePhotoResponseSchema,
+  fleetVehicleResponseSchema,
   errorResponseSchema,
   escalationCaseResponseSchema,
   getCustomerResponseSchema,
@@ -15,7 +17,10 @@ import {
   providerStatusResponseSchema,
   staffReplyResponseSchema,
   transcriptResponseSchema,
+  type CreateVehicleBody,
   type DashboardSummaryResponse,
+  type FleetVehicleResponse,
+  type UpdateVehicleBody,
   type EscalationCaseResponse,
   type GetCustomerResponse,
   type GetJourneyResponse,
@@ -204,5 +209,31 @@ export function sendStaffReply(
     `/v1/enquiries/${encodeURIComponent(conversationId)}/staff-reply`,
     { message },
     staffReplyResponseSchema,
+  );
+}
+
+/** Fleet: add a car (name, specs, daily rate, how many units). */
+export function createFleetVehicle(body: CreateVehicleBody): Promise<FleetVehicleResponse> {
+  return adminPost('/v1/fleet/vehicles', body, fleetVehicleResponseSchema);
+}
+
+/** Fleet: change a car's rate, availability or active flag. */
+export function updateFleetVehicle(
+  vehicleId: string,
+  body: UpdateVehicleBody,
+): Promise<FleetVehicleResponse> {
+  return adminPost(
+    `/v1/fleet/vehicles/${encodeURIComponent(vehicleId)}`,
+    body,
+    fleetVehicleResponseSchema,
+  );
+}
+
+/** Fleet: remove one photo of a car. */
+export async function deleteVehiclePhoto(photoId: string): Promise<void> {
+  await adminPost(
+    `/v1/fleet/photos/${encodeURIComponent(photoId)}/delete`,
+    {},
+    deleteVehiclePhotoResponseSchema,
   );
 }

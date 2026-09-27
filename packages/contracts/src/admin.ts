@@ -4,8 +4,8 @@ import {
   customerTimelineEventSchema,
   journeySchema,
   journeyStateSchema,
-  vehicleSchema,
 } from '@ai-concierge/domain';
+import { fleetVehicleSchema } from './fleet.js';
 
 export const listJourneysQuerySchema = z.object({
   state: journeyStateSchema.optional(),
@@ -23,7 +23,7 @@ export const listVehiclesQuerySchema = z.object({
 });
 export type ListVehiclesQuery = z.infer<typeof listVehiclesQuerySchema>;
 
-export const listVehiclesResponseSchema = z.object({ items: z.array(vehicleSchema) });
+export const listVehiclesResponseSchema = z.object({ items: z.array(fleetVehicleSchema) });
 export type ListVehiclesResponse = z.infer<typeof listVehiclesResponseSchema>;
 
 export const listCustomersQuerySchema = z.object({

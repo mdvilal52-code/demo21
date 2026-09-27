@@ -33,6 +33,18 @@ export default async function CustomerDetailPage({
       <GlassCard className="mt-6">
         <dl className="grid grid-cols-2 gap-4 text-sm">
           <div>
+            <dt className="text-xs uppercase tracking-wide text-cream-50/60">Email</dt>
+            <dd className="mt-1 break-all text-cream-50" data-testid="customer-email">
+              {customer.email ?? 'Not given yet'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-xs uppercase tracking-wide text-cream-50/60">Phone</dt>
+            <dd className="mt-1 text-cream-50" data-testid="customer-phone">
+              {customer.phone ?? 'Not given yet'}
+            </dd>
+          </div>
+          <div>
             <dt className="text-xs uppercase tracking-wide text-cream-50/60">Bookings</dt>
             <dd className="mt-1 text-cream-50">{customer.bookingCount}</dd>
           </div>

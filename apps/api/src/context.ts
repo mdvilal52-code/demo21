@@ -16,6 +16,7 @@ import type { Queue } from 'bullmq';
 import type { Redis } from 'ioredis';
 import type { Logger } from 'pino';
 import type { ApiEnv } from './env.js';
+import type { MediaStorage } from './lib/mediaStorage.js';
 import type { NotificationProvider } from './lib/notificationProvider.js';
 import type { ReservationLockService } from './services/reservationLockService.js';
 
@@ -38,6 +39,8 @@ export interface AppContext {
   emailProvider: EmailProvider;
   emailProviderStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
   notificationProvider: NotificationProvider;
+  /** Where uploaded car photos are stored. */
+  mediaStorage: MediaStorage;
   notificationProviderStatus: 'CONFIGURED' | 'NOT_CONFIGURED';
   /** Exposed for future admin-Settings visibility (matches `whatsappProvider`'s role) — consumed directly by `reservationLockService`, not read elsewhere yet. */
   fleetProvider: FleetProvider;

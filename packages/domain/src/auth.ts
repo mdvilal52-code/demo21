@@ -95,6 +95,7 @@ export const Permission = {
   ESCALATION_RESOLVE: 'escalation:resolve',
   CUSTOMER_READ: 'customer:read',
   CONVERSATION_REPLY: 'conversation:reply',
+  FLEET_WRITE: 'fleet:write',
 } as const;
 
 export const permissionSchema = z.enum([
@@ -110,6 +111,7 @@ export const permissionSchema = z.enum([
   Permission.ESCALATION_RESOLVE,
   Permission.CUSTOMER_READ,
   Permission.CONVERSATION_REPLY,
+  Permission.FLEET_WRITE,
 ]);
 export type PermissionValue = z.infer<typeof permissionSchema>;
 
@@ -143,6 +145,7 @@ const SECURITY_PERMISSIONS: PermissionValue[] = [
   ...STAFF_JOURNEY_PERMISSIONS,
 ];
 const MANAGER_PERMISSIONS: PermissionValue[] = [
+  Permission.FLEET_WRITE,
   Permission.AUDIT_EVENT_READ,
   Permission.SECURITY_EVENT_READ,
   Permission.USER_READ,

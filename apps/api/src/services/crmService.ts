@@ -1,5 +1,6 @@
 import {
   findConversationById,
+  hasCustomerTimelineEvent,
   recordCustomerTimelineEvent,
   upsertCustomerFromJourney,
   type PrismaClient,
@@ -7,6 +8,7 @@ import {
 import {
   AppError,
   type Customer,
+  CustomerTimelineEventType,
   type CustomerTimelineEventTypeValue,
   type TenantId,
 } from '@ai-concierge/domain';
@@ -64,6 +66,21 @@ export async function syncCustomerFromJourney(
       },
       new Date(),
     );
+
+    // The turn service reports "journey started" on every message of a journey;
+    // the CRM timeline records it once.
+    if (
+      input.eventType === CustomerTimelineEventType.JOURNEY_STARTED &&
+      (await hasCustomerTimelineEvent(
+        tx,
+        input.tenantId,
+        customer.id,
+        input.journeyId,
+        input.eventType,
+      ))
+    ) {
+      return customer;
+    }
 
     await recordCustomerTimelineEvent(tx, {
       tenantId: input.tenantId,

@@ -71,7 +71,7 @@ const MAX_REPLY_CHARS = 1400;
 // Formatting
 // ---------------------------------------------------------------------------
 
-function formatMoney(minorUnits: number, currency: string): string {
+export function formatMoney(minorUnits: number, currency: string): string {
   const major = minorUnits / 100;
   const digits = minorUnits % 100 === 0 ? 0 : 2;
   return `${currency} ${major.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits })}`;
@@ -118,7 +118,7 @@ function formatDate(iso: string): string {
   return `${day} ${month} ${year}`;
 }
 
-function formatDateTime(iso: string): string {
+export function formatDateTime(iso: string): string {
   const { day, month, year, hour, minute } = displayParts(iso);
   return `${day} ${month} ${year}, ${hour}:${minute} (Dubai time)`;
 }
@@ -173,7 +173,7 @@ function draftNeedsEligibilityInfo(
   };
 }
 
-function describeQuote(quote: QuoteSnapshot): string {
+export function describeQuote(quote: QuoteSnapshot): string {
   const lines: string[] = [];
   for (const item of quote.lineItems) {
     lines.push(

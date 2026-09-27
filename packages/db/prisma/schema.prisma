@@ -44,6 +44,8 @@ model Tenant {
   customerTimelineEvents     CustomerTimelineEvent[]
   eligibilityIntakes         EligibilityIntake[]
   outboundMessages           OutboundMessage[]
+  vehiclePhotos              VehiclePhoto[]
+  notificationDeliveries     NotificationDelivery[]
 
   @@map("tenants")
 }
@@ -399,6 +401,7 @@ model Vehicle {
   availabilityChecks         AvailabilityCheck[]
   alternativeRecommendations AlternativeRecommendation[]
   quotes                     Quote[]
+  photos                     VehiclePhoto[]
 
   @@unique([tenantId, make, model])
   @@index([tenantId])
@@ -927,6 +930,10 @@ model Customer {
   channel        Channel
   customerRef    String
   displayName    String?
+  /// Contact details the customer gave in chat (WEB) — or that the channel itself is (EMAIL/WHATSAPP).
+  /// Used for the automatic quote/hand-over email and SMS; never guessed, only what the customer wrote.
+  email          String?
+  phone          String?
   lastVehicleId  String?
   lastQuoteId    String?
   bookingCount   Int      @default(0)
@@ -1015,9 +1022,58 @@ model OutboundMessage {
   authorUserId   String?
   /// The journey stage this reply was written for (e.g. QUOTE_ISSUED).
   stage          String
+  /// Images sent with this reply (a car photo the customer asked for): [{ photoId, vehicleId, caption }].
+  attachments    Json?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
   @@index([tenantId])
   @@map("outbound_messages")
+}
+
+/// A photo of a fleet vehicle, uploaded by staff from the dashboard. The image
+/// bytes live on disk under `MEDIA_ROOT` (`storageKey` is a generated file
+/// name, never user input); the public URL is `/media/vehicles/<id>`. When a
+/// customer asks to see a car in chat, the concierge attaches these.
+model VehiclePhoto {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  vehicleId   String
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id])
+  storageKey  String
+  contentType String
+  sizeBytes   Int
+  caption     String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, vehicleId, sortOrder])
+  @@map("vehicle_photos")
+}
+
+/// One automatic email/SMS attempt to a customer or staff member. A SENT row
+/// is what stops the same quote being emailed twice; NOT_CONFIGURED/FAILED
+/// rows are the honest record that nothing left (never a fake success).
+/// A partial unique index on (tenantId, kind, subjectKey, channel) WHERE
+/// status = 'SENT' lives in the migration SQL (Prisma cannot express it).
+model NotificationDelivery {
+  id             String   @id @default(uuid())
+  tenantId       String
+  tenant         Tenant   @relation(fields: [tenantId], references: [id])
+  conversationId String?
+  /// QUOTE_ISSUED | HANDOFF_ACK
+  kind           String
+  /// What this is about (e.g. the quote id) — with kind+channel it identifies "the same notification".
+  subjectKey     String
+  /// EMAIL | SMS
+  channel        String
+  /// SENT | FAILED | NOT_CONFIGURED
+  status         String
+  providerRef    String?
+  error          String?
+  createdAt      DateTime @default(now())
+
+  @@index([tenantId, conversationId])
+  @@map("notification_deliveries")
 }

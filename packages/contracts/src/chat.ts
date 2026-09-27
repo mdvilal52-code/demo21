@@ -13,10 +13,19 @@ export const chatSessionIdSchema = z.string().uuid();
 export const chatRoleSchema = z.enum(['CUSTOMER', 'CONCIERGE', 'STAFF']);
 export type ChatRole = z.infer<typeof chatRoleSchema>;
 
+/** A car photo shown inline in the chat — the customer asked to see the car. */
+export const chatAttachmentSchema = z.object({
+  type: z.literal('image'),
+  url: z.string().url(),
+  caption: z.string(),
+});
+export type ChatAttachment = z.infer<typeof chatAttachmentSchema>;
+
 export const chatMessageSchema = z.object({
   id: z.string().uuid(),
   role: chatRoleSchema,
   content: z.string(),
+  attachments: z.array(chatAttachmentSchema).default([]),
   createdAt: z.string().datetime(),
 });
 export type ChatMessage = z.infer<typeof chatMessageSchema>;
@@ -78,6 +87,8 @@ export const sendChatMessageResponseSchema = chatStateSchema.extend({
     text: z.string(),
     /** AI_GENERATED when Gemini worded it, otherwise TEMPLATE (the deterministic draft). */
     source: z.enum(['AI_GENERATED', 'TEMPLATE']),
+    /** Car photos to show with this reply (only when the customer asked to see a car). */
+    attachments: z.array(chatAttachmentSchema).default([]),
     createdAt: z.string().datetime(),
   }),
 });

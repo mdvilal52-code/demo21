@@ -179,3 +179,52 @@ export async function listVehicles(db: Executor, params: ListVehiclesParams): Pr
   });
   return rows.map(toDomainVehicle);
 }
+
+export interface UpdateVehicleInput {
+  category?: string;
+  luxuryTier?: string;
+  seats?: number;
+  luggage?: number;
+  transmission?: string;
+  availabilityStatus?: string;
+  pricingProfile?: PricingProfile;
+  active?: boolean;
+}
+
+/** Edits a catalog entry the dashboard owns; returns null when the vehicle is missing or soft-deleted. */
+export async function updateVehicle(
+  db: Executor,
+  tenantId: TenantId,
+  vehicleId: string,
+  patch: UpdateVehicleInput,
+): Promise<Vehicle | null> {
+  const result = await db.vehicle.updateMany({
+    where: { id: vehicleId, tenantId, deletedAt: null },
+    data: {
+      ...(patch.category
+        ? { category: patch.category as Prisma.VehicleUpdateInput['category'] }
+        : {}),
+      ...(patch.luxuryTier
+        ? { luxuryTier: patch.luxuryTier as Prisma.VehicleUpdateInput['luxuryTier'] }
+        : {}),
+      ...(patch.seats !== undefined ? { seats: patch.seats } : {}),
+      ...(patch.luggage !== undefined ? { luggage: patch.luggage } : {}),
+      ...(patch.transmission
+        ? { transmission: patch.transmission as Prisma.VehicleUpdateInput['transmission'] }
+        : {}),
+      ...(patch.availabilityStatus
+        ? {
+            availabilityStatus:
+              patch.availabilityStatus as Prisma.VehicleUpdateInput['availabilityStatus'],
+          }
+        : {}),
+      ...(patch.pricingProfile
+        ? { pricingProfile: patch.pricingProfile as unknown as Prisma.InputJsonValue }
+        : {}),
+      ...(patch.active !== undefined ? { active: patch.active } : {}),
+    },
+  });
+  if (result.count === 0) return null;
+  const row = await db.vehicle.findFirst({ where: { id: vehicleId, tenantId, deletedAt: null } });
+  return row ? toDomainVehicle(row) : null;
+}
