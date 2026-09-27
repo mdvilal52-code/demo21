@@ -176,74 +176,107 @@ export function extractDateOfBirth(
   return { value: chosen.iso, ambiguous: false };
 }
 
-const LICENSE_WORD = String.raw`(?:driving\s+)?(?:licen[cs]e|permit)`;
+// Horizontal whitespace only ([ \t], never \s) throughout this function's
+// phrase-matching: a customer answering several questions on separate lines
+// ("Nationality: UAE\nDriving licence: ...") must never have one line's
+// answer read as if it modified the *next* line's licence label — \s would
+// match the newline between them and produce a licence type from a field
+// that was never about licences at all.
+const LICENSE_WORD = String.raw`(?:driving[ \t]+)?(?:licen[cs]e|permit)`;
 const LICENSE_INVALID =
   /\b(expired|suspended|revoked|cancell?ed|invalid|not valid|no longer valid|lapsed)\b/;
 const NO_LICENSE =
-  /\b(no|don'?t have|do not have|dont have|without|never had)\s+(?:a\s+|any\s+|my\s+)?(?:valid\s+)?(?:driving\s+)?(?:licen[cs]e|permit)\b/;
+  /\b(no|don'?t have|do not have|dont have|without|never had)[ \t]+(?:a[ \t]+|any[ \t]+|my[ \t]+)?(?:valid[ \t]+)?(?:driving[ \t]+)?(?:licen[cs]e|permit)\b/;
+
+/**
+ * Every "<word(s)> licence/permit" or "licence/permit from <word(s)>" match
+ * in `lowered`, in order — not just the first: a redundant label like
+ * "Driving licence:" trivially matches the same shape as a genuine value
+ * ("Indian driving licence") without naming a country, and must not shadow
+ * a later, genuine match. Built from the shared `LICENSE_WORD` grammar so
+ * this and `extractNationality`'s licence-phrase stripper (which reuses
+ * `LICENSE_PHRASE_BEFORE_RE` directly) can never drift out of sync on what
+ * counts as a licence phrase.
+ */
+const LICENSE_PHRASE_BEFORE_RE = new RegExp(
+  String.raw`\b([a-z]+(?:[ \t][a-z]+)?)[ \t]+${LICENSE_WORD}\b`,
+  'g',
+);
+const LICENSE_PHRASE_AFTER_RE = new RegExp(
+  String.raw`\b${LICENSE_WORD}[ \t]+(?:from|issued in|of)[ \t]+(?:the[ \t]+)?([a-z]+(?:[ \t][a-z]+)?)`,
+  'g',
+);
+
+function licensePhraseCandidates(lowered: string): string[] {
+  const before = [...lowered.matchAll(LICENSE_PHRASE_BEFORE_RE)].map((match) => match[1]);
+  const after = [...lowered.matchAll(LICENSE_PHRASE_AFTER_RE)].map((match) => match[1]);
+  return [...before, ...after].filter((phrase): phrase is string => Boolean(phrase));
+}
+
+/**
+ * True when `phrase` names a country, checking every word individually and
+ * not just the last: which word is the country name shifts with the
+ * sentence around it ("an Indian driving licence" leaves "an indian" as the
+ * captured phrase — last word "indian" — but "Indian driving licence" with
+ * no leading article leaves "indian driving" — last word "driving").
+ */
+function phraseNamesACountry(phrase: string): boolean {
+  if (lookupCountry(phrase) !== null) return true;
+  return phrase.split(/[ \t]+/).some((word) => lookupCountry(word) !== null);
+}
 
 function detectLicenseType(lowered: string): LicenseTypeValue | null {
   if (
-    new RegExp(String.raw`\b(?:uae|u\.a\.e|emirates|emirati|dubai)\s+${LICENSE_WORD}`).test(
+    new RegExp(String.raw`\b(?:uae|u\.a\.e|emirates|emirati|dubai)[ \t]+${LICENSE_WORD}`).test(
       lowered,
     ) ||
     new RegExp(
-      String.raw`${LICENSE_WORD}\s+(?:from|issued in|of)\s+(?:the\s+)?(?:uae|emirates|dubai)`,
+      String.raw`${LICENSE_WORD}[ \t]+(?:from|issued in|of)[ \t]+(?:the[ \t]+)?(?:uae|emirates|dubai)`,
     ).test(lowered) ||
-    /\b(?:resident|residence)\s+(?:driving\s+)?licen[cs]e\b/.test(lowered)
+    /\b(?:resident|residence)[ \t]+(?:driving[ \t]+)?licen[cs]e\b/.test(lowered)
   ) {
     return LicenseType.UAE;
   }
   if (
     new RegExp(
-      String.raw`\b(?:gcc|saudi|kuwaiti?|qatari?|bahraini?|omani?)\s+${LICENSE_WORD}`,
+      String.raw`\b(?:gcc|saudi|kuwaiti?|qatari?|bahraini?|omani?)[ \t]+${LICENSE_WORD}`,
     ).test(lowered) ||
     new RegExp(
-      String.raw`${LICENSE_WORD}\s+(?:from|issued in|of)\s+(?:the\s+)?(?:gcc|saudi|kuwait|qatar|bahrain|oman)`,
+      String.raw`${LICENSE_WORD}[ \t]+(?:from|issued in|of)[ \t]+(?:the[ \t]+)?(?:gcc|saudi|kuwait|qatar|bahrain|oman)`,
     ).test(lowered) ||
     /\bgcc\b/.test(lowered)
   ) {
     return LicenseType.GCC;
   }
   if (
-    /\b(?:idp|international\s+driving\s+(?:permit|licen[cs]e)|international\s+(?:licen[cs]e|permit)|international\s+driver'?s?\s+(?:permit|licen[cs]e))\b/.test(
+    /\b(?:idp|international[ \t]+driving[ \t]+(?:permit|licen[cs]e)|international[ \t]+(?:licen[cs]e|permit)|international[ \t]+driver'?s?[ \t]+(?:permit|licen[cs]e))\b/.test(
       lowered,
     )
   ) {
     return LicenseType.IDP;
   }
   if (
-    /\b(?:foreign|home\s+country|my\s+country|own\s+country|overseas)\s+(?:driving\s+)?(?:licen[cs]e|permit)\b/.test(
+    /\b(?:foreign|home[ \t]+country|my[ \t]+country|own[ \t]+country|overseas)[ \t]+(?:driving[ \t]+)?(?:licen[cs]e|permit)\b/.test(
       lowered,
     )
   ) {
     return LicenseType.FOREIGN;
   }
   // "Indian licence" / "licence from India": a national licence of a non-UAE/GCC country.
-  const before = /\b([a-z]+(?:\s[a-z]+)?)\s+(?:driving\s+)?(?:licen[cs]e|permit)\b/.exec(
-    lowered,
-  )?.[1];
-  const after =
-    /\b(?:licen[cs]e|permit)\s+(?:from|issued in|of)\s+(?:the\s+)?([a-z]+(?:\s[a-z]+)?)/.exec(
-      lowered,
-    )?.[1];
-  for (const phrase of [before, after]) {
-    if (!phrase) continue;
-    const words = phrase.split(' ');
-    if (
-      lookupCountry(phrase) !== null ||
-      lookupCountry(words[words.length - 1] as string) !== null
-    ) {
-      return LicenseType.FOREIGN;
-    }
+  if (licensePhraseCandidates(lowered).some(phraseNamesACountry)) {
+    return LicenseType.FOREIGN;
   }
   return null;
 }
 
+// Horizontal whitespace only ([ \t], never \s): see the comment above
+// LICENSE_WORD — the same "unrelated line feeds into the next line's label"
+// risk applies here (a bare "No" answering some other question must never
+// be read as "no passport" purely for landing before a "Passport:" label).
 const PASSPORT_NO =
-  /(?:\b(?:no|don'?t have|do not have|dont have|without|lost|forgot|not carrying)\s+(?:a\s+|my\s+|any\s+|the\s+)?(?:valid\s+)?passport\b|\bpassport\s*[:-]?\s*(?:no|not available|nahi|nahin)\b)/;
+  /(?:\b(?:no|don'?t have|do not have|dont have|without|lost|forgot|not carrying)[ \t]+(?:a[ \t]+|my[ \t]+|any[ \t]+|the[ \t]+)?(?:valid[ \t]+)?passport\b|\bpassport[ \t]*[:-]?[ \t]*(?:no|not available|nahi|nahin)\b)/;
 const PASSPORT_YES =
-  /(?:\b(?:have|hold|carry|got|has)\s+(?:a\s+|my\s+|the\s+)?(?:valid\s+)?passport\b|\bpassport\s*[:-]?\s*(?:yes|yep|available|ready|valid|with me|haan|ha)\b|\b(?:can|will)\s+(?:provide|show|share|send|submit)\s+(?:my\s+|the\s+)?passport\b|\bpassport\s+(?:is\s+)?(?:valid|available|ready|with me)\b)/;
+  /(?:\b(?:have|hold|carry|got|has)[ \t]+(?:a[ \t]+|my[ \t]+|the[ \t]+)?(?:valid[ \t]+)?passport\b|\bpassport[ \t]*[:-]?[ \t]*(?:yes|yep|available|ready|valid|with me|haan|ha)\b|\b(?:can|will)[ \t]+(?:provide|show|share|send|submit)[ \t]+(?:my[ \t]+|the[ \t]+)?passport\b|\bpassport[ \t]+(?:is[ \t]+)?(?:valid|available|ready|with me)\b)/;
 
 const BARE_YES =
   /^\s*(?:yes|yeah|yep|yup|yea|sure|ok(?:ay)?|correct|right|haan|han|ha|ji|ji haan|i do|i have|of course|absolutely|definitely)\b/;
@@ -258,8 +291,15 @@ const NATIONALITY_CUE_C = /\b([a-z]+(?: [a-z]+)?)\s+(?:national|citizen|passport
 function extractNationality(text: string, asked: boolean): string | null {
   // Licence phrases ("UAE licence", "Indian driving permit") name a country
   // without being a nationality statement — strip them before looking.
+  // Reuses `LICENSE_PHRASE_BEFORE_RE` (horizontal whitespace only, [ \t],
+  // never \s) rather than its own copy of the same grammar, so the two can
+  // never drift apart on what counts as a licence phrase. \s would match a
+  // newline: a customer answering several questions on separate lines
+  // ("Nationality: Indian\nDriving licence: ...") must never have "Indian"
+  // read as if it modified the *next* line's "Driving licence" label —
+  // that would silently erase the nationality answer.
   const stripped = normalizeForCountryLookup(
-    text.replace(/\b[\w']+(?:\s[\w']+)?\s+(?:driving\s+)?(?:licen[cs]e|permit)\b/gi, ' '),
+    text.toLowerCase().replace(LICENSE_PHRASE_BEFORE_RE, ' '),
   );
 
   for (const cue of [NATIONALITY_CUE_A, NATIONALITY_CUE_C, NATIONALITY_CUE_B]) {

@@ -44,6 +44,9 @@ export default defineConfig({
         // Phase 6 — required, no NOT_CONFIGURED state for staff auth.
         JWT_SIGNING_SECRET: 'e2e-jwt-signing-secret-at-least-32-bytes-long',
         MFA_ENCRYPTION_KEY: 'zsqFPLXxhE2jMyWnSscCoupYiPB3Mi1V7cuiAh0FR4I=',
+        // Phase 16 dashboard e2e — drives a real signed WhatsApp webhook
+        // request to seed a journey the dashboard then renders.
+        WHATSAPP_APP_SECRET: 'e2e-whatsapp-app-secret-0123456789',
       },
     },
     {

@@ -184,6 +184,47 @@ describe('extractEligibilityIntake — everything in one message', () => {
       passportProvided: true,
     });
   });
+
+  it('extracts all five fields from a structured multi-line reply, one label per line (regression)', () => {
+    // The exact shape of the reported conversation: the customer answers
+    // each requested field on its own line within one message. Nationality
+    // ("Indian") sits immediately before a line starting with a licence
+    // label ("Driving licence: ...") — the licence-phrase stripper must not
+    // read across that line break and erase it.
+    const message = [
+      'Date of birth: 12 May 1990',
+      'Nationality: Indian',
+      'Driving licence: Indian driving licence + IDP',
+      'Licence validity: Yes',
+      'Passport: Yes',
+    ].join('\n');
+    const { patch } = extract(message);
+    expect(patch).toEqual({
+      dateOfBirth: '1990-05-12',
+      nationality: 'IN',
+      licenseType: 'IDP',
+      hasValidLicense: true,
+      passportProvided: true,
+    });
+  });
+
+  it('resolves a foreign licence type from a multi-line reply with no "IDP" keyword and no leading article (regression)', () => {
+    // "Indian driving licence" with nothing before "Indian" (no "a"/"an"/"my")
+    // previously broke the licence-type fallback's "last word is the
+    // country" assumption.
+    const message = ['Nationality: Indian', 'Driving licence: Indian driving licence'].join('\n');
+    const { patch } = extract(message);
+    expect(patch.nationality).toBe('IN');
+    expect(patch.licenseType).toBe('FOREIGN');
+    expect(patch.hasValidLicense).toBe(true);
+  });
+
+  it('a bare nationality answer on its own line before a licence label is never lost even without the word "driving" (regression)', () => {
+    const message = ['Nationality: British', 'Licence: UAE licence'].join('\n');
+    const { patch } = extract(message);
+    expect(patch.nationality).toBe('GB');
+    expect(patch.licenseType).toBe('UAE');
+  });
 });
 
 describe('stripQuotedReply', () => {

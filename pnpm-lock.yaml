@@ -142,6 +142,9 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
     devDependencies:
+      '@ai-concierge/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@ai-concierge/testing':
         specifier: workspace:*
         version: link:../../packages/testing

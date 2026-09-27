@@ -32,12 +32,8 @@ const FUZZY_SIMILARITY_THRESHOLD = 0.75;
  * 2-3 word Capitalized phrases — two consecutive capitalized words together
  * are a strong proper-noun signal regardless of position (e.g. "Toyota
  * Corolla"), unlike ordinary English sentence-initial capitalization.
- *
- * Horizontal whitespace only (never \n): `propose` runs against an
- * accumulated multi-message transcript joined with "\n" (see
- * `buildAccumulatedTranscript`), so a plain `\s` here would let the last
- * capitalized word of one message merge with the first capitalized word of
- * the next (e.g. "Hi" + "Yes" -> "Hi\nYes") into one bogus phrase.
+ * Always matched against one message's text (see `propose`), never a raw
+ * multi-message transcript, so this never merges words across messages.
  */
 const MULTI_WORD_CAPITALIZED_PHRASE_RE = /\b[A-Z][a-zA-Z]*(?:[ \t]+[A-Z][a-zA-Z]*){1,2}\b/g;
 
@@ -51,6 +47,17 @@ const SINGLE_CAPITALIZED_WORD_RE = /\b[A-Z][a-zA-Z]+\b/g;
 const GENERIC_MENTION_RE =
   /\b(?:book|rent|hire|need|want)(?:\s+to\s+(?:book|rent|hire))?\s+(?:an?\s+)?([a-zA-Z][a-zA-Z\s]{1,40}?)(?=\s+(?:for|from|on|in|please|now|today|tomorrow|asap)\b|[.,!?]|$)/i;
 
+/**
+ * "model X" / "car model X" / "model: X", case-insensitive — catches a
+ * typo'd model named in plain lowercase text (e.g. "car model ranger
+ * rover"), which the capitalized-phrase heuristic above would never see
+ * since it requires capitalized words. Lazy capture + explicit terminator
+ * lookahead (same shape as `GENERIC_MENTION_RE`) so a trailing word like
+ * "please" or a following clause is never swallowed into the model name.
+ */
+const MODEL_CUE_RE =
+  /\bmodel\s*(?:is|:|-)?\s*([a-z][a-z\s]{1,40}?)(?=\s+(?:for|from|on|in|and|please|now|today|tomorrow|asap)\b|[.,!?]|$)/gi;
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
@@ -62,45 +69,19 @@ function textMentions(text: string, phrase: string): RegExpMatchArray | null {
 /**
  * True when nothing but horizontal whitespace precedes `index` on its line
  * — i.e. `index` is the first word of the whole text, or the first word of
- * a line within it. `text` may be an accumulated multi-message transcript
- * joined by "\n" (see `buildAccumulatedTranscript`), where each line is an
- * independent message with its own sentence-initial position; checking only
- * absolute index 0 would treat every message after the first as never
- * sentence-initial, so a lone reply like "Yes" or "What" or "Pickup" would
- * be misread as a proper-noun/vehicle-shaped signal purely for landing after
- * the first message.
+ * a line within it. `matchFuzzy` always calls this (via
+ * `extractVehicleShapedPhrases`) with a single message's text, where this
+ * reduces to "first word of the message"; `findGenericVehiclePhrase`'s
+ * final fallback still runs against the whole accumulated transcript (one
+ * message per line), where each line is an independent message with its
+ * own sentence-initial position — checking only absolute index 0 would
+ * treat every message after the first as never sentence-initial, so a lone
+ * reply like "Yes" or "What" would be misread as a proper-noun signal
+ * purely for landing after the first message.
  */
 function isLineInitial(text: string, index: number | undefined): boolean {
   if (index === undefined) return false;
   return /(?:^|\n)[ \t]*$/.test(text.slice(0, index));
-}
-
-/** 0-based line number of `index` in `text` — how many "\n"s precede it. */
-function lineNumberAt(text: string, index: number | undefined): number {
-  if (index === undefined) return 0;
-  let line = 0;
-  for (let i = 0; i < index; i += 1) {
-    if (text[i] === '\n') line += 1;
-  }
-  return line;
-}
-
-/**
- * When every candidate is on the same line, they were named together in one
- * message — a genuine choice between them, left untouched. When they span
- * more than one line, only the ones on the *last* line survive: the
- * customer named an earlier vehicle in an earlier message and a different
- * one more recently, which reads as changing their mind, not as asking to
- * pick between both.
- */
-function preferMostRecentMessageWhenDistinct<T extends { line: number }>(
-  results: T[],
-): Omit<T, 'line'>[] {
-  const survivors =
-    results.length > 1 && new Set(results.map((r) => r.line)).size > 1
-      ? results.filter((r) => r.line === Math.max(...results.map((r) => r.line)))
-      : results;
-  return survivors.map(({ line: _line, ...rest }) => rest);
 }
 
 /**
@@ -142,6 +123,33 @@ function extractVehicleShapedPhrases(text: string): string[] {
 }
 
 /**
+ * Cue-based phrases: text following an explicit "model" cue, or the object
+ * of a "book/rent/hire/need/want" verb — case-insensitive, so this catches
+ * a typo'd vehicle name a customer typed entirely in lowercase (e.g. "car
+ * model ranger rover"), which `extractVehicleShapedPhrases` cannot see.
+ */
+function extractCuedPhrases(text: string): string[] {
+  const cued = [...text.matchAll(MODEL_CUE_RE)]
+    .map((match) => match[1])
+    .filter((phrase): phrase is string => Boolean(phrase));
+  const generic = GENERIC_MENTION_RE.exec(text)?.[1]?.trim();
+  if (generic) cued.push(generic);
+  return cued;
+}
+
+/**
+ * Every phrase `matchFuzzy` tries against the fleet: capitalized
+ * proper-noun-shaped phrases (a customer who capitalizes brand names, even
+ * with a typo) plus cue-based phrases (a customer typing entirely in
+ * lowercase, e.g. "car model ranger rover" or "i want the range rovr").
+ */
+function extractFuzzyCandidatePhrases(text: string): string[] {
+  return [...extractVehicleShapedPhrases(text), ...extractCuedPhrases(text)].filter(
+    (phrase) => !isLocationShapedPhrase(phrase),
+  );
+}
+
+/**
  * AI-side proposal step: matches the (sanitized) message text against the
  * tenant's real fleet lexicon — never a hardcoded model list — so it can
  * never propose a vehicle the fleet doesn't actually carry. Tiered,
@@ -157,6 +165,36 @@ export class VehicleIntentService {
     // mistaken for a capitalized "vehicle-shaped" phrase (e.g. "REMOVED").
     const text = sanitizedText.replace(/\[REMOVED\]/g, ' ').trim();
 
+    // `text` may be an accumulated multi-message transcript, one message per
+    // line (see `buildAccumulatedTranscript`, this method's only production
+    // caller, via the orchestrator). That function guarantees every "\n" in
+    // its output is a boundary between two different messages — it collapses
+    // any newline a customer typed *inside* one message before joining — so
+    // a line here is always exactly one whole message, never a fragment of
+    // one. Scan from the most recent message backward: the first message
+    // that names any vehicle — at *any* match tier — is what the customer
+    // means now. A later, lower-tier correction (a typo, or a bare brand
+    // where an earlier message named an exact model) is still a deliberate
+    // change of mind and must win over an earlier, higher-tier mention from
+    // an older message; evaluating every tier against the *whole* transcript
+    // at once (the previous approach) let an early exact/brand match
+    // permanently shadow a later correction that only qualified for a lower
+    // tier. Two vehicles named in the *same* message remain a genuine
+    // ambiguity — see `proposeForSingleMessage`.
+    const lines = text.split('\n');
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      const proposal = this.proposeForSingleMessage(lines[i] as string, lexicon);
+      if (proposal.candidates.length > 0) return proposal;
+    }
+
+    return { candidates: [], rawMention: this.findGenericVehiclePhrase(text) };
+  }
+
+  /** Tiered, mutually-exclusive matching (exact model > brand only > category only > typo-tolerant fuzzy) for one message's text. */
+  private proposeForSingleMessage(
+    text: string,
+    lexicon: VehicleLexiconEntry[],
+  ): VehicleIntentProposal {
     const exact = this.matchExactModel(text, lexicon);
     if (exact.length > 0) return { candidates: exact, rawMention: null };
 
@@ -169,21 +207,16 @@ export class VehicleIntentService {
     const fuzzy = this.matchFuzzy(text, lexicon);
     if (fuzzy.length > 0) return { candidates: fuzzy, rawMention: null };
 
-    return { candidates: [], rawMention: this.findGenericVehiclePhrase(text) };
+    return { candidates: [], rawMention: null };
   }
 
   /**
-   * `text` may be an accumulated multi-message transcript, so a still-open
-   * mention from an earlier turn (e.g. the customer's first vehicle pick)
-   * stays matchable alongside a later one. Two *different* exact models
-   * both matching is ambiguous only when they're named in the *same*
-   * message ("the Urus or the Range Rover?") — across different messages
-   * it's a change of mind ("Urus" in turn 3, "actually the Range Rover
-   * instead" in turn 7), so only the vehicle named in the most recent
-   * message carries forward; see `preferMostRecentMessageWhenDistinct`.
+   * `text` is a single message's text (see `propose`). Two different exact
+   * models both matching is a genuine ambiguity ("the Urus or the Range
+   * Rover?") since they were named together in one message.
    */
   private matchExactModel(text: string, lexicon: VehicleLexiconEntry[]): VehicleMentionCandidate[] {
-    const results: (VehicleMentionCandidate & { line: number })[] = [];
+    const results: VehicleMentionCandidate[] = [];
     for (const entry of lexicon) {
       const fullMatch = textMentions(text, `${entry.make} ${entry.model}`);
       const match = fullMatch ?? textMentions(text, entry.model);
@@ -196,11 +229,10 @@ export class VehicleIntentService {
           matchType: VehicleMatchType.EXACT_MODEL,
           matchedText: match[0],
           similarity: 1,
-          line: lineNumberAt(text, match.index),
         });
       }
     }
-    return preferMostRecentMessageWhenDistinct(results);
+    return results;
   }
 
   private matchBrandOnly(text: string, lexicon: VehicleLexiconEntry[]): VehicleMentionCandidate[] {
@@ -252,7 +284,7 @@ export class VehicleIntentService {
   }
 
   private matchFuzzy(text: string, lexicon: VehicleLexiconEntry[]): VehicleMentionCandidate[] {
-    const phrases = extractVehicleShapedPhrases(text);
+    const phrases = extractFuzzyCandidatePhrases(text);
     const seen = new Set<string>();
     const results: VehicleMentionCandidate[] = [];
 

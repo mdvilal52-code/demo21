@@ -222,4 +222,57 @@ describe('VehicleIntentService', () => {
     expect(proposal.candidates).toHaveLength(0);
     expect(proposal.rawMention).toBe('Bugatti Chiron');
   });
+
+  describe('cross-message correction (regression)', () => {
+    it('BRAND_ONLY: a later message naming a different brand is a change of mind, even with no typo', () => {
+      // Same shape as the EXACT_MODEL recency test above, but exercising the
+      // brand-only tier, which previously had no recency handling at all.
+      const proposal = makeService().propose(
+        'I wants Lamborghini\nActually I want a Land Rover instead',
+        FLEET,
+      );
+      expect(proposal.candidates).toHaveLength(1);
+      expect(proposal.candidates[0]).toMatchObject({
+        lexiconEntryId: RANGE_ROVER.id,
+        matchType: 'BRAND_ONLY',
+      });
+    });
+
+    it('FUZZY_MATCH: recognizes a lowercase, cue-based typo\'d model ("car model ranger rover") that the capitalized-phrase heuristic alone would miss', () => {
+      const proposal = makeService().propose('car model ranger rover please', FLEET);
+      expect(proposal.candidates).toHaveLength(1);
+      expect(proposal.candidates[0]).toMatchObject({
+        lexiconEntryId: RANGE_ROVER.id,
+        matchType: 'FUZZY_MATCH',
+      });
+    });
+
+    it('FUZZY_MATCH: a later, lowercase, typo\'d correction wins over an earlier brand-only mention (full reported conversation)', () => {
+      const proposal = makeService().propose(
+        [
+          'Hii',
+          'I wants a car',
+          'I wants Lamborghini',
+          '29sept',
+          'No I wants car at 29 sept and return is 2 Oct in dubai and car model ranger rover',
+        ].join('\n'),
+        FLEET,
+      );
+      expect(proposal.candidates).toHaveLength(1);
+      expect(proposal.candidates[0]).toMatchObject({
+        lexiconEntryId: RANGE_ROVER.id,
+        matchType: 'FUZZY_MATCH',
+      });
+    });
+
+    it('a message that only adds unrelated details (no vehicle mention) never erases an earlier resolved vehicle', () => {
+      const proposal = makeService().propose('I wants Lamborghini\n29sept', FLEET);
+      expect(proposal.candidates).toHaveLength(1);
+      expect(proposal.candidates[0]).toMatchObject({
+        lexiconEntryId: URUS.id,
+        matchType: 'BRAND_ONLY',
+      });
+    });
+
+  });
 });
