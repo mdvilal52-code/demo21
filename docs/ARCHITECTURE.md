@@ -439,6 +439,22 @@ Each hop calls the same step service and `record*Outcome` the REST endpoints use
 never decides a fact: it only rewords a draft built from verified step results, and any reply that
 alters a number or makes an unearned claim is replaced by the draft. See `docs/PHASE-16.md`.
 
+## Phase 17 scope: frontend completion (admin dashboard, human worker, customer web chat)
+
+Staff pages under `/dashboard` and the customer PWA under `/concierge` are Next.js server/client
+components that reach the API **only** through `backendFetch` (SSRF-safe, host allowlist) or the
+route handlers in `apps/web/src/app/api/chat/*`; the browser never talks to the API directly.
+
+- Staff read model: `/v1/dashboard/summary`, `/v1/quotes`, `/v1/conversations/:id/transcript`
+  (`dashboardRepository` in `packages/db`). Human replies: `POST /v1/conversations/:id/reply`
+  (`conversation:reply`, audit event without message text; WEB replies are stored and show up in
+  the customer's chat, WHATSAPP/EMAIL go through the provider and are recorded only when delivered).
+- Customer web chat: `POST /v1/chat/messages` runs the same `handleInboundTurn` as the other
+  channels (customerRef `web:<sessionId>`), idempotent per `clientMessageId`, limited per session
+  and globally in Redis. `GET /v1/chat/sessions/:id` returns messages, journey state and the issued
+  quote (no integrity hash).
+- Offline shell: service worker scoped to `/concierge`, never caches `/api/*`. See `docs/PHASE-17.md`.
+
 ## Monorepo layout
 
 ```

@@ -6,6 +6,7 @@ type Executor = PrismaClient | Prisma.TransactionClient;
 export const OutboundMessageSource = {
   AI_GENERATED: 'AI_GENERATED',
   TEMPLATE: 'TEMPLATE',
+  HUMAN: 'HUMAN',
 } as const;
 export type OutboundMessageSourceValue =
   (typeof OutboundMessageSource)[keyof typeof OutboundMessageSource];
@@ -17,6 +18,8 @@ export interface CreateOutboundMessageInput {
   source: OutboundMessageSourceValue;
   /** The journey stage the reply was written for. */
   stage: string;
+  /** The staff user who wrote a HUMAN reply. */
+  authorUserId?: string | null;
 }
 
 export interface StoredOutboundMessage {
@@ -24,6 +27,7 @@ export interface StoredOutboundMessage {
   content: string;
   source: string;
   stage: string;
+  authorUserId: string | null;
   createdAt: Date;
 }
 
@@ -38,8 +42,16 @@ export async function createOutboundMessage(
       content: input.content,
       source: input.source,
       stage: input.stage,
+      authorUserId: input.authorUserId ?? null,
     },
-    select: { id: true, content: true, source: true, stage: true, createdAt: true },
+    select: {
+      id: true,
+      content: true,
+      source: true,
+      stage: true,
+      authorUserId: true,
+      createdAt: true,
+    },
   });
 }
 
@@ -54,7 +66,14 @@ export async function findOutboundMessagesForConversation(
     where: { tenantId, conversationId },
     orderBy: { createdAt: 'desc' },
     take: limit,
-    select: { id: true, content: true, source: true, stage: true, createdAt: true },
+    select: {
+      id: true,
+      content: true,
+      source: true,
+      stage: true,
+      authorUserId: true,
+      createdAt: true,
+    },
   });
   return rows.reverse();
 }

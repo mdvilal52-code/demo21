@@ -28,6 +28,8 @@ import { userRoutes } from './routes/v1/users.js';
 import { escalationRoutes } from './routes/v1/escalations.js';
 import { journeyRoutes } from './routes/v1/journeys.js';
 import { adminRoutes } from './routes/v1/admin.js';
+import { dashboardRoutes } from './routes/v1/dashboard.js';
+import { chatRoutes } from './routes/v1/chat.js';
 
 export async function buildApp(
   ctx: AppContext,
@@ -69,6 +71,8 @@ export async function buildApp(
   await app.register(escalationRoutes);
   await app.register(journeyRoutes);
   await app.register(adminRoutes);
+  await app.register(dashboardRoutes);
+  await app.register(chatRoutes);
 
   return app;
 }

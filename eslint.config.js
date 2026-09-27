@@ -66,6 +66,21 @@ export default tseslint.config(
       'no-console': 'off',
     },
   },
+  {
+    // The customer app's service worker runs in a ServiceWorkerGlobalScope, not Node or a page.
+    files: ['apps/web/public/sw.js'],
+    languageOptions: {
+      sourceType: 'script',
+      globals: {
+        self: 'readonly',
+        caches: 'readonly',
+        fetch: 'readonly',
+        Request: 'readonly',
+        Response: 'readonly',
+        URL: 'readonly',
+      },
+    },
+  },
   ...compat.extends('next/core-web-vitals').map((config) => ({
     ...config,
     files: ['apps/web/**/*.{ts,tsx}'],
