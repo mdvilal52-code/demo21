@@ -11,3 +11,5 @@ export * from './email/inboundParser.js';
 export * from './email/signature.js';
 export * from './email/provider.js';
 export * from './email/replyBuilder.js';
+export * from './email/factory.js';
+export * from './email/constants.js';

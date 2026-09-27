@@ -88,6 +88,8 @@ export const transcriptMessageSchema = z.object({
   source: z.string().nullable(),
   stage: z.string().nullable(),
   authorUserId: z.string().uuid().nullable(),
+  /** SENT | FAILED for an email reply the channel could (not) deliver; null for the customer's own message. */
+  deliveryStatus: z.string().nullable(),
   createdAt: z.string().datetime(),
 });
 export type TranscriptMessage = z.infer<typeof transcriptMessageSchema>;
@@ -139,3 +141,16 @@ export const staffReplyResponseSchema = z.object({
   message: transcriptMessageSchema.nullable(),
 });
 export type StaffReplyResponse = z.infer<typeof staffReplyResponseSchema>;
+
+/** Resends one FAILED email message's already-written content — never edits or regenerates it. */
+export const resendEmailParamsSchema = z.object({
+  conversationId: z.string().uuid(),
+  outboundMessageId: z.string().uuid(),
+});
+export type ResendEmailParams = z.infer<typeof resendEmailParamsSchema>;
+
+export const resendEmailResponseSchema = z.object({
+  delivered: z.boolean(),
+  status: z.enum(['SENT', 'FAILED', 'NOT_CONFIGURED']),
+});
+export type ResendEmailResponse = z.infer<typeof resendEmailResponseSchema>;

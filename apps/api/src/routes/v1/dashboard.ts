@@ -2,6 +2,8 @@ import {
   dashboardSummaryResponseSchema,
   listQuotesQuerySchema,
   listQuotesResponseSchema,
+  resendEmailParamsSchema,
+  resendEmailResponseSchema,
   staffReplyBodySchema,
   staffReplyResponseSchema,
   transcriptParamsSchema,
@@ -12,6 +14,7 @@ import { Permission } from '@ai-concierge/domain';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { requirePermission } from '../../lib/authz.js';
 import { authenticate } from '../../plugins/auth.js';
+import { resendFailedEmailMessage } from '../../services/emailResendService.js';
 import { sendStaffReply } from '../../services/staffReplyService.js';
 import { getTranscript } from '../../services/transcriptService.js';
 
@@ -128,6 +131,31 @@ export const dashboardRoutes: FastifyPluginAsyncZod = async (app) => {
           userId: request.auth!.userId,
           conversationId: request.params.conversationId,
           message: request.body.message,
+          requestId: request.id,
+        },
+      );
+      reply.status(200).send(result);
+    },
+  );
+
+  app.post(
+    '/v1/enquiries/:conversationId/outbound-messages/:outboundMessageId/resend',
+    {
+      preHandler: [authenticate, requirePermission(Permission.CONVERSATION_REPLY)],
+      schema: {
+        tags: ['admin'],
+        params: resendEmailParamsSchema,
+        response: { 200: resendEmailResponseSchema },
+      },
+    },
+    async (request, reply) => {
+      const result = await resendFailedEmailMessage(
+        { prisma: app.ctx.prisma, emailProvider: app.ctx.emailProvider },
+        {
+          tenantId: request.auth!.tenantId,
+          conversationId: request.params.conversationId,
+          outboundMessageId: request.params.outboundMessageId,
+          userId: request.auth!.userId,
           requestId: request.id,
         },
       );

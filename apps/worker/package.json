@@ -13,6 +13,7 @@
     "test:security": "echo \"no security tests in @ai-concierge/worker\""
   },
   "dependencies": {
+    "@ai-concierge/channels": "workspace:*",
     "@ai-concierge/config": "workspace:*",
     "@ai-concierge/contracts": "workspace:*",
     "@ai-concierge/db": "workspace:*",

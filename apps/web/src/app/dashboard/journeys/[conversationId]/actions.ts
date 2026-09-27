@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { redirect } from 'next/navigation';
 import { staffReplyBodySchema } from '@ai-concierge/contracts';
-import { SessionExpiredError, sendStaffReply } from '../../../../lib/adminApi';
+import { resendEmailMessage, SessionExpiredError, sendStaffReply } from '../../../../lib/adminApi';
 import type { ReplyState } from './replyState';
 
 /**
@@ -50,6 +50,29 @@ export async function sendStaffReplyAction(
       status: 'error',
       message: error instanceof Error ? error.message : 'Could not send the reply.',
       nonce,
+    };
+  }
+}
+
+/** Re-attempts a FAILED email message's already-written content — never edits or regenerates it. */
+export async function resendEmailMessageAction(
+  conversationId: string,
+  outboundMessageId: string,
+): Promise<{ delivered: boolean; message: string }> {
+  try {
+    const result = await resendEmailMessage(conversationId, outboundMessageId);
+    revalidatePath(`/dashboard/journeys/${conversationId}`);
+    return {
+      delivered: result.delivered,
+      message: result.delivered
+        ? 'Sent to the customer.'
+        : 'Still could not reach the customer. Please try again shortly.',
+    };
+  } catch (error) {
+    if (error instanceof SessionExpiredError) redirect('/login');
+    return {
+      delivered: false,
+      message: error instanceof Error ? error.message : 'Could not resend the message.',
     };
   }
 }

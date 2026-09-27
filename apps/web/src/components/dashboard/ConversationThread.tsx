@@ -1,5 +1,6 @@
 import type { TranscriptMessage } from '@ai-concierge/contracts';
 import { formatDateTime } from '../../lib/format';
+import { ResendMessageButton } from './ResendMessageButton';
 
 const ROLE_STYLE: Record<
   TranscriptMessage['role'],
@@ -28,8 +29,20 @@ function sourceNote(message: TranscriptMessage): string {
   return '';
 }
 
-/** One chronological thread: what the customer said, what the concierge said, and what a person said. */
-export function ConversationThread({ messages }: { messages: TranscriptMessage[] }) {
+/**
+ * One chronological thread: what the customer said, what the concierge said,
+ * and what a person said. `conversationId` is only needed to let a FAILED
+ * email message (`deliveryStatus`) be resent from here — omit it (e.g. for
+ * a non-email conversation's read-only view) and that affordance never
+ * renders, since only the caller knows the channel.
+ */
+export function ConversationThread({
+  messages,
+  conversationId,
+}: {
+  messages: TranscriptMessage[];
+  conversationId?: string;
+}) {
   if (messages.length === 0) {
     return <p className="text-sm text-cream-50/60">No messages yet.</p>;
   }
@@ -39,12 +52,17 @@ export function ConversationThread({ messages }: { messages: TranscriptMessage[]
         const style = ROLE_STYLE[message.role];
         return (
           <li key={message.id} className={`flex ${style.align}`}>
-            <div className={`max-w-[88%] rounded-2xl px-4 py-2.5 text-sm ${style.bubble}`}>
-              <p className="mb-1 text-[10px] uppercase tracking-[0.12em] opacity-70">
-                {style.label}
-                {sourceNote(message)} · {formatDateTime(message.createdAt)}
-              </p>
-              <p className="whitespace-pre-wrap break-words">{message.content}</p>
+            <div className="max-w-[88%]">
+              <div className={`rounded-2xl px-4 py-2.5 text-sm ${style.bubble}`}>
+                <p className="mb-1 text-[10px] uppercase tracking-[0.12em] opacity-70">
+                  {style.label}
+                  {sourceNote(message)} · {formatDateTime(message.createdAt)}
+                </p>
+                <p className="whitespace-pre-wrap break-words">{message.content}</p>
+              </div>
+              {message.deliveryStatus === 'FAILED' && conversationId && (
+                <ResendMessageButton conversationId={conversationId} outboundMessageId={message.id} />
+              )}
             </div>
           </li>
         );

@@ -12,7 +12,11 @@ import { emailInboundAckResponseSchema } from '@ai-concierge/contracts';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { AppContext } from '../../context.js';
 import { flagUnexpectedPiiInOutboundText } from '../../lib/dlp.js';
-import { handleInboundTurn, recordOutboundReply } from '../../services/conversationTurnService.js';
+import {
+  handleInboundTurn,
+  recordFailedEmailReply,
+  recordOutboundReply,
+} from '../../services/conversationTurnService.js';
 
 const EMAIL_CHANNEL: Channel = 'EMAIL';
 
@@ -59,12 +63,24 @@ async function processInboundEmail(
       ? inbound.subject
       : `Re: ${inbound.subject || 'Your rental enquiry'}`;
     const sendResult = await ctx.emailProvider.sendEmail(inbound.from, replySubject, replyText);
+    const replySource = turn.reply.source === 'AI_GENERATED' ? 'AI_GENERATED' : 'TEMPLATE';
     if (sendResult.status === 'SENT') {
       await recordOutboundReply(ctx, {
         conversationId: turn.conversationId,
         text: replyText,
-        source: turn.reply.source === 'AI_GENERATED' ? 'AI_GENERATED' : 'TEMPLATE',
+        source: replySource,
         stage: turn.reply.stage,
+      });
+    } else if (sendResult.status === 'FAILED') {
+      // Persisted (not dropped) so it surfaces on the dashboard and the
+      // resend sweep can retry it — Mailgun API errors are often transient.
+      await recordFailedEmailReply(ctx, {
+        conversationId: turn.conversationId,
+        text: replyText,
+        source: replySource,
+        stage: turn.reply.stage,
+        deliveryError: sendResult.error ?? null,
+        subject: replySubject,
       });
     }
 

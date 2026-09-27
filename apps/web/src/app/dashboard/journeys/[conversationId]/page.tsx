@@ -74,7 +74,10 @@ export default async function JourneyDetailPage({
             <h2 className="text-xs uppercase tracking-wide text-cream-50/70">Conversation</h2>
             <div className="mt-4">
               <ScrollingThread>
-                <ConversationThread messages={transcript.messages} />
+                <ConversationThread
+                  messages={transcript.messages}
+                  conversationId={journey.conversationId}
+                />
               </ScrollingThread>
             </div>
             {ended ? (

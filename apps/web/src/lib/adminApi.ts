@@ -13,6 +13,7 @@ import {
   listSecurityEventsResponseSchema,
   listVehiclesResponseSchema,
   providerStatusResponseSchema,
+  resendEmailResponseSchema,
   staffReplyResponseSchema,
   transcriptResponseSchema,
   type DashboardSummaryResponse,
@@ -27,6 +28,7 @@ import {
   type ListSecurityEventsResponse,
   type ListVehiclesResponse,
   type ProviderStatusResponse,
+  type ResendEmailResponse,
   type StaffReplyResponse,
   type TranscriptResponse,
 } from '@ai-concierge/contracts';
@@ -204,5 +206,17 @@ export function sendStaffReply(
     `/v1/enquiries/${encodeURIComponent(conversationId)}/staff-reply`,
     { message },
     staffReplyResponseSchema,
+  );
+}
+
+/** Re-attempts sending one FAILED email message's already-written content — never edits it. */
+export function resendEmailMessage(
+  conversationId: string,
+  outboundMessageId: string,
+): Promise<ResendEmailResponse> {
+  return adminPost(
+    `/v1/enquiries/${encodeURIComponent(conversationId)}/outbound-messages/${encodeURIComponent(outboundMessageId)}/resend`,
+    {},
+    resendEmailResponseSchema,
   );
 }

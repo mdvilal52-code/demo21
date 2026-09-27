@@ -240,3 +240,43 @@ export async function recordOutboundReply(
     ctx.logger.error({ err: error }, 'could not record the outbound reply');
   }
 }
+
+/**
+ * The email-only counterpart to `recordOutboundReply`: a send the provider
+ * actually rejected. Unlike a delivered reply, this *is* persisted — with
+ * `status: 'FAILED'` — precisely so it is not lost: it becomes visible on
+ * the dashboard and eligible for the resend sweep (`emailResendSweep.ts`)
+ * or a staff-triggered resend (`emailResendService.ts`). Never used for
+ * WhatsApp/Web: Meta's Cloud API already has its own delivery/retry
+ * semantics, and web chat delivery is just storing the row, which cannot
+ * fail the way an external HTTP call to Mailgun can.
+ */
+export async function recordFailedEmailReply(
+  ctx: AppContext,
+  input: {
+    conversationId: string;
+    text: string;
+    source: OutboundMessageSourceValue;
+    stage: string;
+    authorUserId?: string | null;
+    deliveryError: string | null;
+    /** The subject actually used for this attempt — recovered on resend instead of falling back to a generic one. */
+    subject: string;
+  },
+): Promise<void> {
+  try {
+    await createOutboundMessage(ctx.prisma, {
+      tenantId: ctx.config.DEFAULT_TENANT_ID,
+      conversationId: input.conversationId,
+      content: input.text,
+      source: input.source,
+      stage: input.stage,
+      authorUserId: input.authorUserId ?? null,
+      subject: input.subject,
+      status: 'FAILED',
+      deliveryError: input.deliveryError,
+    });
+  } catch (error) {
+    ctx.logger.error({ err: error }, 'could not record the failed email reply for later resend');
+  }
+}

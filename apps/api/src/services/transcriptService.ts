@@ -62,6 +62,7 @@ export async function getTranscript(
       source: null,
       stage: null,
       authorUserId: null,
+      deliveryStatus: null,
       createdAt: row.createdAt.toISOString(),
     })),
     ...outbound.map((row): TranscriptMessage => ({
@@ -71,6 +72,7 @@ export async function getTranscript(
       source: row.source,
       stage: row.stage,
       authorUserId: row.authorUserId,
+      deliveryStatus: row.status,
       createdAt: row.createdAt.toISOString(),
     })),
   ].sort((a, b) => a.createdAt.localeCompare(b.createdAt));

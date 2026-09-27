@@ -184,6 +184,9 @@ importers:
 
   apps/worker:
     dependencies:
+      '@ai-concierge/channels':
+        specifier: workspace:*
+        version: link:../../packages/channels
       '@ai-concierge/config':
         specifier: workspace:*
         version: link:../../packages/config

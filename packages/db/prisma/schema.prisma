@@ -1015,9 +1015,24 @@ model OutboundMessage {
   authorUserId   String?
   /// The journey stage this reply was written for (e.g. QUOTE_ISSUED).
   stage          String
+  /// SENT (delivered) | FAILED (the channel rejected/could not deliver it — eligible for resend).
+  /// Every row before this column existed was only ever created on a successful send, so SENT
+  /// is the correct default for them and for every other channel that still only records on success.
+  status         String       @default("SENT")
+  /// Provider error message from the last failed attempt; never customer content, diagnostics only.
+  deliveryError  String?
+  /// How many resend attempts have been made after the original failure.
+  retryCount     Int          @default(0)
+  /// The email subject actually used (only ever set for the EMAIL channel) — recovered on resend
+  /// instead of falling back to a generic subject that would break the customer's mail thread.
+  subject        String?
+  /// Set atomically while a resend attempt (sweep or staff-triggered) is in flight, so the two
+  /// can never both act on the same FAILED row at once; cleared once the attempt concludes.
+  claimedAt      DateTime?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])
   @@index([tenantId])
+  @@index([status])
   @@map("outbound_messages")
 }
