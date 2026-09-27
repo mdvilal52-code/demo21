@@ -1,7 +1,8 @@
 # Phase 16 — Automatic Steps 5-8 chaining + Conversation Engine v2
 
-Status: **IN_PROGRESS** (implementation + automated gates done; e2e/Playwright and an independent
-code review are not, so this phase is not frozen — see §8)
+Status: **FROZEN** (2026-09-27) — implementation, Playwright e2e, two independent code-review
+passes and the full gate pipeline (typecheck, lint, unit, integration, security, e2e, build, code
+review, architecture review, regression) are all green — see §9.
 
 ## 1. Pre-flight
 
@@ -60,9 +61,11 @@ In scope:
    customer's next reply into a brand-new conversation) and closes it after 72h idle;
    `GEMINI_THINKING_LEVEL` (default `low`) with automatic retry-without if the API rejects it.
 
-Out of scope (still PENDING, unchanged): documents, payments, delivery/return, invoice, follow-up
-(journey Steps 9-19), the Customer PWA, web chat, an "email retry/resend" feature, and staff-side
-reply composition from the dashboard.
+Out of scope for this phase, still PENDING project-wide: documents, payments, delivery/return,
+invoice, follow-up (journey Steps 9-19) — an accepted quote still ends in a human hand-off by
+design. The Customer PWA, web chat, and staff-side reply composition from the dashboard were built
+separately under Phase 17 (`docs/PHASE-17.md`). Email retry/resend — listed here as out of scope
+when this phase was first written — was completed as an addendum to this phase; see §9.
 
 ## 3. Behaviour
 
@@ -119,8 +122,6 @@ Everything else is unchanged; every provider still reports `NOT_CONFIGURED` rath
 
 ## 8. Known limits (honest list)
 
-- **Not frozen.** Playwright e2e was not run (no web/UI change) and there has been no independent
-  code review — only the author's own review.
 - Steps 9-19 do not exist: an accepted quote ends in a human hand-off by design.
 - The quote and its availability hold are still independent (a quote expiring does not release the
   hold) — pre-existing, `docs/PHASE-14.md` §9.
@@ -128,4 +129,103 @@ Everything else is unchanged; every provider still reports `NOT_CONFIGURED` rath
 - Live Gemini behaviour (model id, `thinkingLevel` field) could not be exercised without an API key;
   the provider retries without `thinkingConfig` if it is rejected, and every path falls back to the
   deterministic draft.
-- The RLS/scoped-role cutover (`docs/PILOT-READINESS-REPORT.md` §6) is unchanged.
+- The RLS/scoped-role cutover (`docs/PILOT-READINESS-REPORT.md` §6) is unchanged: the API/worker's
+  actual runtime `DATABASE_URL` is still the Postgres superuser, in local dev, CI, and as currently
+  documented for production — not the least-privilege `ai_concierge_api`/`ai_concierge_worker`
+  roles. Those roles' grants (including the one §9 adds for `outbound_messages`) and the RLS
+  policies they're subject to are real and proven in isolation (`rowLevelSecurity.security.test.ts`
+  connects _as_ the scoped role against real Postgres), but nothing in this phase changes that the
+  application itself does not yet connect through them.
+
+## 9. Addendum (2026-09-27) — bug fixes, e2e, independent review, email retry/resend
+
+This addendum closes the two gaps §8 used to list ("not frozen") and adds one feature that was
+originally scoped out. All work below was re-verified against the full gate pipeline before this
+phase was marked FROZEN.
+
+**Two conversation-engine bugs, root-caused from a customer-reported failure report (not guessed):**
+
+1. `VehicleIntentService.propose()` evaluated every match tier (exact/brand/category/fuzzy) against
+   the *whole* accumulated transcript and returned the first tier with any hit anywhere in it, so an
+   early higher-tier mention (a bare "Lamborghini") permanently shadowed a later message that only
+   qualified for a lower tier (a lowercase, typo'd "car model ranger rover") — a customer's own
+   correction was silently ignored in favour of their first message. Fixed by scanning the
+   transcript one message at a time from most recent backward, and by extending fuzzy matching to
+   cue-based lowercase phrases ("model X", "want X") alongside capitalized ones.
+   `buildAccumulatedTranscript` (`apps/api/src/lib/conversationTranscript.ts`) now collapses any
+   newline a customer typed inside one message before joining, so the per-message scan can rely on
+   `"\n"` always meaning a message boundary, never text the customer typed.
+2. `extractNationality`'s licence-phrase-stripping regex used `\s` (matches newlines), so a
+   nationality answered on its own line immediately before a line starting with a licence label
+   ("Nationality: Indian\nDriving licence: ...") had the answer silently erased before nationality
+   lookup ever ran — this is what produced an observed "keeps asking for nationality after it was
+   already given" loop. Fixed to horizontal whitespace only (`[ \t]`), applied the same fix to
+   `detectLicenseType`'s equivalent tier patterns (UAE/GCC/IDP/foreign/`NO_LICENSE`/`PASSPORT_YES`/
+   `PASSPORT_NO`), and made the licence-type fallback check every word of a match instead of
+   assuming the country name is always the last one.
+
+Both are covered by regression tests (`vehicleIntentService.test.ts`'s "cross-message correction"
+block, `conversationTranscript.test.ts`, `intakeExtractor.test.ts`).
+
+**Playwright e2e** (`apps/web/e2e/dashboard.spec.ts`, permanent): drives the real signed WhatsApp
+webhook end to end and verifies the admin dashboard renders the result — a quote-issued journey's
+timeline, and an escalation-queue entry.
+
+**Two independent code-review passes** (via the repo's `/code-review` skill, run cold — no
+foreknowledge of what to look for): the first, on the two bug fixes above, caught that my first
+patch assumed one-message-per-transcript-line without `buildAccumulatedTranscript` actually
+guaranteeing it (fixed, see bug 1 above) and that a test I had written violated `propose()`'s own
+precondition (removed, precondition documented instead). The second, on the email-resend feature
+below, found three real bugs before it shipped — see below.
+
+**Email retry/resend** (`apps/api/src/services/emailResendService.ts`,
+`apps/worker/src/jobs/emailResendSweep.ts`): a Mailgun send that failed used to be dropped entirely
+— nothing persisted, nothing to retry, the customer never got a reply. `OutboundMessage` gains
+`status` (SENT/FAILED), `deliveryError`, `retryCount`, `subject` and `claimedAt`; a failed send
+(automatic reply or staff reply) is now persisted as FAILED instead of discarded. The worker's
+`emailResendSweep` periodically retries FAILED email messages (bounded by age and attempt count,
+same housekeeping pattern as the hold-expiration/escalation-SLA sweeps); a staff member can also
+resend on demand (`POST /v1/enquiries/:conversationId/outbound-messages/:id/resend`), surfaced in
+the dashboard's conversation thread as a "Resend" action on a failed message.
+
+The second code-review pass, before this landed, found and fixed three real bugs: (1) the resend
+lookup was scoped only by `tenantId`+`id`, not `conversationId`, so a mismatched
+conversationId/outboundMessageId pair could resend one customer's private message content to a
+*different* customer — fixed by making `findOutboundMessageById` require and enforce
+`conversationId` in the query itself; (2) the original email subject was never preserved, so a
+resend broke the customer's mail thread with a generic fallback subject — fixed with the stored
+`subject` column; (3) the automatic sweep and a staff-triggered resend had no concurrency guard and
+could both send the same message at once — fixed via an atomic claim (`claimedAt`, conditional
+`updateMany`, the same pattern `AvailabilityHold` already used) that only one caller can win. Each
+fix has its own regression test, including a genuine concurrent-HTTP-request race test
+(`apps/api/src/emailResend.integration.test.ts`) expecting exactly one 200 and one 409, and exactly
+one email sent.
+
+**This phase's own architecture-review pass** (re-reading the feature against the project's
+tenant-isolation/least-privilege/audit non-negotiables once everything else was green) found one
+further gap: the migrations adding the columns the resend sweep depends on never granted
+`ai_concierge_worker` access to `outbound_messages`, unlike the sibling `escalation_cases` migration
+which granted that role when the SLA sweep started touching it. Dormant today only because of the
+pre-existing, separately-tracked superuser-connection limitation noted in §8 — but a real gap
+against this project's own "narrow, explicit, never-auto-granted worker posture" convention. Fixed
+in `20260927140000_grant_worker_outbound_message_access` (`GRANT SELECT, UPDATE ON
+"outbound_messages" TO ai_concierge_worker;`), matching exactly what the sweep needs and nothing
+more.
+
+**Manual verification**: a temporary Playwright script (never committed) drove the real dev stack
+in a browser and screenshotted every dashboard screen plus the Resend button/flow. Confirmed: the
+Resend button appears on a FAILED email message and, since this sandbox has no real Mailgun
+credentials, correctly reports "still could not reach the customer" rather than a faked success (a
+positive proof of the "never fake success" principle, not a defect) — the message row's `status`
+stays `FAILED`, unchanged. Escalations, Journeys, Customers, Quotes, Audit, Security, Fleet and
+Settings all render real, non-placeholder data end to end.
+
+**Final gate results** (2026-09-27, full repo, real Postgres 16 + Redis, no Docker daemon in this
+sandbox — same documented limitation as every prior phase): typecheck, lint, unit (all packages),
+integration (47 test files across `apps/api`/`apps/worker`/`packages/db`), security (14 files/97
+tests), e2e (12/12 Playwright tests including both new `dashboard.spec.ts` cases), production build
+(api/worker/web) all green. A fresh `knip` dead-code pass found nothing genuinely unused — every
+flagged item (four files, a runtime-only dependency, an ESLint shorthand-resolved devDependency,
+nine "exported but not imported elsewhere" bindings, one intentional schema alias) was individually
+verified against its actual call site or config reference and is live, used code, not dead code —
+consistent with the phase 1-9/16 dead-code audit already completed earlier in this phase's work.
