@@ -71,6 +71,7 @@ describe('journeyService', () => {
           messageId: message.id,
           resolvedVehicleId: null,
           missingInfoStatus: MissingInfoStatus.COMPLETE,
+          collectedFingerprint: null,
           requestId: 'req-1',
         },
       );
@@ -86,7 +87,7 @@ describe('journeyService', () => {
       ]);
     });
 
-    it('loops at COLLECTING_MISSING_INFO on NEEDS_INFO, incrementing the attempt counter', async () => {
+    it('loops at COLLECTING_MISSING_INFO on NEEDS_INFO, incrementing the attempt counter when nothing new was resolved', async () => {
       const conversation = await seedConversation(prisma);
       const message = await seedMessage(prisma, conversation.id);
       const input = {
@@ -95,6 +96,8 @@ describe('journeyService', () => {
         messageId: message.id,
         resolvedVehicleId: null,
         missingInfoStatus: MissingInfoStatus.NEEDS_INFO,
+        // Same fingerprint both calls — nothing changed between them, so this is a real "no progress" turn.
+        collectedFingerprint: 'fp-same',
         requestId: 'req-1',
       } as const;
 
@@ -108,7 +111,7 @@ describe('journeyService', () => {
       expect(notificationProvider.sent).toHaveLength(0);
     });
 
-    it('escalates to T2 (MISSING_INFO_STALLED) on the 3rd consecutive NEEDS_INFO and pages OPS_AGENT staff', async () => {
+    it('escalates to T2 (MISSING_INFO_STALLED) on the 3rd consecutive NEEDS_INFO with no new info, and pages OPS_AGENT staff', async () => {
       const worker = await seedTestUser(prisma, {
         tenantId: TEST_TENANT_ID,
         role: 'OPS_AGENT',
@@ -124,6 +127,7 @@ describe('journeyService', () => {
         messageId: message.id,
         resolvedVehicleId: null,
         missingInfoStatus: MissingInfoStatus.NEEDS_INFO,
+        collectedFingerprint: 'fp-same',
         requestId: 'req-1',
       } as const;
 
@@ -146,6 +150,36 @@ describe('journeyService', () => {
       expect(notificationProvider.sent[0]?.to).toBe('+15550001234');
     });
 
+    it('never escalates while each turn resolves something new, even past the stall threshold', async () => {
+      const conversation = await seedConversation(prisma);
+      const message = await seedMessage(prisma, conversation.id);
+      const base = {
+        tenantId: TEST_TENANT_ID,
+        conversationId: conversation.id,
+        messageId: message.id,
+        resolvedVehicleId: null,
+        missingInfoStatus: MissingInfoStatus.NEEDS_INFO,
+        requestId: 'req-1',
+      } as const;
+
+      // Five turns, each resolving one more fact than the last (vehicle, then
+      // pickup date, then return date, then pickup location, then dropoff
+      // location) — real progress every time, so the stall counter (which
+      // would fire at 3) must never trip even though this is 5 NEEDS_INFO
+      // turns in a row.
+      const fingerprints = ['fp-vehicle', 'fp-vehicle-pickup', 'fp-vehicle-pickup-return', 'fp-vehicle-pickup-return-loc', 'fp-vehicle-pickup-return-loc-dropoff'];
+      let last;
+      for (const collectedFingerprint of fingerprints) {
+        last = await syncJourneyAfterMissingInfo(
+          { prisma, notificationProvider },
+          { ...base, collectedFingerprint },
+        );
+        expect(last.state).toBe(JourneyState.COLLECTING_MISSING_INFO);
+        expect(last.context.missingInfoAttempts).toBe(1);
+      }
+      expect(notificationProvider.sent).toHaveLength(0);
+    });
+
     it('a journey already ESCALATED is left untouched by a further sync call', async () => {
       await seedTestUser(prisma, { tenantId: TEST_TENANT_ID, role: 'OPS_AGENT' });
       const conversation = await seedConversation(prisma);
@@ -156,6 +190,7 @@ describe('journeyService', () => {
         messageId: message.id,
         resolvedVehicleId: null,
         missingInfoStatus: MissingInfoStatus.NEEDS_INFO,
+        collectedFingerprint: 'fp-same',
         requestId: 'req-1',
       } as const;
       await syncJourneyAfterMissingInfo({ prisma, notificationProvider }, input);
@@ -165,7 +200,7 @@ describe('journeyService', () => {
 
       const untouched = await syncJourneyAfterMissingInfo(
         { prisma, notificationProvider },
-        { ...input, missingInfoStatus: MissingInfoStatus.COMPLETE },
+        { ...input, missingInfoStatus: MissingInfoStatus.COMPLETE, collectedFingerprint: null },
       );
       expect(untouched.state).toBe(JourneyState.ESCALATED);
       expect(untouched.version).toBe(escalated.version);
@@ -182,6 +217,7 @@ describe('journeyService', () => {
           messageId: message.id,
           resolvedVehicleId: null,
           missingInfoStatus: MissingInfoStatus.EXPIRED,
+          collectedFingerprint: null,
           requestId: 'req-1',
         },
       );
@@ -201,6 +237,7 @@ describe('journeyService', () => {
           messageId: message.id,
           resolvedVehicleId: null,
           missingInfoStatus: MissingInfoStatus.COMPLETE,
+          collectedFingerprint: null,
           requestId: 'req-1',
         },
       );
@@ -302,6 +339,7 @@ describe('journeyService', () => {
           messageId: message.id,
           resolvedVehicleId: null,
           missingInfoStatus: MissingInfoStatus.COMPLETE,
+          collectedFingerprint: null,
           requestId: 'req-1',
         },
       );
@@ -414,6 +452,7 @@ describe('journeyService', () => {
           messageId: message.id,
           resolvedVehicleId: null,
           missingInfoStatus: MissingInfoStatus.COMPLETE,
+          collectedFingerprint: null,
           requestId: 'req-1',
         },
       );

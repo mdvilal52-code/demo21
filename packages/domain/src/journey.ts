@@ -120,6 +120,14 @@ export const journeyContextSchema = z.object({
   resolvedVehicleId: z.string().uuid().nullable(),
   quoteId: z.string().uuid().nullable(),
   missingInfoAttempts: z.number().int().nonnegative(),
+  /**
+   * `computeCollectedFingerprint` (missingInfo.ts) from the last
+   * COLLECTING_MISSING_INFO turn — lets `journeyService.ts` tell "still
+   * missing the same things, customer isn't adding anything new" apart from
+   * "still missing something, but new facts keep arriving one at a time".
+   * Only the second one should ever reset `missingInfoAttempts`.
+   */
+  missingInfoFingerprint: z.string().nullable(),
 });
 export type JourneyContext = z.infer<typeof journeyContextSchema>;
 
@@ -130,6 +138,7 @@ export function createInitialJourneyContext(conversationId: string): JourneyCont
     resolvedVehicleId: null,
     quoteId: null,
     missingInfoAttempts: 0,
+    missingInfoFingerprint: null,
   };
 }
 

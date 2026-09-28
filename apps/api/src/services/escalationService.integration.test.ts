@@ -30,6 +30,7 @@ async function seedEscalatedJourney(
       messageId: message.id,
       resolvedVehicleId: null,
       missingInfoStatus: MissingInfoStatus.COMPLETE,
+      collectedFingerprint: null,
       requestId: 'req-1',
     },
   );

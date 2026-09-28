@@ -195,6 +195,13 @@ export interface SyncJourneyAfterMissingInfoInput {
   messageId: string;
   resolvedVehicleId: string | null;
   missingInfoStatus: MissingInfoStatusValue;
+  /**
+   * `computeCollectedFingerprint(missingInfo.collected)` for this turn —
+   * required whenever `missingInfoStatus` is `NEEDS_INFO`, so a stall is only
+   * counted while nothing new has actually been resolved (see
+   * `JourneyContext.missingInfoFingerprint`'s own doc comment).
+   */
+  collectedFingerprint: string | null;
   requestId: string;
 }
 
@@ -253,7 +260,15 @@ export async function syncJourneyAfterMissingInfo(
     }
 
     if (input.missingInfoStatus === MissingInfoStatus.NEEDS_INFO) {
-      context.missingInfoAttempts += 1;
+      // A changed fingerprint means Steps 1-3 resolved something new this
+      // turn (a vehicle, a date, a location) — the customer is actively
+      // answering, one detail at a time, which must never look like a stall
+      // just because they haven't finished in 3 turns. Only an *unchanged*
+      // fingerprint across turns means nothing moved.
+      const madeProgress =
+        input.collectedFingerprint !== context.missingInfoFingerprint;
+      context.missingInfoAttempts = madeProgress ? 1 : context.missingInfoAttempts + 1;
+      context.missingInfoFingerprint = input.collectedFingerprint;
       const decision = decideMissingInfoEscalation(
         input.missingInfoStatus,
         context.missingInfoAttempts,
@@ -283,7 +298,10 @@ export async function syncJourneyAfterMissingInfo(
         : input.missingInfoStatus === MissingInfoStatus.EXPIRED
           ? JourneyState.EXPIRED
           : JourneyState.CANCELLED;
-    if (toState === JourneyState.ELIGIBILITY_CHECK) context.missingInfoAttempts = 0;
+    if (toState === JourneyState.ELIGIBILITY_CHECK) {
+      context.missingInfoAttempts = 0;
+      context.missingInfoFingerprint = null;
+    }
     const next = await advance(
       tx,
       input.tenantId,
@@ -605,7 +623,7 @@ export async function resumeStalledJourney(
       journeyId: journey.id,
       expectedVersion: journey.version,
       toState: JourneyState.ELIGIBILITY_CHECK,
-      context: { ...journey.context, missingInfoAttempts: 0 },
+      context: { ...journey.context, missingInfoAttempts: 0, missingInfoFingerprint: null },
       actor: 'SYSTEM',
       reason,
     });

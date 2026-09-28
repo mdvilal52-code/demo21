@@ -5,7 +5,13 @@ import {
   type Channel,
   type OutboundMessageSourceValue,
 } from '@ai-concierge/db';
-import { CustomerTimelineEventType, type Journey, type TenantId } from '@ai-concierge/domain';
+import {
+  computeCollectedFingerprint,
+  CustomerTimelineEventType,
+  MissingInfoStatus,
+  type Journey,
+  type TenantId,
+} from '@ai-concierge/domain';
 import type { AppContext } from '../context.js';
 import { resolvePiiKey } from '../lib/piiKey.js';
 import { MAX_RECENT_TURNS_FOR_REPLY, type RecentTurn } from './conversationalReplyService.js';
@@ -152,6 +158,10 @@ export async function handleInboundTurn(
         messageId: pipeline.enquiry.messageId,
         resolvedVehicleId: pipeline.vehicle.determination.resolvedVehicle?.id ?? null,
         missingInfoStatus: missingInfo.status,
+        collectedFingerprint:
+          missingInfo.status === MissingInfoStatus.NEEDS_INFO
+            ? computeCollectedFingerprint(missingInfo.collected)
+            : null,
         requestId: input.requestId,
       },
     );

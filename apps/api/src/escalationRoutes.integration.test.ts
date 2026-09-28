@@ -67,6 +67,7 @@ describe('escalation + journey routes', () => {
         messageId: message.id,
         resolvedVehicleId: null,
         missingInfoStatus: MissingInfoStatus.COMPLETE,
+        collectedFingerprint: null,
         requestId: 'req-1',
       },
     );

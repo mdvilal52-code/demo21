@@ -106,3 +106,24 @@ export const missingInfoResultSchema = z.object({
   }),
 });
 export type MissingInfoResult = z.infer<typeof missingInfoResultSchema>;
+
+/**
+ * A stable snapshot of what Steps 1-3 have resolved, for detecting whether a
+ * later message added anything new — see `journeyService.ts`'s
+ * `missingInfoAttempts` counter, which must never treat "the customer is
+ * still filling in details, one at a time" the same as "the customer stopped
+ * engaging". Deliberately only the fields `RequiredField` tracks; other
+ * details a customer might add (colour, transmission, budget, ...) don't
+ * belong in it, but they don't need to reset it either — the point is
+ * whether *the actually-missing facts* have moved at all, and a shrinking
+ * `missingFields` list is exactly that.
+ */
+export function computeCollectedFingerprint(collected: CollectedBookingInfo): string {
+  return JSON.stringify({
+    vehicleId: collected.vehicle?.id ?? null,
+    pickupDate: collected.pickupDate,
+    returnDate: collected.returnDate,
+    pickupLocation: collected.pickupLocation?.normalized ?? null,
+    dropoffLocation: collected.dropoffLocation?.normalized ?? null,
+  });
+}

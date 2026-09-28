@@ -64,6 +64,7 @@ describe('admin read routes (journeys, vehicles, customers, settings)', () => {
         messageId: message.id,
         resolvedVehicleId: null,
         missingInfoStatus: 'NOT_APPLICABLE',
+        collectedFingerprint: null,
         requestId: 'req-1',
       },
     );

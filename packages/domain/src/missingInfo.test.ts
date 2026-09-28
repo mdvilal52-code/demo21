@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { missingInfoResultSchema } from './missingInfo.js';
+import { computeCollectedFingerprint, missingInfoResultSchema } from './missingInfo.js';
 
 const emptyCollected = {
   pickupDate: null,
@@ -134,5 +134,59 @@ describe('missingInfoResultSchema', () => {
       modelMetadata: baseMetadata,
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe('computeCollectedFingerprint', () => {
+  it('is stable across calls with the same collected info', () => {
+    const collected = { ...emptyCollected, pickupDate: '2026-10-15T06:00:00.000Z' };
+    expect(computeCollectedFingerprint(collected)).toBe(computeCollectedFingerprint(collected));
+  });
+
+  it('changes when a vehicle is newly resolved', () => {
+    const before = computeCollectedFingerprint(emptyCollected);
+    const after = computeCollectedFingerprint({
+      ...emptyCollected,
+      vehicle: {
+        id: '11111111-1111-1111-1111-111111111111',
+        make: 'BMW',
+        model: 'X5',
+        category: 'SUV',
+        luxuryTier: 'PREMIUM',
+        seats: 5,
+        luggage: 4,
+        transmission: 'AUTOMATIC',
+        availabilityStatus: 'AVAILABLE',
+        pricingProfile: { currency: 'AED', dailyRate: 900 },
+        active: true,
+      },
+    });
+    expect(after).not.toBe(before);
+  });
+
+  it('does not change when only non-tracked details (e.g. colour, mentioned in chat only) are added', () => {
+    // computeCollectedFingerprint only ever sees what Steps 1-3 resolve into
+    // `collected` (vehicle/dates/location) — a colour or transmission
+    // preference the customer mentioned never reaches this function at all,
+    // so two calls with an identical `collected` must fingerprint identically
+    // regardless of what the raw conversation text said.
+    const collected = { ...emptyCollected, pickupDate: '2026-10-15T06:00:00.000Z' };
+    expect(computeCollectedFingerprint(collected)).toBe(computeCollectedFingerprint({ ...collected }));
+  });
+
+  it('changes when a location is newly resolved', () => {
+    const before = computeCollectedFingerprint(emptyCollected);
+    const after = computeCollectedFingerprint({
+      ...emptyCollected,
+      pickupLocation: {
+        raw: 'Dubai Marina',
+        normalized: 'Dubai Marina',
+        city: 'Dubai',
+        country: 'AE',
+        timezone: 'Asia/Dubai',
+        locationType: 'CITY_AREA',
+      },
+    });
+    expect(after).not.toBe(before);
   });
 });
