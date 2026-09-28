@@ -40,6 +40,7 @@ describe('POST /v1/enquiries/:conversationId/alternatives — integration', () =
       luggage: 4,
       transmission: 'AUTOMATIC',
       ...overrides,
+      color: overrides.color ?? 'Black',
     });
     for (let i = 0; i < unitCount; i += 1) {
       await createVehicleUnit(testApp.ctx.prisma, {

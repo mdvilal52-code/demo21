@@ -5,6 +5,7 @@ const validVehicle = {
   id: '11111111-1111-1111-1111-111111111111',
   make: 'Lamborghini',
   model: 'Urus',
+  color: 'Black',
   category: 'SUV',
   luxuryTier: 'ULTRA_LUXURY',
   seats: 5,
@@ -12,6 +13,7 @@ const validVehicle = {
   transmission: 'AUTOMATIC',
   availabilityStatus: 'AVAILABLE',
   pricingProfile: { currency: 'AED', dailyRate: 3500, weeklyRate: 21000, depositAmount: 10000 },
+  photoUrl: null,
   active: true,
 };
 

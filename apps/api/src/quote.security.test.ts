@@ -50,6 +50,7 @@ describe('POST/GET /v1/enquiries/:conversationId/quote — security', () => {
       transmission: 'AUTOMATIC',
       pricingProfile: { currency: 'AED', dailyRate: 3500 },
       ...overrides,
+      color: overrides.color ?? 'Black',
     });
   }
 

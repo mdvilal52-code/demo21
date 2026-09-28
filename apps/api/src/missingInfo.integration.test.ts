@@ -21,6 +21,7 @@ describe('POST /v1/enquiries/:conversationId/missing-info — integration', () =
       tenantId: TEST_TENANT_ID,
       make: 'Lamborghini',
       model: 'Urus',
+      color: 'Black',
       category: 'SUV',
       luxuryTier: 'ULTRA_LUXURY',
       seats: 5,

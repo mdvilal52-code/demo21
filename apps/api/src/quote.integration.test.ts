@@ -41,6 +41,7 @@ describe('POST /v1/enquiries/:conversationId/quote — integration', () => {
       luggage: 4,
       transmission: 'AUTOMATIC',
       ...overrides,
+      color: overrides.color ?? 'Black',
     });
   }
 

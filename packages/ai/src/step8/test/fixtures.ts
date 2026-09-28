@@ -6,6 +6,7 @@ export function makeVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
     id: '00000000-0000-0000-0000-000000000001',
     make: 'Lamborghini',
     model: 'Urus',
+    color: 'Black',
     category: 'SUV',
     luxuryTier: 'ULTRA_LUXURY',
     seats: 5,
@@ -13,6 +14,7 @@ export function makeVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
     transmission: 'AUTOMATIC',
     availabilityStatus: 'AVAILABLE',
     pricingProfile: { currency: 'AED', dailyRate: 3500 },
+    photoUrl: null,
     active: true,
     ...overrides,
   };

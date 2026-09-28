@@ -15,6 +15,7 @@ function makeVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
     id: URUS_ID,
     make: 'Lamborghini',
     model: 'Urus',
+    color: 'Black',
     category: 'SUV',
     luxuryTier: 'ULTRA_LUXURY',
     seats: 5,
@@ -22,6 +23,7 @@ function makeVehicle(overrides: Partial<Vehicle> = {}): Vehicle {
     transmission: 'AUTOMATIC',
     availabilityStatus: 'AVAILABLE',
     pricingProfile: { currency: 'AED', dailyRate: 3500 },
+    photoUrl: null,
     active: true,
     ...overrides,
   };
@@ -32,6 +34,7 @@ function candidate(overrides: Partial<VehicleMentionCandidate> = {}): VehicleMen
     lexiconEntryId: URUS_ID,
     make: 'Lamborghini',
     model: 'Urus',
+    color: 'Black',
     category: 'SUV',
     matchType: 'EXACT_MODEL',
     matchedText: 'Lamborghini Urus',

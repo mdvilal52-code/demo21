@@ -379,6 +379,10 @@ model Vehicle {
   tenant             Tenant                    @relation(fields: [tenantId], references: [id])
   make               String
   model              String
+  /// One catalog row per make+model+colour combination (see the unique
+  /// index below) — a customer naming a colour is naming a specific
+  /// listing, the same way naming an exact model already is.
+  color              String
   category           VehicleCategory
   luxuryTier         LuxuryTier
   seats              Int
@@ -388,6 +392,10 @@ model Vehicle {
   /// Zod-validated PricingProfile (currency, dailyRate, weeklyRate?, depositAmount?) — a
   /// "budget hint" per MASTER-PLAN.md Step 3, not the real pricing engine (Step 8).
   pricingProfile     Json
+  /// Reference/catalog image for chat and the dashboard — not a real fleet
+  /// photo of a specific physical unit (see `VehiclePhoto` for that, once
+  /// that pilot work merges). Null is fine; nothing renders it as fact.
+  photoUrl           String?
   active             Boolean                   @default(true)
   deletedAt          DateTime?
   createdAt          DateTime                  @default(now())
@@ -400,7 +408,7 @@ model Vehicle {
   alternativeRecommendations AlternativeRecommendation[]
   quotes                     Quote[]
 
-  @@unique([tenantId, make, model])
+  @@unique([tenantId, make, model, color])
   @@index([tenantId])
   @@index([tenantId, category])
   @@map("vehicles")

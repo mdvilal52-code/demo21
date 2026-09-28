@@ -66,7 +66,9 @@ export class VehicleValidationService {
             ? ('BRAND_ONLY_MULTIPLE_MATCHES' as const)
             : matchType === VehicleMatchType.CATEGORY_ONLY
               ? ('CATEGORY_ONLY_MULTIPLE_MATCHES' as const)
-              : ('MULTIPLE_CANDIDATE_VEHICLES' as const);
+              : matchType === VehicleMatchType.COLOR_ONLY
+                ? ('COLOR_ONLY_MULTIPLE_MATCHES' as const)
+                : ('MULTIPLE_CANDIDATE_VEHICLES' as const);
         ambiguities.push({
           field: 'vehicle',
           code,
@@ -122,7 +124,11 @@ export class VehicleValidationService {
     if (matchType === VehicleMatchType.FUZZY_MATCH) {
       confidence -= Math.max(0, 1 - worstSimilarity);
     }
-    if (matchType === VehicleMatchType.BRAND_ONLY || matchType === VehicleMatchType.CATEGORY_ONLY) {
+    if (
+      matchType === VehicleMatchType.BRAND_ONLY ||
+      matchType === VehicleMatchType.CATEGORY_ONLY ||
+      matchType === VehicleMatchType.COLOR_ONLY
+    ) {
       confidence -= 0.1;
     }
     if (!resolvedVehicle) confidence -= 0.1;

@@ -15,6 +15,7 @@ const URUS: Vehicle = {
   id: URUS_ID,
   make: 'Lamborghini',
   model: 'Urus',
+  color: 'Black',
   category: 'SUV',
   luxuryTier: 'ULTRA_LUXURY',
   seats: 5,
@@ -22,6 +23,7 @@ const URUS: Vehicle = {
   transmission: 'AUTOMATIC',
   availabilityStatus: 'AVAILABLE',
   pricingProfile: { currency: 'AED', dailyRate: 3500 },
+  photoUrl: null,
   active: true,
 };
 
@@ -29,6 +31,7 @@ const RANGE_ROVER: Vehicle = {
   id: RANGE_ROVER_ID,
   make: 'Land Rover',
   model: 'Range Rover',
+  color: 'White',
   category: 'SUV',
   luxuryTier: 'LUXURY',
   seats: 5,
@@ -36,6 +39,7 @@ const RANGE_ROVER: Vehicle = {
   transmission: 'AUTOMATIC',
   availabilityStatus: 'AVAILABLE',
   pricingProfile: { currency: 'AED', dailyRate: 1800 },
+  photoUrl: null,
   active: true,
 };
 
@@ -43,6 +47,7 @@ const INACTIVE_BENTLEY: Vehicle = {
   id: BENTLEY_ID,
   make: 'Bentley',
   model: 'Continental',
+  color: 'Silver',
   category: 'COUPE',
   luxuryTier: 'LUXURY',
   seats: 4,
@@ -50,6 +55,7 @@ const INACTIVE_BENTLEY: Vehicle = {
   transmission: 'AUTOMATIC',
   availabilityStatus: 'AVAILABLE',
   pricingProfile: { currency: 'AED', dailyRate: 2200 },
+  photoUrl: null,
   active: false,
 };
 
@@ -63,6 +69,7 @@ class InMemoryVehicleCatalogProvider implements VehicleCatalogProvider {
       id: v.id,
       make: v.make,
       model: v.model,
+      color: v.color,
       category: v.category,
       active: v.active,
       availabilityStatus: v.availabilityStatus,

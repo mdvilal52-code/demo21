@@ -17,6 +17,7 @@ const URUS = {
   id: '11111111-1111-1111-1111-111111111111',
   make: 'Lamborghini',
   model: 'Urus',
+  color: 'Black',
   category: 'SUV' as const,
   luxuryTier: 'ULTRA_LUXURY' as const,
   seats: 5,
@@ -24,6 +25,7 @@ const URUS = {
   transmission: 'AUTOMATIC' as const,
   availabilityStatus: 'AVAILABLE' as const,
   pricingProfile: { currency: 'AED', dailyRate: 3500 },
+  photoUrl: null,
   active: true,
 };
 

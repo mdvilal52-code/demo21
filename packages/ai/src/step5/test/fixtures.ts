@@ -16,6 +16,7 @@ export const URUS: Vehicle = {
   id: '11111111-1111-1111-1111-111111111111',
   make: 'Lamborghini',
   model: 'Urus',
+  color: 'Black',
   category: 'SUV',
   luxuryTier: 'ULTRA_LUXURY',
   seats: 5,
@@ -23,6 +24,7 @@ export const URUS: Vehicle = {
   transmission: 'AUTOMATIC',
   availabilityStatus: 'AVAILABLE',
   pricingProfile: { currency: 'AED', dailyRate: 3500 },
+  photoUrl: null,
   active: true,
 };
 
@@ -30,6 +32,7 @@ export const RANGE_ROVER: Vehicle = {
   id: '22222222-2222-2222-2222-222222222222',
   make: 'Land Rover',
   model: 'Range Rover',
+  color: 'White',
   category: 'SUV',
   luxuryTier: 'LUXURY',
   seats: 5,
@@ -37,6 +40,7 @@ export const RANGE_ROVER: Vehicle = {
   transmission: 'AUTOMATIC',
   availabilityStatus: 'AVAILABLE',
   pricingProfile: { currency: 'AED', dailyRate: 1800 },
+  photoUrl: null,
   active: true,
 };
 

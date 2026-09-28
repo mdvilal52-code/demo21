@@ -21,6 +21,7 @@ export function toDomainVehicle(row: PrismaVehicle): Vehicle {
     id: row.id,
     make: row.make,
     model: row.model,
+    color: row.color,
     category: row.category,
     luxuryTier: row.luxuryTier,
     seats: row.seats,
@@ -28,6 +29,7 @@ export function toDomainVehicle(row: PrismaVehicle): Vehicle {
     transmission: row.transmission,
     availabilityStatus: row.availabilityStatus,
     pricingProfile: row.pricingProfile,
+    photoUrl: row.photoUrl,
     active: row.active,
   });
 }
@@ -48,6 +50,7 @@ export interface CreateVehicleInput {
   tenantId: TenantId;
   make: string;
   model: string;
+  color: string;
   category: string;
   luxuryTier: string;
   seats: number;
@@ -55,6 +58,7 @@ export interface CreateVehicleInput {
   transmission: string;
   availabilityStatus?: string;
   pricingProfile: PricingProfile;
+  photoUrl?: string | null;
   active?: boolean;
 }
 
@@ -72,6 +76,7 @@ export async function createVehicle(db: Executor, input: CreateVehicleInput) {
         tenantId: input.tenantId,
         make,
         model,
+        color: input.color,
         category: input.category as Prisma.VehicleCreateInput['category'],
         luxuryTier: input.luxuryTier as Prisma.VehicleCreateInput['luxuryTier'],
         seats: input.seats,
@@ -80,14 +85,17 @@ export async function createVehicle(db: Executor, input: CreateVehicleInput) {
         availabilityStatus:
           input.availabilityStatus as Prisma.VehicleCreateInput['availabilityStatus'],
         pricingProfile: input.pricingProfile as unknown as Prisma.InputJsonValue,
+        photoUrl: input.photoUrl,
         active: input.active,
       },
     });
   } catch (error) {
     if (isUniqueConstraintViolation(error)) {
-      throw new AppError('CONFLICT', `Vehicle "${make} ${model}" already exists for this tenant`, {
-        cause: error,
-      });
+      throw new AppError(
+        'CONFLICT',
+        `Vehicle "${make} ${model}" in "${input.color}" already exists for this tenant`,
+        { cause: error },
+      );
     }
     throw error;
   }
@@ -115,6 +123,7 @@ export async function listVehicleLexicon(db: Executor, tenantId: TenantId) {
       id: true,
       make: true,
       model: true,
+      color: true,
       category: true,
       active: true,
       availabilityStatus: true,

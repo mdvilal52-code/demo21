@@ -9,6 +9,7 @@ export interface VehicleLexiconEntry {
   id: string;
   make: string;
   model: string;
+  color: string;
   category: VehicleCategoryValue;
   active: boolean;
   availabilityStatus: VehicleAvailabilityStatusValue;

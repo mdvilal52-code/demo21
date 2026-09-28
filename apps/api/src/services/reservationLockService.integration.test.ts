@@ -33,6 +33,7 @@ async function seedVehicleWithUnits(
     tenantId,
     make: 'Lamborghini',
     model: `Urus-${randomUUID().slice(0, 8)}`,
+    color: 'Black',
     category: 'SUV',
     luxuryTier: 'ULTRA_LUXURY',
     seats: 5,

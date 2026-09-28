@@ -19,6 +19,7 @@ async function seedVehicle(prisma: PrismaClient, tenantId: string, model = 'Urus
     tenantId,
     make: 'Lamborghini',
     model,
+    color: 'Black',
     category: 'SUV',
     luxuryTier: 'ULTRA_LUXURY',
     seats: 5,

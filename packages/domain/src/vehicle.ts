@@ -87,6 +87,8 @@ export const vehicleSchema = z.object({
   id: z.string().uuid(),
   make: z.string().min(1).max(80),
   model: z.string().min(1).max(80),
+  /** One catalog row per make+model+colour — see `packages/db`'s schema comment on `Vehicle.color`. */
+  color: z.string().min(1).max(40),
   category: vehicleCategorySchema,
   luxuryTier: luxuryTierSchema,
   seats: z.number().int().positive().max(20),
@@ -94,6 +96,8 @@ export const vehicleSchema = z.object({
   transmission: transmissionSchema,
   availabilityStatus: vehicleAvailabilityStatusSchema,
   pricingProfile: pricingProfileSchema,
+  /** Reference/catalog image, never a specific physical unit's real photo — see the schema comment on `Vehicle.photoUrl`. */
+  photoUrl: z.string().url().nullable(),
   active: z.boolean(),
 });
 export type Vehicle = z.infer<typeof vehicleSchema>;
@@ -103,6 +107,7 @@ export const VehicleMatchType = {
   EXACT_MODEL: 'EXACT_MODEL',
   BRAND_ONLY: 'BRAND_ONLY',
   CATEGORY_ONLY: 'CATEGORY_ONLY',
+  COLOR_ONLY: 'COLOR_ONLY',
   FUZZY_MATCH: 'FUZZY_MATCH',
   NONE: 'NONE',
 } as const;
@@ -111,6 +116,7 @@ export const vehicleMatchTypeSchema = z.enum([
   VehicleMatchType.EXACT_MODEL,
   VehicleMatchType.BRAND_ONLY,
   VehicleMatchType.CATEGORY_ONLY,
+  VehicleMatchType.COLOR_ONLY,
   VehicleMatchType.FUZZY_MATCH,
   VehicleMatchType.NONE,
 ]);
@@ -120,6 +126,7 @@ export const VehicleAmbiguityCode = {
   NO_VEHICLE_MENTIONED: 'NO_VEHICLE_MENTIONED',
   BRAND_ONLY_MULTIPLE_MATCHES: 'BRAND_ONLY_MULTIPLE_MATCHES',
   CATEGORY_ONLY_MULTIPLE_MATCHES: 'CATEGORY_ONLY_MULTIPLE_MATCHES',
+  COLOR_ONLY_MULTIPLE_MATCHES: 'COLOR_ONLY_MULTIPLE_MATCHES',
   MULTIPLE_CANDIDATE_VEHICLES: 'MULTIPLE_CANDIDATE_VEHICLES',
 } as const;
 
@@ -127,6 +134,7 @@ export const vehicleAmbiguityCodeSchema = z.enum([
   VehicleAmbiguityCode.NO_VEHICLE_MENTIONED,
   VehicleAmbiguityCode.BRAND_ONLY_MULTIPLE_MATCHES,
   VehicleAmbiguityCode.CATEGORY_ONLY_MULTIPLE_MATCHES,
+  VehicleAmbiguityCode.COLOR_ONLY_MULTIPLE_MATCHES,
   VehicleAmbiguityCode.MULTIPLE_CANDIDATE_VEHICLES,
 ]);
 export type VehicleAmbiguityCodeValue = z.infer<typeof vehicleAmbiguityCodeSchema>;

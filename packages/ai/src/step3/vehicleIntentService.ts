@@ -5,6 +5,7 @@ import {
 } from '@ai-concierge/domain';
 import { LOCATION_KEYWORDS } from '../lexicon.js';
 import { CATEGORY_KEYWORDS } from './categoryKeywords.js';
+import { COLOR_KEYWORDS } from './colorKeywords.js';
 import { similarityRatio } from './levenshtein.js';
 import type { VehicleLexiconEntry } from './vehicleCatalogProvider.js';
 
@@ -12,6 +13,7 @@ export interface VehicleMentionCandidate {
   lexiconEntryId: string;
   make: string;
   model: string;
+  color: string;
   category: VehicleCategoryValue;
   matchType: VehicleMatchTypeValue;
   matchedText: string;
@@ -204,6 +206,9 @@ export class VehicleIntentService {
     const category = this.matchCategoryOnly(text, lexicon);
     if (category.length > 0) return { candidates: category, rawMention: null };
 
+    const color = this.matchColorOnly(text, lexicon);
+    if (color.length > 0) return { candidates: color, rawMention: null };
+
     const fuzzy = this.matchFuzzy(text, lexicon);
     if (fuzzy.length > 0) return { candidates: fuzzy, rawMention: null };
 
@@ -213,18 +218,27 @@ export class VehicleIntentService {
   /**
    * `text` is a single message's text (see `propose`). Two different exact
    * models both matching is a genuine ambiguity ("the Urus or the Range
-   * Rover?") since they were named together in one message.
+   * Rover?") since they were named together in one message. Tries
+   * colour-qualified phrases first ("BMW X5 black") so a customer who states
+   * make+model+colour together in one message resolves to exactly one
+   * catalog row instead of every colour variant of that model.
    */
   private matchExactModel(text: string, lexicon: VehicleLexiconEntry[]): VehicleMentionCandidate[] {
     const results: VehicleMentionCandidate[] = [];
     for (const entry of lexicon) {
-      const fullMatch = textMentions(text, `${entry.make} ${entry.model}`);
+      const colorQualified =
+        textMentions(text, `${entry.make} ${entry.model} ${entry.color}`) ??
+        textMentions(text, `${entry.color} ${entry.make} ${entry.model}`) ??
+        textMentions(text, `${entry.model} ${entry.color}`) ??
+        textMentions(text, `${entry.color} ${entry.model}`);
+      const fullMatch = colorQualified ?? textMentions(text, `${entry.make} ${entry.model}`);
       const match = fullMatch ?? textMentions(text, entry.model);
       if (match) {
         results.push({
           lexiconEntryId: entry.id,
           make: entry.make,
           model: entry.model,
+          color: entry.color,
           category: entry.category,
           matchType: VehicleMatchType.EXACT_MODEL,
           matchedText: match[0],
@@ -246,6 +260,7 @@ export class VehicleIntentService {
           lexiconEntryId: entry.id,
           make: entry.make,
           model: entry.model,
+          color: entry.color,
           category: entry.category,
           matchType: VehicleMatchType.BRAND_ONLY,
           matchedText: match[0],
@@ -273,8 +288,41 @@ export class VehicleIntentService {
           lexiconEntryId: entry.id,
           make: entry.make,
           model: entry.model,
+          color: entry.color,
           category: entry.category,
           matchType: VehicleMatchType.CATEGORY_ONLY,
+          matchedText: matchedKeyword,
+          similarity: 1,
+        });
+      }
+    }
+    return results;
+  }
+
+  /**
+   * Colour named alone (e.g. "black"), with no model/brand/category word in
+   * the same message — the weakest single-attribute signal, tried only after
+   * every other tier has found nothing in this message. Matches every
+   * catalog entry in that colour; a real narrowing to "the black one we were
+   * already discussing" is a cross-message conversation-state question this
+   * tier deliberately does not attempt (see `propose`'s own doc comment on
+   * why a later message's signal replaces rather than intersects with an
+   * earlier one).
+   */
+  private matchColorOnly(text: string, lexicon: VehicleLexiconEntry[]): VehicleMentionCandidate[] {
+    const lowerText = text.toLowerCase();
+    const results: VehicleMentionCandidate[] = [];
+    for (const [color, keywords] of Object.entries(COLOR_KEYWORDS)) {
+      const matchedKeyword = keywords.find((keyword) => lowerText.includes(keyword));
+      if (!matchedKeyword) continue;
+      for (const entry of lexicon.filter((e) => e.color === color)) {
+        results.push({
+          lexiconEntryId: entry.id,
+          make: entry.make,
+          model: entry.model,
+          color: entry.color,
+          category: entry.category,
+          matchType: VehicleMatchType.COLOR_ONLY,
           matchedText: matchedKeyword,
           similarity: 1,
         });
@@ -307,6 +355,7 @@ export class VehicleIntentService {
           lexiconEntryId: best.entry.id,
           make: best.entry.make,
           model: best.entry.model,
+          color: best.entry.color,
           category: best.entry.category,
           matchType: VehicleMatchType.FUZZY_MATCH,
           matchedText: phrase,
