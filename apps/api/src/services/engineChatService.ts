@@ -152,15 +152,36 @@ export async function sendEngineMessage(
       now: new Date(),
     };
 
-    const result = await engine.handleMessage([], body.message, state, execCtx);
-    await saveEngineState(ctx, turn.conversationId, result.state);
-
-    const response: SendEngineMessageResponse = {
-      conversationId: turn.conversationId,
-      intent: toContractIntent(result.intent),
-      reply: { text: result.reply, createdAt: new Date().toISOString() },
-      escalated: result.intent === 'escalate_to_human' && result.data.escalated === true,
-    };
+    // `handleInboundTurn` above already produced a safe reply (its own
+    // Gemini call has the same "fall back to a deterministic draft" pattern
+    // journeyReplyService.ts uses everywhere else) — if the *classifier*
+    // call fails (rate limit, timeout, upstream outage), the customer must
+    // still get that reply, never a 502. This mirrors the exact resilience
+    // posture the rest of this codebase already has for every other Gemini
+    // call site; it must not be the one place a Gemini hiccup becomes a
+    // visible failure.
+    let response: SendEngineMessageResponse;
+    try {
+      const result = await engine.handleMessage([], body.message, state, execCtx);
+      await saveEngineState(ctx, turn.conversationId, result.state);
+      response = {
+        conversationId: turn.conversationId,
+        intent: toContractIntent(result.intent),
+        reply: { text: result.reply, createdAt: new Date().toISOString() },
+        escalated: result.intent === 'escalate_to_human' && result.data.escalated === true,
+      };
+    } catch (engineError) {
+      ctx.logger.warn(
+        { err: engineError },
+        'conversation engine classification failed, falling back to the booking pipeline reply',
+      );
+      response = {
+        conversationId: turn.conversationId,
+        intent: null,
+        reply: { text: turn.reply.text, createdAt: new Date().toISOString() },
+        escalated: false,
+      };
+    }
     await completeIdempotencyKey(ctx.prisma, idempotencyKey, 200, response);
     return response;
   } catch (error) {
