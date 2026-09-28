@@ -152,6 +152,16 @@ export async function sendEngineMessage(
       now: new Date(),
     };
 
+    // `handleInboundTurn`'s own policy-driven escalations (eligibility
+    // exceptions, a stalled customer, an explicit human request the
+    // deterministic intent engine already caught, ...) happen whether or not
+    // this engine's classifier runs at all — `escalate_to_human` only adds a
+    // *second*, Gemini-driven trigger for the same outcome. `escalated` must
+    // reflect the pipeline's own outcome, not just this engine's function
+    // choice, or a customer the baseline pipeline already escalated would
+    // incorrectly be told `escalated: false`.
+    const pipelineEscalated = turn.progress.stage === 'HUMAN_REVIEW' || turn.progress.stage === 'ESCALATED_WAITING';
+
     // `handleInboundTurn` above already produced a safe reply (its own
     // Gemini call has the same "fall back to a deterministic draft" pattern
     // journeyReplyService.ts uses everywhere else) — if the *classifier*
@@ -168,7 +178,7 @@ export async function sendEngineMessage(
         conversationId: turn.conversationId,
         intent: toContractIntent(result.intent),
         reply: { text: result.reply, createdAt: new Date().toISOString() },
-        escalated: result.intent === 'escalate_to_human' && result.data.escalated === true,
+        escalated: pipelineEscalated || result.data.escalated === true,
       };
     } catch (engineError) {
       ctx.logger.warn(
@@ -179,7 +189,7 @@ export async function sendEngineMessage(
         conversationId: turn.conversationId,
         intent: null,
         reply: { text: turn.reply.text, createdAt: new Date().toISOString() },
-        escalated: false,
+        escalated: pipelineEscalated,
       };
     }
     await completeIdempotencyKey(ctx.prisma, idempotencyKey, 200, response);
