@@ -1,5 +1,9 @@
 import type { Prisma, PrismaClient } from '@prisma/client';
-import type { TenantId } from '@ai-concierge/domain';
+import {
+  outboundAttachmentSchema,
+  type OutboundAttachment,
+  type TenantId,
+} from '@ai-concierge/domain';
 
 type Executor = PrismaClient | Prisma.TransactionClient;
 
@@ -35,6 +39,8 @@ export interface CreateOutboundMessageInput {
   deliveryError?: string | null;
   /** The email subject actually used — only ever set for the EMAIL channel, so a resend can reuse it instead of a generic fallback. */
   subject?: string | null;
+  /** Car photos sent with this reply. */
+  attachments?: OutboundAttachment[] | null;
 }
 
 export interface StoredOutboundMessage {
@@ -47,6 +53,7 @@ export interface StoredOutboundMessage {
   deliveryError: string | null;
   retryCount: number;
   subject: string | null;
+  attachments: OutboundAttachment[];
   createdAt: Date;
 }
 
@@ -60,14 +67,35 @@ const STORED_MESSAGE_SELECT = {
   deliveryError: true,
   retryCount: true,
   subject: true,
+  attachments: true,
   createdAt: true,
 } as const;
+
+interface OutboundRow {
+  id: string;
+  content: string;
+  source: string;
+  stage: string;
+  authorUserId: string | null;
+  status: string;
+  deliveryError: string | null;
+  retryCount: number;
+  subject: string | null;
+  attachments: Prisma.JsonValue | null;
+  createdAt: Date;
+}
+
+/** Re-validates the stored JSON — a malformed column degrades to "no attachments", never a crash. */
+function toStored(row: OutboundRow): StoredOutboundMessage {
+  const parsed = outboundAttachmentSchema.array().safeParse(row.attachments ?? []);
+  return { ...row, attachments: parsed.success ? parsed.data : [] };
+}
 
 export async function createOutboundMessage(
   db: Executor,
   input: CreateOutboundMessageInput,
 ): Promise<StoredOutboundMessage> {
-  return db.outboundMessage.create({
+  const row = await db.outboundMessage.create({
     data: {
       tenantId: input.tenantId,
       conversationId: input.conversationId,
@@ -78,9 +106,13 @@ export async function createOutboundMessage(
       status: input.status ?? OutboundMessageStatus.SENT,
       deliveryError: input.deliveryError ?? null,
       subject: input.subject ?? null,
+      ...(input.attachments && input.attachments.length > 0
+        ? { attachments: input.attachments as unknown as Prisma.InputJsonValue }
+        : {}),
     },
     select: STORED_MESSAGE_SELECT,
   });
+  return toStored(row);
 }
 
 /** Oldest-first, tenant-scoped; `limit` keeps the most recent rows. */
@@ -96,7 +128,7 @@ export async function findOutboundMessagesForConversation(
     take: limit,
     select: STORED_MESSAGE_SELECT,
   });
-  return rows.reverse();
+  return rows.reverse().map(toStored);
 }
 
 /**
@@ -112,10 +144,11 @@ export async function findOutboundMessageById(
   conversationId: string,
   id: string,
 ): Promise<StoredOutboundMessage | null> {
-  return db.outboundMessage.findFirst({
+  const row = await db.outboundMessage.findFirst({
     where: { tenantId, conversationId, id },
     select: STORED_MESSAGE_SELECT,
   });
+  return row ? toStored(row) : null;
 }
 
 /**
@@ -148,7 +181,11 @@ export async function findResendableEmailMessages(
       conversation: { select: { customerRef: true } },
     },
   });
-  return rows.map(({ conversation, ...row }) => ({ ...row, customerRef: conversation.customerRef }));
+  return rows.map(({ conversation, ...row }) => ({
+    ...toStored(row),
+    tenantId: row.tenantId,
+    customerRef: conversation.customerRef,
+  }));
 }
 
 /**

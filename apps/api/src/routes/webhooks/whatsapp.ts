@@ -16,6 +16,7 @@ import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import type { AppContext } from '../../context.js';
 import { flagUnexpectedPiiInOutboundText } from '../../lib/dlp.js';
 import { handleInboundTurn, recordOutboundReply } from '../../services/conversationTurnService.js';
+import { photoPublicUrl } from '../../services/fleetService.js';
 
 declare module 'fastify' {
   interface FastifyRequest {
@@ -71,12 +72,23 @@ async function processInboundMessage(
     );
 
     const sendResult = await ctx.whatsappProvider.sendTextMessage(inbound.from, replyText);
+    // The car photos the customer asked for follow the text as inline pictures.
+    let photosSent = 0;
     if (sendResult.status === 'SENT') {
+      for (const attachment of turn.attachments) {
+        const imageResult = await ctx.whatsappProvider.sendImageMessage(
+          inbound.from,
+          photoPublicUrl(ctx.config.API_PUBLIC_URL, attachment.photoId),
+          attachment.caption,
+        );
+        if (imageResult.status === 'SENT') photosSent += 1;
+      }
       await recordOutboundReply(ctx, {
         conversationId: turn.conversationId,
         text: replyText,
         source: turn.reply.source === 'AI_GENERATED' ? 'AI_GENERATED' : 'TEMPLATE',
         stage: turn.reply.stage,
+        attachments: turn.attachments,
       });
     }
 
@@ -92,6 +104,7 @@ async function processInboundMessage(
         missingInfoStatus: turn.missingInfoStatus,
         journeyProgress: turn.progress.stage,
         replySource: turn.reply.source,
+        photosSent,
       },
       requestId,
     });

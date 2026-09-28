@@ -10,6 +10,7 @@ import {
   CustomerTimelineEventType,
   MissingInfoStatus,
   type Journey,
+  type OutboundAttachment,
   type TenantId,
 } from '@ai-concierge/domain';
 import type { AppContext } from '../context.js';
@@ -24,6 +25,7 @@ import { advanceJourneyAutomatically } from './journeyAutopilotService.js';
 import type { JourneyProgress } from './journeyProgress.js';
 import { generateJourneyReply, type JourneyReply } from './journeyReplyService.js';
 import { syncJourneyAfterMissingInfo } from './journeyService.js';
+import { buildPhotoReply } from './vehiclePhotoReplyService.js';
 
 export interface InboundTurnInput {
   channel: Channel;
@@ -39,6 +41,8 @@ export interface InboundTurnResult {
   reply: JourneyReply;
   progress: JourneyProgress;
   missingInfoStatus: string;
+  /** Car photos to send with the reply (stored as ids; each channel turns them into what it can send). */
+  attachments: OutboundAttachment[];
 }
 
 /**
@@ -220,7 +224,33 @@ export async function handleInboundTurn(
     { progress, missingInfo, turns },
   );
 
-  return { conversationId, reply, progress, missingInfoStatus: missingInfo.status };
+  let replyText = reply.text;
+  let attachments: OutboundAttachment[] = [];
+  // "Send me a photo of the Range Rover": attach the photos staff uploaded for it.
+  try {
+    const photoReply = await buildPhotoReply(
+      { prisma: ctx.prisma },
+      {
+        tenantId,
+        message: input.body,
+        resolvedVehicleId: pipeline.vehicle.determination.resolvedVehicle?.id ?? null,
+      },
+    );
+    if (photoReply) {
+      replyText = `${photoReply.text}\n\n${replyText}`;
+      attachments = photoReply.attachments;
+    }
+  } catch (error) {
+    ctx.logger.error({ err: error }, 'could not build the car photo reply');
+  }
+
+  return {
+    conversationId,
+    reply: { ...reply, text: replyText },
+    progress,
+    missingInfoStatus: missingInfo.status,
+    attachments,
+  };
 }
 
 /**
@@ -236,6 +266,7 @@ export async function recordOutboundReply(
     text: string;
     source: OutboundMessageSourceValue;
     stage: string;
+    attachments?: OutboundAttachment[];
   },
 ): Promise<void> {
   try {
@@ -245,6 +276,9 @@ export async function recordOutboundReply(
       content: input.text,
       source: input.source,
       stage: input.stage,
+      ...(input.attachments && input.attachments.length > 0
+        ? { attachments: input.attachments }
+        : {}),
     });
   } catch (error) {
     ctx.logger.error({ err: error }, 'could not record the outbound reply');

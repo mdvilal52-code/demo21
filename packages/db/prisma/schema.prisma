@@ -1062,6 +1062,9 @@ model OutboundMessage {
   /// Set atomically while a resend attempt (sweep or staff-triggered) is in flight, so the two
   /// can never both act on the same FAILED row at once; cleared once the attempt concludes.
   claimedAt      DateTime?
+  /// Car photos sent with this reply (OutboundAttachment[] JSON) — only ever set on a message
+  /// that was actually delivered, since a failed send never reached the customer with them.
+  attachments    Json?
   createdAt      DateTime     @default(now())
 
   @@index([conversationId, createdAt])

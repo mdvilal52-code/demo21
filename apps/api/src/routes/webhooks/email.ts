@@ -17,6 +17,7 @@ import {
   recordFailedEmailReply,
   recordOutboundReply,
 } from '../../services/conversationTurnService.js';
+import { photoPublicUrl } from '../../services/fleetService.js';
 
 const EMAIL_CHANNEL: Channel = 'EMAIL';
 
@@ -62,7 +63,14 @@ async function processInboundEmail(
     const replySubject = inbound.subject.trim().toLowerCase().startsWith('re:')
       ? inbound.subject
       : `Re: ${inbound.subject || 'Your rental enquiry'}`;
-    const sendResult = await ctx.emailProvider.sendEmail(inbound.from, replySubject, replyText);
+    // Car photos the customer asked for go in the email as links to the images.
+    const photoLines = turn.attachments.map(
+      (attachment) =>
+        `${attachment.caption}: ${photoPublicUrl(ctx.config.API_PUBLIC_URL, attachment.photoId)}`,
+    );
+    const emailText =
+      photoLines.length > 0 ? `${replyText}\n\nPhotos:\n${photoLines.join('\n')}` : replyText;
+    const sendResult = await ctx.emailProvider.sendEmail(inbound.from, replySubject, emailText);
     const replySource = turn.reply.source === 'AI_GENERATED' ? 'AI_GENERATED' : 'TEMPLATE';
     if (sendResult.status === 'SENT') {
       await recordOutboundReply(ctx, {
@@ -70,6 +78,7 @@ async function processInboundEmail(
         text: replyText,
         source: replySource,
         stage: turn.reply.stage,
+        attachments: turn.attachments,
       });
     } else if (sendResult.status === 'FAILED') {
       // Persisted (not dropped) so it surfaces on the dashboard and the

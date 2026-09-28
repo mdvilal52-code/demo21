@@ -140,6 +140,25 @@ export function ChatView() {
                     </p>
                   )}
                   <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                  {message.attachments.length > 0 && (
+                    <ul className="mt-2 grid grid-cols-2 gap-2" aria-label="Photos">
+                      {message.attachments.map((attachment) => (
+                        <li key={attachment.url}>
+                          <a href={attachment.url} target="_blank" rel="noopener noreferrer">
+                            {/* Plain <img>: the photo is served by the API, not from this app. */}
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={attachment.url}
+                              alt={attachment.caption}
+                              loading="lazy"
+                              className="aspect-[4/3] w-full rounded-xl border border-white/10 object-cover"
+                            />
+                          </a>
+                          <p className="mt-1 text-[10px] text-cream-50/60">{attachment.caption}</p>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                   <p
                     className={`mt-1 text-[10px] ${mine ? 'text-ink-900/60' : 'text-cream-50/40'}`}
                   >

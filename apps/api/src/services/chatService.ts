@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import type {
+  ChatAttachment,
   ChatBooking,
   ChatMessage,
   ChatQuote,
@@ -34,11 +35,24 @@ import type { AppContext } from '../context.js';
 import { enforceChatLimits } from '../lib/chatLimiter.js';
 import { flagUnexpectedPiiInOutboundText } from '../lib/dlp.js';
 import { handleInboundTurn } from './conversationTurnService.js';
+import { photoPublicUrl } from './fleetService.js';
 
 const CHANNEL = 'WEB' as const;
 /** How many of a customer's most recent conversations the chat history shows. */
 const HISTORY_CONVERSATIONS = 5;
 const HISTORY_MESSAGES_PER_CONVERSATION = 300;
+
+/** Stored attachment ids -> the public image URLs the chat page shows. */
+export function toChatAttachments(
+  publicBaseUrl: string,
+  attachments: { photoId: string; caption: string }[],
+): ChatAttachment[] {
+  return attachments.map((attachment) => ({
+    type: 'image' as const,
+    url: photoPublicUrl(publicBaseUrl, attachment.photoId),
+    caption: attachment.caption,
+  }));
+}
 
 /** A web chat customer is identified only by the random session id their browser made up. */
 export function customerRefForSession(sessionId: string): string {
@@ -162,6 +176,7 @@ export async function sendChatMessage(
       content: turn.reply.text,
       source,
       stage: turn.reply.stage,
+      attachments: turn.attachments,
     });
 
     const state = await buildChatState(ctx.prisma, tenantId, turn.conversationId);
@@ -171,6 +186,7 @@ export async function sendChatMessage(
         id: stored.id,
         text: turn.reply.text,
         source,
+        attachments: toChatAttachments(ctx.config.API_PUBLIC_URL, turn.attachments),
         createdAt: stored.createdAt.toISOString(),
       },
     };
@@ -217,12 +233,14 @@ export async function getChatSession(
           id: row.id,
           role: 'CUSTOMER',
           content: row.content,
+          attachments: [],
           createdAt: row.createdAt.toISOString(),
         })),
         ...outbound.map((row): ChatMessage => ({
           id: row.id,
           role: row.source === 'HUMAN' ? 'STAFF' : 'CONCIERGE',
           content: row.content,
+          attachments: toChatAttachments(ctx.config.API_PUBLIC_URL, row.attachments),
           createdAt: row.createdAt.toISOString(),
         })),
       ];
