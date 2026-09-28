@@ -1,5 +1,11 @@
 import { redirect } from 'next/navigation';
+import { Permission } from '@ai-concierge/domain';
 import { fetchVehicles, SessionExpiredError } from '../../../lib/adminApi';
+import { getCurrentUser } from '../../../lib/getCurrentUser';
+import { hasPermission } from '../../../lib/dashboardNav';
+import { AddVehicleForm } from '../../../components/dashboard/AddVehicleForm';
+import { VehicleEditForm } from '../../../components/dashboard/VehicleEditForm';
+import { VehiclePhotos } from '../../../components/dashboard/VehiclePhotos';
 import { CopperCard } from '../../../components/ui/CopperCard';
 import { GlassCard } from '../../../components/ui/GlassCard';
 import { StatusChip } from '../../../components/ui/StatusChip';
@@ -14,13 +20,29 @@ export default async function FleetPage() {
     if (error instanceof SessionExpiredError) redirect('/login');
     throw error;
   }
+  const user = await getCurrentUser();
+  const canEdit = user !== null && hasPermission(user.role, Permission.FLEET_WRITE);
 
   return (
     <div className="mx-auto max-w-4xl py-8">
       <h1 className="font-display text-lg uppercase tracking-[0.14em] text-cream-50">Fleet</h1>
       <p className="mt-2 text-sm text-cream-50/70">
-        The vehicle catalog and its live pricing profile.
+        Your cars, their colours, daily rates and photos. When a customer asks the concierge to
+        see a car, it sends these photos automatically.
       </p>
+
+      {canEdit ? (
+        <GlassCard className="mt-6">
+          <h2 className="font-display text-sm uppercase tracking-wide text-cream-50">Add a car</h2>
+          <div className="mt-4">
+            <AddVehicleForm />
+          </div>
+        </GlassCard>
+      ) : (
+        <p className="mt-4 text-xs text-cream-50/60">
+          Only an admin or a manager can add cars and photos.
+        </p>
+      )}
 
       <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
         {items.length === 0 && (
@@ -34,7 +56,7 @@ export default async function FleetPage() {
             <div className="flex items-start justify-between gap-2">
               <div>
                 <h2 className="font-display text-sm uppercase tracking-wide text-ink-900">
-                  {vehicle.make} {vehicle.model}
+                  {vehicle.make} {vehicle.model} — {vehicle.color}
                 </h2>
                 <p className="mt-1 text-xs text-ink-600">
                   {formatEnumLabel(vehicle.category)} · {formatEnumLabel(vehicle.luxuryTier)}
@@ -68,6 +90,9 @@ export default async function FleetPage() {
               {vehicle.pricingProfile.currency} {vehicle.pricingProfile.dailyRate.toLocaleString()}{' '}
               / day
             </p>
+
+            <VehiclePhotos vehicleId={vehicle.id} photos={vehicle.photos} canEdit={canEdit} />
+            {canEdit && <VehicleEditForm vehicle={vehicle} />}
           </CopperCard>
         ))}
       </div>

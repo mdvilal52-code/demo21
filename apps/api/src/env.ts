@@ -15,6 +15,9 @@ export const apiEnvSchema = baseEnvSchema.extend({
         .filter(Boolean),
     ),
   API_BODY_LIMIT_BYTES: z.coerce.number().int().positive().default(102_400),
+  // Where uploaded car photos live on disk (must be writable by the API process
+  // and included in backups). Public URLs are built from API_PUBLIC_URL.
+  MEDIA_ROOT: z.string().trim().min(1).default('./media'),
   RATE_LIMIT_MAX: z.coerce.number().int().positive().default(100),
   RATE_LIMIT_WINDOW_MS: z.coerce.number().int().positive().default(60_000),
 

@@ -100,6 +100,7 @@ test.describe('Dashboard — Phase 16 automatic journey (Steps 5-8)', () => {
           tenantId: TEST_TENANT_ID,
           make: 'Lamborghini',
           model: 'Urus',
+          color: 'Black',
           category: 'SUV',
           luxuryTier: 'ULTRA_LUXURY',
           seats: 5,

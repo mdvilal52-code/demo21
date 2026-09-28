@@ -3,6 +3,7 @@ import {
   findCustomerTimeline,
   listCustomers,
   listJourneys,
+  listPhotosForVehicles,
   listVehicles,
 } from '@ai-concierge/db';
 import {
@@ -20,6 +21,7 @@ import { AppError, Permission } from '@ai-concierge/domain';
 import type { FastifyPluginAsyncZod } from 'fastify-type-provider-zod';
 import { authenticate } from '../../plugins/auth.js';
 import { requirePermission } from '../../lib/authz.js';
+import { toVehiclePhoto } from '../../services/fleetService.js';
 
 /**
  * The admin dashboard's remaining read surfaces — Journeys list, Fleet,
@@ -63,11 +65,23 @@ export const adminRoutes: FastifyPluginAsyncZod = async (app) => {
       },
     },
     async (request, reply) => {
-      const items = await listVehicles(app.ctx.prisma, {
-        tenantId: request.auth!.tenantId,
+      const tenantId = request.auth!.tenantId;
+      const vehicles = await listVehicles(app.ctx.prisma, {
+        tenantId,
         limit: request.query.limit,
         offset: request.query.offset,
       });
+      const photos = await listPhotosForVehicles(
+        app.ctx.prisma,
+        tenantId,
+        vehicles.map((vehicle) => vehicle.id),
+      );
+      const items = vehicles.map((vehicle) => ({
+        ...vehicle,
+        photos: photos
+          .filter((photo) => photo.vehicleId === vehicle.id)
+          .map((photo) => toVehiclePhoto(app.ctx.config.API_PUBLIC_URL, photo)),
+      }));
       reply.status(200).send({ items });
     },
   );

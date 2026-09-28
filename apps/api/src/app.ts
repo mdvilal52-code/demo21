@@ -31,6 +31,8 @@ import { adminRoutes } from './routes/v1/admin.js';
 import { dashboardRoutes } from './routes/v1/dashboard.js';
 import { chatRoutes } from './routes/v1/chat.js';
 import { engineRoutes } from './routes/v1/engine.js';
+import { fleetRoutes } from './routes/v1/fleet.js';
+import { mediaRoutes } from './routes/media.js';
 
 export async function buildApp(
   ctx: AppContext,
@@ -75,6 +77,8 @@ export async function buildApp(
   await app.register(dashboardRoutes);
   await app.register(chatRoutes);
   await app.register(engineRoutes);
+  await app.register(fleetRoutes);
+  await app.register(mediaRoutes);
 
   return app;
 }

@@ -44,6 +44,7 @@ model Tenant {
   customerTimelineEvents     CustomerTimelineEvent[]
   eligibilityIntakes         EligibilityIntake[]
   outboundMessages           OutboundMessage[]
+  vehiclePhotos              VehiclePhoto[]
 
   @@map("tenants")
 }
@@ -392,9 +393,9 @@ model Vehicle {
   /// Zod-validated PricingProfile (currency, dailyRate, weeklyRate?, depositAmount?) — a
   /// "budget hint" per MASTER-PLAN.md Step 3, not the real pricing engine (Step 8).
   pricingProfile     Json
-  /// Reference/catalog image for chat and the dashboard — not a real fleet
-  /// photo of a specific physical unit (see `VehiclePhoto` for that, once
-  /// that pilot work merges). Null is fine; nothing renders it as fact.
+  /// Generic reference/catalog placeholder image — never a real fleet photo of
+  /// a specific physical unit; see `VehiclePhoto` for those (dashboard-uploaded,
+  /// what the concierge actually shows a customer who asks to see the car).
   photoUrl           String?
   active             Boolean                   @default(true)
   deletedAt          DateTime?
@@ -407,11 +408,35 @@ model Vehicle {
   availabilityChecks         AvailabilityCheck[]
   alternativeRecommendations AlternativeRecommendation[]
   quotes                     Quote[]
+  photos                     VehiclePhoto[]
 
   @@unique([tenantId, make, model, color])
   @@index([tenantId])
   @@index([tenantId, category])
   @@map("vehicles")
+}
+
+/// A real, dashboard-uploaded photo of the fleet — what the concierge sends a
+/// customer who asks to see a car (web, WhatsApp, email). Bytes live on disk
+/// (or object storage later) under `storageKey` — a UUID-based filename, never
+/// user input; the public URL is `/media/vehicles/<id>`. Up to
+/// `MAX_PHOTOS_PER_VEHICLE` per vehicle, ordered by `sortOrder` (the first is
+/// what customers see first).
+model VehiclePhoto {
+  id          String   @id @default(uuid())
+  tenantId    String
+  tenant      Tenant   @relation(fields: [tenantId], references: [id])
+  vehicleId   String
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id])
+  storageKey  String
+  contentType String
+  sizeBytes   Int
+  caption     String?
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, vehicleId, sortOrder])
+  @@map("vehicle_photos")
 }
 
 /// One row per vehicle-determination run against a message — same
