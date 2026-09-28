@@ -7,6 +7,11 @@ export * from './provider.js';
 export * from './resilientAIProvider.js';
 export * from './sandbox/toolPermissionMatrix.js';
 
+// Conversation Engine — Gemini function-calling: Intent Classification +
+// Requirement Extraction + Function Calling + Conversation State
+export * from './engine/types.js';
+export * from './engine/conversationEngine.js';
+
 // Step 2 — Extract Dates & Location
 export * from './step2/calendar.js';
 export * from './step2/calendarDay.js';

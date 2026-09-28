@@ -43,10 +43,55 @@ export interface GenerateStructuredResult {
   latencyMs: number;
 }
 
+/** One callable tool a `generateWithTools` call may pick — the model never sees more than name/description/parameters. */
+export interface ToolDeclaration {
+  name: string;
+  description: string;
+  /** JSON-schema-shaped parameter spec (same subset Gemini's function-calling accepts). */
+  parameters: {
+    type: 'object';
+    properties: Record<string, unknown>;
+    required?: string[];
+  };
+}
+
+/** One turn of the tool-calling conversation sent back to the model as history. */
+export type ToolConversationTurn =
+  | { role: 'user'; text: string }
+  | { role: 'model'; functionCall: { name: string; args: Record<string, unknown> } }
+  | { role: 'user'; functionResponse: { name: string; response: Record<string, unknown> } };
+
+export interface GenerateWithToolsInput {
+  systemInstruction: string;
+  /** Conversation so far, oldest first — the caller owns trimming/windowing. */
+  contents: ToolConversationTurn[];
+  tools: ToolDeclaration[];
+  temperature?: number;
+  maxOutputTokens?: number;
+  timeoutMs?: number;
+}
+
+export interface GenerateWithToolsResult {
+  /** Set when the model chose a tool instead of replying in plain text. */
+  functionCall?: { name: string; args: Record<string, unknown> };
+  /** Set when the model replied in plain text instead of calling a tool. */
+  text?: string;
+  usage: AIUsage;
+  modelId: string;
+  latencyMs: number;
+}
+
 export interface AIProvider {
   readonly name: string;
   generateStructured(input: GenerateStructuredInput): Promise<GenerateStructuredResult>;
   healthCheck(): Promise<AIProviderHealth>;
+  /**
+   * Native function-calling, for the intent-classification/function-dispatch
+   * engine only (see `@ai-concierge/ai`'s `engine/` module) — optional
+   * because most providers/call sites only ever need `generateStructured`.
+   * Steps 2-8's business-fact pipeline must never depend on this existing.
+   */
+  generateWithTools?(input: GenerateWithToolsInput): Promise<GenerateWithToolsResult>;
 }
 
 export class NotConfiguredProvider implements AIProvider {

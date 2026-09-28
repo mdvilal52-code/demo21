@@ -207,3 +207,85 @@ describe('createAIProvider', () => {
     expect(provider).toBeInstanceOf(ResilientAIProvider);
   });
 });
+
+describe('GeminiProvider.generateWithTools', () => {
+  beforeEach(() => {
+    mocks.ssrfSafeFetch.mockReset();
+  });
+
+  const TOOLS = [
+    {
+      name: 'echo',
+      description: 'Echoes text',
+      parameters: { type: 'object' as const, properties: { text: { type: 'string' } } },
+    },
+  ];
+
+  it('sends tools/functionDeclarations and parses a functionCall response', async () => {
+    mocks.ssrfSafeFetch.mockResolvedValue(
+      fakeGeminiResponse({
+        candidates: [
+          { content: { parts: [{ functionCall: { name: 'echo', args: { text: 'hi' } } }] } },
+        ],
+      }),
+    );
+    const result = await new GeminiProvider(CONFIG).generateWithTools({
+      systemInstruction: 's',
+      contents: [{ role: 'user', text: 'say hi' }],
+      tools: TOOLS,
+    });
+
+    expect(result.functionCall).toEqual({ name: 'echo', args: { text: 'hi' } });
+    expect(result.text).toBeUndefined();
+    const options = mocks.ssrfSafeFetch.mock.calls[0]![2] as { body: string };
+    const body = JSON.parse(options.body);
+    expect(body.tools).toEqual([{ functionDeclarations: TOOLS }]);
+    expect(body.contents).toEqual([{ role: 'user', parts: [{ text: 'say hi' }] }]);
+  });
+
+  it('parses a plain-text response when the model does not call a function', async () => {
+    mocks.ssrfSafeFetch.mockResolvedValue(
+      fakeGeminiResponse({ candidates: [{ content: { parts: [{ text: 'Hello!' }] } }] }),
+    );
+    const result = await new GeminiProvider(CONFIG).generateWithTools({
+      systemInstruction: 's',
+      contents: [{ role: 'user', text: 'hi' }],
+      tools: TOOLS,
+    });
+    expect(result.functionCall).toBeUndefined();
+    expect(result.text).toBe('Hello!');
+  });
+
+  it('maps model functionCall and functionResponse turns to Gemini roles', async () => {
+    mocks.ssrfSafeFetch.mockResolvedValue(
+      fakeGeminiResponse({ candidates: [{ content: { parts: [{ text: 'done' }] } }] }),
+    );
+    await new GeminiProvider(CONFIG).generateWithTools({
+      systemInstruction: 's',
+      contents: [
+        { role: 'user', text: 'say hi' },
+        { role: 'model', functionCall: { name: 'echo', args: { text: 'hi' } } },
+        { role: 'user', functionResponse: { name: 'echo', response: { ok: true } } },
+      ],
+      tools: TOOLS,
+    });
+    const options = mocks.ssrfSafeFetch.mock.calls[0]![2] as { body: string };
+    const body = JSON.parse(options.body);
+    expect(body.contents).toEqual([
+      { role: 'user', parts: [{ text: 'say hi' }] },
+      { role: 'model', parts: [{ functionCall: { name: 'echo', args: { text: 'hi' } } }] },
+      { role: 'function', parts: [{ functionResponse: { name: 'echo', response: { ok: true } } }] },
+    ]);
+  });
+
+  it('throws UPSTREAM_UNAVAILABLE on a non-ok response', async () => {
+    mocks.ssrfSafeFetch.mockResolvedValue(fakeGeminiResponse({}, false, 500));
+    await expect(
+      new GeminiProvider(CONFIG).generateWithTools({
+        systemInstruction: 's',
+        contents: [{ role: 'user', text: 'hi' }],
+        tools: TOOLS,
+      }),
+    ).rejects.toThrow(/function-calling request failed/);
+  });
+});

@@ -3,6 +3,9 @@ import type {
   AIProviderHealth,
   GenerateStructuredInput,
   GenerateStructuredResult,
+  GenerateWithToolsInput,
+  GenerateWithToolsResult,
+  ToolConversationTurn,
 } from '@ai-concierge/ai';
 import { NotConfiguredProvider, ResilientAIProvider } from '@ai-concierge/ai';
 import { ssrfSafeFetch } from '@ai-concierge/security';
@@ -26,9 +29,15 @@ export interface GeminiProviderConfig {
   thinkingLevel?: 'minimal' | 'low' | 'medium' | 'high';
 }
 
+interface GeminiPart {
+  text?: string;
+  functionCall?: { name: string; args?: Record<string, unknown> };
+  functionResponse?: { name: string; response: Record<string, unknown> };
+}
+
 interface GeminiGenerateContentResponse {
   candidates?: Array<{
-    content?: { parts?: Array<{ text?: string }> };
+    content?: { parts?: GeminiPart[] };
     finishReason?: string;
   }>;
   promptFeedback?: { blockReason?: string };
@@ -37,6 +46,21 @@ interface GeminiGenerateContentResponse {
     candidatesTokenCount?: number;
     totalTokenCount?: number;
   };
+}
+
+/** `ToolConversationTurn` (this codebase's provider-agnostic shape) -> Gemini's own `contents` wire format. */
+function toGeminiContent(turn: ToolConversationTurn): {
+  role: 'user' | 'model' | 'function';
+  parts: GeminiPart[];
+} {
+  if ('text' in turn) {
+    return { role: 'user', parts: [{ text: turn.text }] };
+  }
+  if ('functionCall' in turn) {
+    return { role: 'model', parts: [{ functionCall: turn.functionCall }] };
+  }
+  // functionResponse — Gemini expects this on its own role, not "user".
+  return { role: 'function', parts: [{ functionResponse: turn.functionResponse }] };
 }
 
 /**
@@ -156,6 +180,74 @@ export class GeminiProvider implements AIProvider {
     } catch {
       return 'UNAVAILABLE';
     }
+  }
+
+  /**
+   * Native function-calling for the intent-classification/dispatch engine
+   * (`@ai-concierge/ai`'s `engine/` module) — a separate code path from
+   * `generateStructured` because Gemini's `tools`/`functionCall` wire shape
+   * has nothing in common with `responseSchema` JSON mode.
+   */
+  async generateWithTools(input: GenerateWithToolsInput): Promise<GenerateWithToolsResult> {
+    const startedAt = Date.now();
+    const url = `https://${GEMINI_API_HOST}/${GEMINI_API_VERSION}/models/${this.config.modelId}:generateContent`;
+
+    const response = await ssrfSafeFetch(url, [GEMINI_API_HOST], {
+      method: 'POST',
+      timeoutMs: input.timeoutMs ?? this.config.timeoutMs,
+      headers: {
+        'x-goog-api-key': this.config.apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        contents: input.contents.map(toGeminiContent),
+        systemInstruction: { parts: [{ text: input.systemInstruction }] },
+        tools: [{ functionDeclarations: input.tools }],
+        generationConfig: {
+          temperature: input.temperature ?? this.config.temperature,
+          maxOutputTokens: input.maxOutputTokens ?? this.config.maxOutputTokens,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '');
+      throw new AppError('UPSTREAM_UNAVAILABLE', 'Gemini function-calling request failed', {
+        details: { status: response.status },
+        cause: errorBody,
+      });
+    }
+
+    const data = (await response.json()) as GeminiGenerateContentResponse;
+
+    if (data.promptFeedback?.blockReason) {
+      throw new AppError('AI_RESPONSE_INVALID', 'Gemini blocked the request', {
+        details: { blockReason: data.promptFeedback.blockReason },
+      });
+    }
+
+    const parts = data.candidates?.[0]?.content?.parts ?? [];
+    const functionCallPart = parts.find((part) => part.functionCall);
+    const textPart = parts.find((part) => typeof part.text === 'string');
+
+    return {
+      ...(functionCallPart?.functionCall
+        ? {
+            functionCall: {
+              name: functionCallPart.functionCall.name,
+              args: functionCallPart.functionCall.args ?? {},
+            },
+          }
+        : {}),
+      ...(textPart?.text ? { text: textPart.text } : {}),
+      usage: {
+        promptTokens: data.usageMetadata?.promptTokenCount ?? 0,
+        completionTokens: data.usageMetadata?.candidatesTokenCount ?? 0,
+        totalTokens: data.usageMetadata?.totalTokenCount ?? 0,
+      },
+      modelId: this.config.modelId,
+      latencyMs: Date.now() - startedAt,
+    };
   }
 }
 
